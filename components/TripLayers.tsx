@@ -36,29 +36,29 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
     const addOrUpdate = () => {
       if (!map.getSource("routes")) {
         map.addSource("routes", { type: "geojson", data: routeData });
-        map.addLayer({ id: "routes-shadow", type: "line", source: "routes", paint: { "line-color": "#082f49", "line-width": 8, "line-opacity": 0.55 } });
-        map.addLayer({ id: "routes-line", type: "line", source: "routes", paint: { "line-color": ["match", ["get", "mode"], "ferry", "#38bdf8", "bus", "#f59e0b", "#22d3ee"], "line-width": 4, "line-opacity": 0.95 } });
+        map.addLayer({ id: "routes-shadow", type: "line", source: "routes", paint: { "line-color": "#26423b", "line-width": 8, "line-opacity": 0.28 } });
+        map.addLayer({ id: "routes-line", type: "line", source: "routes", paint: { "line-color": ["match", ["get", "mode"], "ferry", "#2b8aa0", "bus", "#d0872f", "#0f766e"], "line-width": 4, "line-opacity": 0.95 } });
       } else {
         (map.getSource("routes") as mapboxgl.GeoJSONSource).setData(routeData);
       }
 
       if (!map.getSource("photos")) {
         map.addSource("photos", { type: "geojson", data: photoData });
-        map.addLayer({ id: "photos-circle", type: "circle", source: "photos", paint: { "circle-radius": 9, "circle-color": "#f8fafc", "circle-stroke-width": 4, "circle-stroke-color": "#06b6d4" } });
+        map.addLayer({ id: "photos-circle", type: "circle", source: "photos", paint: { "circle-radius": 9, "circle-color": "#fffdf6", "circle-stroke-width": 4, "circle-stroke-color": "#e7a13d" } });
       } else {
         (map.getSource("photos") as mapboxgl.GeoJSONSource).setData(photoData);
       }
 
       if (!map.getSource("notes")) {
         map.addSource("notes", { type: "geojson", data: noteData });
-        map.addLayer({ id: "notes-circle", type: "circle", source: "notes", paint: { "circle-radius": 8, "circle-color": "#fde68a", "circle-stroke-width": 3, "circle-stroke-color": "#78350f" } });
+        map.addLayer({ id: "notes-circle", type: "circle", source: "notes", paint: { "circle-radius": 8, "circle-color": "#f6d28f", "circle-stroke-width": 3, "circle-stroke-color": "#7c4a14" } });
       } else {
         (map.getSource("notes") as mapboxgl.GeoJSONSource).setData(noteData);
       }
 
       if (!map.getSource("places")) {
         map.addSource("places", { type: "geojson", data: placeData });
-        map.addLayer({ id: "places-circle", type: "circle", source: "places", paint: { "circle-radius": 8, "circle-color": "#a7f3d0", "circle-stroke-width": 3, "circle-stroke-color": "#064e3b" } });
+        map.addLayer({ id: "places-circle", type: "circle", source: "places", paint: { "circle-radius": 8, "circle-color": "#c8e4d4", "circle-stroke-width": 3, "circle-stroke-color": "#0f5f55" } });
       } else {
         (map.getSource("places") as mapboxgl.GeoJSONSource).setData(placeData);
       }
@@ -81,9 +81,9 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
       const props = feature.properties ?? {};
       const coordinates = (feature.geometry.coordinates as [number, number]).slice() as [number, number];
       const content = props.kind === "photo"
-        ? `<div class="w-64"><img src="${escapeHtml(props.image_url)}" alt="Trip photo" class="h-36 w-full object-cover"/><div class="space-y-1 p-3"><div class="text-sm font-bold">${escapeHtml(props.caption || "Untitled photo")}</div><div class="text-xs text-slate-300">${escapeHtml(formatDateTime(String(props.taken_at || props.created_at || "")))}</div></div></div>`
-        : `<div class="w-64 p-3"><div class="text-sm font-bold">${escapeHtml(props.title || props.body || props.name || "Map marker")}</div><div class="mt-1 text-xs text-slate-300">${escapeHtml(props.description || props.note_type || "Shared trip marker")}</div></div>`;
-      new mapboxgl.Popup({ offset: 18 }).setLngLat(coordinates).setHTML(content).addTo(map!);
+        ? `<div class="lofoten-popup-card lofoten-popup-card-photo"><img src="${escapeHtml(props.image_url)}" alt="Trip photo" class="lofoten-popup-image"/><div class="lofoten-popup-body"><div class="lofoten-popup-title">${escapeHtml(props.caption || "Untitled photo")}</div><div class="lofoten-popup-meta">${escapeHtml(formatDateTime(String(props.taken_at || props.created_at || "")))}</div></div></div>`
+        : `<div class="lofoten-popup-card"><div class="lofoten-popup-body"><div class="lofoten-popup-title">${escapeHtml(props.title || props.body || props.name || "Map marker")}</div><div class="lofoten-popup-meta">${escapeHtml(props.description || props.note_type || "Shared trip marker")}</div></div></div>`;
+      new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(coordinates).setHTML(content).addTo(map!);
     }
 
     for (const layer of ["photos-circle", "notes-circle", "places-circle"]) {

@@ -2,8 +2,8 @@
 @import "mapbox-gl/dist/mapbox-gl.css";
 
 :root {
-  --background: #07111c;
-  --foreground: #f8fafc;
+  --background: #e7efe8;
+  --foreground: #1c1917;
   --font-geist-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-geist-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
@@ -12,19 +12,77 @@
 html, body { height: 100%; }
 body {
   margin: 0;
-  background: radial-gradient(circle at top left, #1e3a5f 0, #07111c 38%, #020617 100%);
+  background: #e7efe8;
   color: var(--foreground);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.mapboxgl-popup-content {
-  border-radius: 18px !important;
-  background: rgba(15, 23, 42, 0.96) !important;
-  color: #f8fafc !important;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  box-shadow: 0 25px 60px rgba(2, 6, 23, 0.45) !important;
+.mapboxgl-popup-content,
+.lofoten-popup .mapboxgl-popup-content {
+  border-radius: 14px !important;
+  background: rgba(255, 253, 246, 0.98) !important;
+  color: #1c1917 !important;
+  border: 1px solid rgba(214, 204, 188, 0.9);
+  box-shadow: 0 24px 60px rgba(46, 61, 54, 0.22) !important;
   padding: 0 !important;
   overflow: hidden;
 }
-.mapboxgl-popup-close-button { color: #f8fafc; font-size: 20px; padding: 6px 10px; }
-.mapboxgl-ctrl-group { border-radius: 14px !important; overflow: hidden; }
+.mapboxgl-popup-tip,
+.lofoten-popup .mapboxgl-popup-tip { border-top-color: rgba(255, 253, 246, 0.98) !important; }
+.mapboxgl-popup-close-button,
+.lofoten-popup .mapboxgl-popup-close-button {
+  border-radius: 999px;
+  color: #57534e !important;
+  font-size: 20px;
+  line-height: 1;
+  margin: 8px;
+  padding: 5px 8px;
+}
+.mapboxgl-popup-close-button:hover,
+.mapboxgl-popup-close-button:focus,
+.lofoten-popup .mapboxgl-popup-close-button:hover,
+.lofoten-popup .mapboxgl-popup-close-button:focus {
+  background: rgba(28, 25, 23, 0.06) !important;
+  color: #1c1917 !important;
+  outline: 2px solid rgba(15, 118, 110, 0.35);
+  outline-offset: 2px;
+}
+.mapboxgl-ctrl-group {
+  border-radius: 10px !important;
+  overflow: hidden;
+  background: rgba(255, 253, 246, 0.94) !important;
+  box-shadow: 0 12px 30px rgba(46, 61, 54, 0.18) !important;
+}
+.mapboxgl-ctrl button { color: #1c1917 !important; }
+
+.lofoten-popup-card {
+  width: 16rem;
+  background: rgba(255, 253, 246, 0.98);
+  color: #1c1917;
+}
+
+.lofoten-popup-image {
+  display: block;
+  height: 9rem;
+  width: 100%;
+  object-fit: cover;
+}
+
+.lofoten-popup-body {
+  padding: 0.85rem;
+}
+
+.lofoten-popup-title {
+  color: #1c1917;
+  font-size: 0.92rem;
+  font-weight: 800;
+  line-height: 1.35;
+  padding-right: 1.5rem;
+}
+
+.lofoten-popup-meta {
+  color: #78716c;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  margin-top: 0.35rem;
+}

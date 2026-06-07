@@ -36,14 +36,19 @@ Never expose a Supabase service role key in the browser.
 
 ## Supabase setup
 
-1. Create a Supabase project.
-2. In SQL Editor, run `supabase/schema.sql`.
-3. In SQL Editor, run `supabase/seed.sql`.
-4. Create a public Storage bucket named `trip-photos`.
-5. Enable Realtime for the `photos`, `notes`, `places`, and `route_segments` tables from Supabase's Replication/Realtimes settings.
-6. Put your project URL and anon key in `.env.local`.
+Keep `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` empty to stay in local demo mode. When you are ready for shared Supabase mode:
 
-The included RLS policies are for development only and allow broad anonymous reads/writes. Tighten them before deploying publicly.
+1. Create a Supabase project.
+2. In Authentication settings, enable email magic links/OTP.
+3. In SQL Editor, run `supabase/schema.sql`.
+4. In SQL Editor, run `supabase/seed.sql`.
+5. Put your project URL and anon key in `.env.local`, then start the app and sign in once with your email.
+6. In SQL Editor, edit and run `supabase/grant-member.sql` to add that email to `trip_members` as an admin.
+7. Reload the app. You should see the seeded trip while signed in as that member.
+
+`schema.sql` creates the public `trip-photos` Storage bucket, grants authenticated API access, enables Realtime for collaborative tables, and applies RLS policies. Trip data is readable only by authenticated users in `trip_members`. Notes and photos can be created by trip members; route, day, place, and membership edits are admin-scoped.
+
+Never expose a Supabase service role key in the browser. The client app only needs the public URL and anon key.
 
 ## Mapbox setup
 

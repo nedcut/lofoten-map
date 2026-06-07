@@ -73,24 +73,24 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
       return;
     }
     if (!markerRef.current) {
-      markerRef.current = new mapboxgl.Marker({ color: "#22d3ee" }).setLngLat([pendingCoordinate.lng, pendingCoordinate.lat]).addTo(map);
+      markerRef.current = new mapboxgl.Marker({ color: "#0f766e" }).setLngLat([pendingCoordinate.lng, pendingCoordinate.lat]).addTo(map);
     } else {
       markerRef.current.setLngLat([pendingCoordinate.lng, pendingCoordinate.lat]);
     }
   }, [pendingCoordinate]);
 
   return (
-    <div className="relative h-full min-h-[520px] overflow-hidden rounded-none bg-slate-900 md:rounded-[2rem]">
+    <div className="relative h-full min-h-[520px] overflow-hidden rounded-none bg-[#dbe7df] md:rounded-[1.35rem] md:ring-1 md:ring-stone-200/80">
       <div ref={containerRef} className="h-full w-full" />
       {tokenMissing ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/90 p-6 text-center">
-          <div className="max-w-md rounded-3xl border border-white/15 bg-white/10 p-6 shadow-2xl">
-            <h2 className="text-2xl font-black text-white">Mapbox token needed</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-300">Add NEXT_PUBLIC_MAPBOX_TOKEN to your environment to load the interactive Lofoten map.</p>
+        <div className="absolute inset-0 flex items-center justify-center bg-[#e7efe8] p-6 text-center">
+          <div className="max-w-md rounded-[1.25rem] border border-stone-200 bg-[rgba(255,253,246,0.94)] p-6 shadow-2xl">
+            <h2 className="font-serif text-3xl font-semibold text-stone-950">Mapbox token needed</h2>
+            <p className="mt-2 text-sm leading-6 text-stone-600">Add NEXT_PUBLIC_MAPBOX_TOKEN to your environment to load the interactive Lofoten map.</p>
           </div>
         </div>
       ) : null}
-      {clickMode !== "idle" ? <div className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-slate-950/85 px-4 py-2 text-sm font-bold text-cyan-100 shadow-xl backdrop-blur">Tap the map to set location</div> : null}
+      {clickMode !== "idle" ? <div className="absolute left-1/2 top-4 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full border border-teal-700/20 bg-[rgba(255,253,246,0.94)] px-4 py-2 text-center text-sm font-bold text-teal-950 shadow-xl backdrop-blur">Tap the map to set location</div> : null}
       {children}
     </div>
   );
