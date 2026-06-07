@@ -138,6 +138,20 @@ export default function Home() {
     setAuthSubmitting(false);
   }
 
+  async function signInWithGoogle() {
+    if (!supabase) return;
+    setAuthSubmitting(true);
+    setAuthMessage(null);
+    const { error: signInError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin },
+    });
+    if (signInError) {
+      setAuthMessage(signInError.message);
+      setAuthSubmitting(false);
+    }
+  }
+
   async function signOut() {
     if (!supabase) return;
     await supabase.auth.signOut();
@@ -280,7 +294,7 @@ export default function Home() {
       {!panel ? <MobileSheet days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} counts={{ photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} /> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
-      {supabase && !authLoading && !user ? <AuthPanel message={authMessage} isSubmitting={authSubmitting} onSignIn={signIn} /> : null}
+      {supabase && !authLoading && !user ? <AuthPanel message={authMessage} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} /> : null}
       {panel === "note" ? <AddNotePanel days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
     </main>
@@ -302,7 +316,7 @@ function StatusPill({ children, tone = "info", onDismiss }: { children: ReactNod
   );
 }
 
-function AuthPanel({ message, isSubmitting, onSignIn }: { message: string | null; isSubmitting: boolean; onSignIn: (email: string) => Promise<void> }) {
+function AuthPanel({ message, isSubmitting, onSignIn, onSignInWithGoogle }: { message: string | null; isSubmitting: boolean; onSignIn: (email: string) => Promise<void>; onSignInWithGoogle: () => Promise<void> }) {
   async function submit(formData: FormData) {
     const email = String(formData.get("email") ?? "").trim();
     if (email) await onSignIn(email);
@@ -317,6 +331,12 @@ function AuthPanel({ message, isSubmitting, onSignIn }: { message: string | null
             <h2 className="font-serif text-2xl font-semibold">Sign in to Lofoten</h2>
             <p className="text-sm leading-6 text-stone-600">Supabase mode is private to trip members.</p>
           </div>
+        </div>
+        <button type="button" disabled={isSubmitting} onClick={onSignInWithGoogle} className="mb-4 flex w-full items-center justify-center gap-3 rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm font-black text-stone-900 shadow-sm transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
+          {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />} Continue with Google
+        </button>
+        <div className="mb-4 flex items-center gap-3 text-xs font-bold uppercase tracking-[0.12em] text-stone-400">
+          <span className="h-px flex-1 bg-stone-200" /> Or use email <span className="h-px flex-1 bg-stone-200" />
         </div>
         <label className="mb-3 block text-sm font-bold text-stone-800" htmlFor="email">Email</label>
         <div className="mb-3 flex items-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-3">
