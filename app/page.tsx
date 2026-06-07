@@ -4,13 +4,12 @@ import dynamic from "next/dynamic";
 import mapboxgl from "mapbox-gl";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
-import { AlertCircle, Loader2, LogIn, Mail, ShieldCheck } from "lucide-react";
+import { AlertCircle, Loader2, LogIn, Mail, ShieldCheck, Sparkles } from "lucide-react";
 import { AddNotePanel } from "@/components/AddNotePanel";
 import { DaySidebar } from "@/components/DaySidebar";
 import { TripLayers } from "@/components/TripLayers";
-import { UploadPhotoPanel } from "@/components/UploadPhotoPanel";
+import { UploadPhotoPanel, type PhotoUploadItemInput } from "@/components/UploadPhotoPanel";
 import { PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
-import type { ExtractedExif } from "@/lib/exif";
 import type { Day, LngLat, MapClickMode, Note, Place, RouteSegment, Trip, TripData } from "@/types/trip";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
@@ -27,6 +26,18 @@ const demoNotes: Note[] = [{ id: "note-demo-1", trip_id: demoTripId, day_id: dem
 const demoPlaces: Place[] = [{ id: "place-demo-1", trip_id: demoTripId, day_id: demoDays[2].id, name: "Coffee and cinnamon buns", lat: 67.9007, lng: 13.0461, place_type: "food", description: "Good meetup stop before the ferry.", created_at: new Date().toISOString() }];
 const demoData: TripData = { trip: demoTrip, days: demoDays, routeSegments: demoRoutes, photos: [], notes: demoNotes, places: demoPlaces };
 const emptyData: TripData = { trip: null, days: [], routeSegments: [], photos: [], notes: [], places: [] };
+const UPLOAD_CONCURRENCY = 4;
+
+async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
+  let index = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const next = items[index++];
+      await worker(next);
+    }
+  });
+  await Promise.all(runners);
+}
 
 export default function Home() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
@@ -41,8 +52,6 @@ export default function Home() {
   const [pendingCoordinate, setPendingCoordinate] = useState<LngLat | null>(null);
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
   const [panel, setPanel] = useState<"photo" | "note" | null>(null);
-  const [exif, setExif] = useState<ExtractedExif | null>(null);
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(Boolean(supabase));
   const [error, setError] = useState<string | null>(null);
@@ -153,8 +162,6 @@ export default function Home() {
     setPanel(null);
     setClickMode("idle");
     setPendingCoordinate(null);
-    setExif(null);
-    setPhotoFile(null);
   }
 
   async function saveNote(input: { body: string; authorName: string; dayId: string | null }) {
@@ -177,43 +184,90 @@ export default function Home() {
     closePanel();
   }
 
-  async function savePhoto(input: { file: File; caption: string; uploaderName: string; dayId: string | null }) {
-    if (!pendingCoordinate || !data.trip) return;
+  async function savePhotos(inputs: PhotoUploadItemInput[]) {
+    if (inputs.length === 0 || !data.trip) return;
     setSaving(true);
     if (!supabase) {
-      const imageUrl = URL.createObjectURL(input.file);
-      setData((current) => ({ ...current, photos: [{ id: crypto.randomUUID(), trip_id: data.trip!.id, day_id: input.dayId, uploader_name: input.uploaderName || "Friend", image_url: imageUrl, thumbnail_url: null, lat: pendingCoordinate.lat, lng: pendingCoordinate.lng, taken_at: exif?.takenAt ?? null, caption: input.caption, exif_found: exif?.exifFound ?? false, created_at: new Date().toISOString() }, ...current.photos] }));
+      const rows = inputs.map((input) => ({
+        id: crypto.randomUUID(),
+        trip_id: data.trip!.id,
+        day_id: input.dayId,
+        uploader_name: input.uploaderName || "Friend",
+        image_url: URL.createObjectURL(input.file),
+        thumbnail_url: null,
+        lat: input.coordinate.lat,
+        lng: input.coordinate.lng,
+        taken_at: input.exif?.takenAt ?? null,
+        caption: input.caption,
+        exif_found: input.exif?.exifFound ?? false,
+        created_at: new Date().toISOString(),
+      }));
+      setData((current) => ({ ...current, photos: [...rows, ...current.photos] }));
     } else {
       if (!user) {
         setError("Sign in before uploading photos to Supabase.");
         setSaving(false);
         return;
       }
-      const extension = input.file.name.split(".").pop() || "jpg";
-      const path = `${data.trip.slug}/${crypto.randomUUID()}.${extension}`;
-      const { error: uploadError } = await supabase.storage.from(PHOTO_BUCKET).upload(path, input.file, { cacheControl: "3600", upsert: false });
-      if (uploadError) setError(uploadError.message);
-      else {
+      const rows: Array<{
+        trip_id: string;
+        day_id: string | null;
+        uploader_name: string;
+        image_url: string;
+        lat: number;
+        lng: number;
+        taken_at: string | null | undefined;
+        caption: string;
+        exif_found: boolean;
+      }> = [];
+      const failures: string[] = [];
+
+      await mapWithConcurrency(inputs, UPLOAD_CONCURRENCY, async (input) => {
+        const extension = input.file.name.split(".").pop() || "jpg";
+        const path = `${data.trip!.slug}/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage.from(PHOTO_BUCKET).upload(path, input.file, { cacheControl: "3600", upsert: false });
+        if (uploadError) {
+          failures.push(`${input.file.name}: ${uploadError.message}`);
+          return;
+        }
         const { data: publicData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
-        const { error: insertError } = await supabase.from("photos").insert({ trip_id: data.trip.id, day_id: input.dayId, uploader_name: input.uploaderName || "Friend", image_url: publicData.publicUrl, lat: pendingCoordinate.lat, lng: pendingCoordinate.lng, taken_at: exif?.takenAt, caption: input.caption, exif_found: exif?.exifFound ?? false });
+        rows.push({
+          trip_id: data.trip!.id,
+          day_id: input.dayId,
+          uploader_name: input.uploaderName || "Friend",
+          image_url: publicData.publicUrl,
+          lat: input.coordinate.lat,
+          lng: input.coordinate.lng,
+          taken_at: input.exif?.takenAt,
+          caption: input.caption,
+          exif_found: input.exif?.exifFound ?? false,
+        });
+      });
+
+      if (rows.length > 0) {
+        const { error: insertError } = await supabase.from("photos").insert(rows);
         if (insertError) setError(insertError.message);
         else await loadData();
       }
+      if (failures.length > 0) setError(`${failures.length} photo${failures.length === 1 ? "" : "s"} failed to upload. ${failures.slice(0, 2).join(" ")}`);
     }
     setSaving(false);
     closePanel();
   }
 
   return (
-    <main className="h-dvh overflow-hidden bg-slate-950 text-white">
-      <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 px-4 py-3 md:px-6">
-        <div className="rounded-full border border-white/15 bg-slate-950/70 px-4 py-2 text-sm font-black shadow-xl backdrop-blur">Lofoten Logbook</div>
+    <main className="relative h-dvh overflow-hidden bg-[#e7efe8] text-stone-950">
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(135deg,rgba(255,253,246,0.92),rgba(211,229,222,0.5)_44%,rgba(234,198,132,0.26))]" />
+      <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 px-3 py-3 md:px-6">
+        <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-sm font-black shadow-lg backdrop-blur">
+          <Sparkles className="h-3.5 w-3.5 text-[#d0872f]" /> Lofoten Logbook
+        </div>
         <div className="flex items-center gap-2">
-          <div className="rounded-full border border-white/15 bg-slate-950/70 px-4 py-2 text-xs text-slate-200 shadow-xl backdrop-blur">{supabase ? (user ? `Signed in ${user.email ?? ""}` : "Supabase sign-in") : "Local demo mode"}</div>
-          {supabase && user ? <button onClick={signOut} className="rounded-full border border-white/15 bg-slate-950/70 px-3 py-2 text-xs font-bold text-slate-100 shadow-xl backdrop-blur hover:bg-white/10">Sign out</button> : null}
+          <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{supabase ? (user ? `Signed in ${user.email ?? ""}` : "Supabase sign-in") : "Local demo mode"}</div>
+          {supabase && user ? <button onClick={signOut} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur hover:bg-white">Sign out</button> : null}
         </div>
       </div>
-      <div className="grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4">
+      <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
         <div className="z-10 hidden md:block"><DaySidebar days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} /></div>
         <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={setMap} onCoordinatePick={setPendingCoordinate}>
           <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} />
@@ -226,13 +280,13 @@ export default function Home() {
       {error ? <StatusPill><AlertCircle className="h-4 w-4 text-amber-200" /> {error}</StatusPill> : null}
       {supabase && !authLoading && !user ? <AuthPanel message={authMessage} isSubmitting={authSubmitting} onSignIn={signIn} /> : null}
       {panel === "note" ? <AddNotePanel days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
-      {panel === "photo" ? <UploadPhotoPanel days={data.days} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} exif={exif} fileName={photoFile?.name ?? null} isSaving={saving} onCancel={closePanel} onExifRead={(file, extracted) => { setPhotoFile(file); setExif(extracted); if (extracted.lat !== null && extracted.lng !== null) setPendingCoordinate({ lat: extracted.lat, lng: extracted.lng }); }} onSave={savePhoto} /> : null}
+      {panel === "photo" ? <UploadPhotoPanel days={data.days} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
     </main>
   );
 }
 
 function StatusPill({ children }: { children: ReactNode }) {
-  return <div className="fixed left-1/2 top-16 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/15 bg-slate-950/85 px-4 py-2 text-sm text-white shadow-xl backdrop-blur">{children}</div>;
+  return <div className="fixed left-1/2 top-16 z-30 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.94)] px-4 py-2 text-sm text-stone-800 shadow-xl backdrop-blur">{children}</div>;
 }
 
 function AuthPanel({ message, isSubmitting, onSignIn }: { message: string | null; isSubmitting: boolean; onSignIn: (email: string) => Promise<void> }) {
@@ -242,22 +296,22 @@ function AuthPanel({ message, isSubmitting, onSignIn }: { message: string | null
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
-      <form action={submit} className="w-full max-w-md rounded-[1.75rem] border border-white/15 bg-slate-950/95 p-5 text-white shadow-2xl">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm">
+      <form action={submit} className="w-full max-w-md rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.97)] p-5 text-stone-950 shadow-2xl">
         <div className="mb-4 flex items-center gap-3">
-          <div className="rounded-2xl bg-cyan-300/15 p-3 text-cyan-100"><ShieldCheck className="h-5 w-5" /></div>
+          <div className="rounded-lg bg-teal-50 p-3 text-teal-800"><ShieldCheck className="h-5 w-5" /></div>
           <div>
-            <h2 className="text-xl font-black">Sign in to Lofoten</h2>
-            <p className="text-sm leading-6 text-slate-300">Supabase mode is private to trip members.</p>
+            <h2 className="font-serif text-2xl font-semibold">Sign in to Lofoten</h2>
+            <p className="text-sm leading-6 text-stone-600">Supabase mode is private to trip members.</p>
           </div>
         </div>
-        <label className="mb-3 block text-sm font-bold text-slate-200" htmlFor="email">Email</label>
-        <div className="mb-3 flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
-          <Mail className="h-4 w-4 text-cyan-100" />
-          <input id="email" name="email" type="email" required placeholder="you@example.com" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-500" />
+        <label className="mb-3 block text-sm font-bold text-stone-800" htmlFor="email">Email</label>
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-3">
+          <Mail className="h-4 w-4 text-teal-800" />
+          <input id="email" name="email" type="email" required placeholder="you@example.com" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-stone-400" />
         </div>
-        {message ? <div className="mb-3 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-3 text-sm text-cyan-50">{message}</div> : null}
-        <button disabled={isSubmitting} className="w-full rounded-2xl bg-cyan-400 px-4 py-3 font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-50">
+        {message ? <div className="mb-3 rounded-lg border border-teal-700/20 bg-teal-50 p-3 text-sm text-teal-950">{message}</div> : null}
+        <button disabled={isSubmitting} className="w-full rounded-lg bg-[#e7a13d] px-4 py-3 font-black text-stone-950 disabled:cursor-not-allowed disabled:opacity-50">
           {isSubmitting ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <LogIn className="mr-2 inline h-4 w-4" />} Send sign-in link
         </button>
       </form>
