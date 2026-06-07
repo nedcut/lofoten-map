@@ -4,12 +4,15 @@ import dynamic from "next/dynamic";
 import mapboxgl from "mapbox-gl";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
-import { AlertCircle, Loader2, LogIn, Mail, ShieldCheck, Sparkles } from "lucide-react";
+import { AlertCircle, Loader2, LogIn, Mail, ShieldCheck, Sparkles, X } from "lucide-react";
 import { AddNotePanel } from "@/components/AddNotePanel";
 import { DaySidebar } from "@/components/DaySidebar";
+import { MapLegend } from "@/components/MapLegend";
+import { MobileSheet } from "@/components/MobileSheet";
 import { TripLayers } from "@/components/TripLayers";
 import { UploadPhotoPanel, type PhotoUploadItemInput } from "@/components/UploadPhotoPanel";
 import { PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import type { Day, LngLat, MapClickMode, Note, Place, RouteSegment, Trip, TripData } from "@/types/trip";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
@@ -264,20 +267,19 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-2">
           <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{supabase ? (user ? `Signed in ${user.email ?? ""}` : "Supabase sign-in") : "Local demo mode"}</div>
-          {supabase && user ? <button onClick={signOut} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur hover:bg-white">Sign out</button> : null}
+          {supabase && user ? <button onClick={signOut} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign out</button> : null}
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
         <div className="z-10 hidden md:block"><DaySidebar days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} /></div>
         <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={setMap} onCoordinatePick={setPendingCoordinate}>
           <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} />
+          <MapLegend visibility={layerVisibility} />
         </MapView>
       </div>
-      <div className="fixed inset-x-3 bottom-3 z-20 md:hidden">
-        {!panel ? <DaySidebar days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} /> : null}
-      </div>
-      {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin" /> Loading trip data...</StatusPill> : null}
-      {error ? <StatusPill><AlertCircle className="h-4 w-4 text-amber-200" /> {error}</StatusPill> : null}
+      {!panel ? <MobileSheet days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} counts={{ photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} /> : null}
+      {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
+      {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
       {supabase && !authLoading && !user ? <AuthPanel message={authMessage} isSubmitting={authSubmitting} onSignIn={signIn} /> : null}
       {panel === "note" ? <AddNotePanel days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
@@ -285,8 +287,19 @@ export default function Home() {
   );
 }
 
-function StatusPill({ children }: { children: ReactNode }) {
-  return <div className="fixed left-1/2 top-16 z-30 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.94)] px-4 py-2 text-sm text-stone-800 shadow-xl backdrop-blur">{children}</div>;
+function StatusPill({ children, tone = "info", onDismiss }: { children: ReactNode; tone?: "info" | "error"; onDismiss?: () => void }) {
+  return (
+    <div
+      role="status"
+      className={cn(
+        "fixed left-1/2 top-16 z-30 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 text-sm shadow-xl backdrop-blur",
+        tone === "error" ? "border-rose-200 bg-rose-50/95 text-rose-900" : "border-stone-200/80 bg-[rgba(255,253,246,0.94)] text-stone-800",
+      )}
+    >
+      {children}
+      {onDismiss ? <button onClick={onDismiss} className="-mr-1 ml-1 rounded-full p-1 text-current/70 transition hover:bg-rose-900/10" aria-label="Dismiss"><X className="h-3.5 w-3.5" /></button> : null}
+    </div>
+  );
 }
 
 function AuthPanel({ message, isSubmitting, onSignIn }: { message: string | null; isSubmitting: boolean; onSignIn: (email: string) => Promise<void> }) {
@@ -311,7 +324,7 @@ function AuthPanel({ message, isSubmitting, onSignIn }: { message: string | null
           <input id="email" name="email" type="email" required placeholder="you@example.com" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-stone-400" />
         </div>
         {message ? <div className="mb-3 rounded-lg border border-teal-700/20 bg-teal-50 p-3 text-sm text-teal-950">{message}</div> : null}
-        <button disabled={isSubmitting} className="w-full rounded-lg bg-[#e7a13d] px-4 py-3 font-black text-stone-950 disabled:cursor-not-allowed disabled:opacity-50">
+        <button disabled={isSubmitting} className="w-full rounded-lg bg-[#e7a13d] px-4 py-3 font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
           {isSubmitting ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <LogIn className="mr-2 inline h-4 w-4" />} Send sign-in link
         </button>
       </form>

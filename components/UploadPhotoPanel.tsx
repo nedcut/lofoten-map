@@ -237,7 +237,7 @@ export function UploadPhotoPanel({ days, defaultDayId, pendingCoordinate, isSavi
 
         <div className="grid grid-cols-[auto_1fr] gap-2">
           <button type="button" onClick={() => { setItems([]); setActiveItemId(null); onCoordinatePreview(null); }} disabled={items.length === 0 || isSaving} className="rounded-lg border border-stone-300 bg-white px-3 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45" aria-label="Clear queue"><RotateCcw className="h-4 w-4" /></button>
-          <button disabled={counts.ready === 0 || counts.reading > 0 || isSaving} className="rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition hover:bg-[#f0ae4b] disabled:cursor-not-allowed disabled:opacity-50">
+          <button disabled={counts.ready === 0 || counts.reading > 0 || isSaving} className="rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
             {isSaving ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <Upload className="mr-2 inline h-4 w-4" />} Upload {counts.ready > 1 ? `${counts.ready} photos` : "photo"}
           </button>
         </div>

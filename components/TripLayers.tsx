@@ -80,9 +80,19 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
       if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
       const props = feature.properties ?? {};
       const coordinates = (feature.geometry.coordinates as [number, number]).slice() as [number, number];
-      const content = props.kind === "photo"
-        ? `<div class="lofoten-popup-card lofoten-popup-card-photo"><img src="${escapeHtml(props.image_url)}" alt="Trip photo" class="lofoten-popup-image"/><div class="lofoten-popup-body"><div class="lofoten-popup-title">${escapeHtml(props.caption || "Untitled photo")}</div><div class="lofoten-popup-meta">${escapeHtml(formatDateTime(String(props.taken_at || props.created_at || "")))}</div></div></div>`
-        : `<div class="lofoten-popup-card"><div class="lofoten-popup-body"><div class="lofoten-popup-title">${escapeHtml(props.title || props.body || props.name || "Map marker")}</div><div class="lofoten-popup-meta">${escapeHtml(props.description || props.note_type || "Shared trip marker")}</div></div></div>`;
+      const byline = (person: unknown) => (person ? `<span class="lofoten-popup-by">by ${escapeHtml(person)}</span>` : "");
+      const tag = (kind: string) => `<span class="lofoten-popup-tag lofoten-popup-tag-${kind}">${escapeHtml(kind)}</span>`;
+
+      let content: string;
+      if (props.kind === "photo") {
+        const meta = [formatDateTime(String(props.taken_at || props.created_at || "")), props.uploader_name ? `by ${props.uploader_name}` : ""].filter(Boolean).join(" · ");
+        content = `<div class="lofoten-popup-card lofoten-popup-card-photo"><img src="${escapeHtml(props.image_url)}" alt="Trip photo" class="lofoten-popup-image"/><div class="lofoten-popup-body">${tag("photo")}<div class="lofoten-popup-title">${escapeHtml(props.caption || "Untitled photo")}</div><div class="lofoten-popup-meta">${escapeHtml(meta)}</div></div></div>`;
+      } else if (props.kind === "note") {
+        content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("note")}<div class="lofoten-popup-title">${escapeHtml(props.body || props.title || "Trail note")}</div><div class="lofoten-popup-meta">${byline(props.author_name)}</div></div></div>`;
+      } else {
+        const meta = [props.place_type, props.description].filter(Boolean).map((value) => escapeHtml(value)).join(" · ");
+        content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("place")}<div class="lofoten-popup-title">${escapeHtml(props.name || props.title || "Place")}</div><div class="lofoten-popup-meta">${meta || "Shared trip marker"}</div></div></div>`;
+      }
       new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(coordinates).setHTML(content).addTo(map!);
     }
 
