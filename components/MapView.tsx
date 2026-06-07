@@ -1,6 +1,7 @@
 "use client";
 
 import mapboxgl from "mapbox-gl";
+import { MapPin } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LOFOTEN_CENTER } from "@/lib/geo";
 import type { LngLat, MapClickMode } from "@/types/trip";
@@ -90,7 +91,15 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
           </div>
         </div>
       ) : null}
-      {clickMode !== "idle" ? <div className="absolute left-1/2 top-4 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full border border-teal-700/20 bg-[rgba(255,253,246,0.94)] px-4 py-2 text-center text-sm font-bold text-teal-950 shadow-xl backdrop-blur">Tap the map to set location</div> : null}
+      {clickMode !== "idle" ? (
+        <div className="absolute left-1/2 top-4 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-teal-700/20 bg-[rgba(255,253,246,0.94)] px-4 py-2 text-center text-sm font-bold text-teal-950 shadow-xl backdrop-blur">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-600/60" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-teal-700" />
+          </span>
+          <MapPin className="h-4 w-4" /> Tap the map to set the location
+        </div>
+      ) : null}
       {children}
     </div>
   );

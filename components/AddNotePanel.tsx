@@ -43,7 +43,7 @@ export function AddNotePanel({ days, selectedCoordinate, defaultDayId, isSaving,
             {days.map((day) => <option key={day.id} value={day.id}>Day {day.day_number}</option>)}
           </select>
         </div>
-        <button disabled={!selectedCoordinate || isSaving} className="w-full rounded-lg bg-[#e7a13d] px-4 py-3 font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] disabled:cursor-not-allowed disabled:opacity-50">
+        <button disabled={!selectedCoordinate || isSaving} className="w-full rounded-lg bg-[#e7a13d] px-4 py-3 font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
           {isSaving ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : null} Save note
         </button>
       </form>
