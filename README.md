@@ -7,7 +7,7 @@ A polished MVP for an interactive collaborative Lofoten trip map and journal. Fr
 - Next.js App Router with TypeScript
 - Tailwind CSS
 - Mapbox GL JS
-- Supabase Postgres, Storage, Auth scaffolding, and Realtime
+- Supabase Postgres, Storage, Auth, trip membership roles, and Realtime
 - Turf.js for GeoJSON route utilities
 - ExifReader for client-side photo metadata parsing
 
@@ -32,7 +32,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 NEXT_PUBLIC_TRIP_SLUG=lofoten-2026
 ```
 
-Never expose a Supabase service role key in the browser.
+Never expose a Supabase service role key in the browser or in Vercel public environment variables.
 
 ## Supabase setup
 
@@ -46,9 +46,11 @@ Keep `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` empty to sta
 6. In SQL Editor, edit and run `supabase/grant-member.sql` to add that email to `trip_members` as an admin.
 7. Reload the app. You should see the seeded trip while signed in as that member.
 
-`schema.sql` creates the public `trip-photos` Storage bucket, grants authenticated API access, enables Realtime for collaborative tables, and applies RLS policies. Trip data is readable only by authenticated users in `trip_members`. Notes and photos can be created by trip members; route, day, place, and membership edits are admin-scoped.
+`schema.sql` creates the `trip-photos` Storage bucket, grants authenticated API access, enables Realtime for collaborative tables, and applies RLS policies. Trip data is readable only by authenticated users in `trip_members`. Notes and photos can be created by trip members; route, day, place, and membership edits are admin-scoped.
 
 Never expose a Supabase service role key in the browser. The client app only needs the public URL and anon key.
+
+For the current testing build, `trip-photos` is configured as a public bucket so uploaded image URLs render directly in Mapbox popups. Treat uploaded test photos as shareable-by-URL until the app moves to private buckets with signed image URLs.
 
 ## Mapbox setup
 
@@ -77,15 +79,42 @@ npm run build
 
 ## Deploying to Vercel
 
+This app is ready for a test deployment once Mapbox and Supabase are configured.
+
 1. Push the repository to GitHub.
 2. Import it in Vercel.
-3. Add the same public environment variables in Vercel Project Settings.
-4. Verify Supabase Storage bucket policies and table RLS policies are production-ready before sharing publicly.
+3. Add these environment variables in Vercel Project Settings:
+
+```bash
+NEXT_PUBLIC_MAPBOX_TOKEN=
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+NEXT_PUBLIC_TRIP_SLUG=lofoten-2026
+```
+
+4. In Supabase, add the deployed URL to Authentication > URL Configuration:
+   - Site URL: `https://your-vercel-app.vercel.app`
+   - Redirect URLs: `https://your-vercel-app.vercel.app/**`
+   - Keep `http://localhost:3000/**` while testing locally.
+5. Run `supabase/schema.sql`, then `supabase/seed.sql`.
+6. Sign in once from the deployed app with your email.
+7. Edit `supabase/grant-member.sql`, run it for that email, then reload the deployed app.
+8. Smoke test:
+   - Signed-out visitors see the sign-in panel in Supabase mode.
+   - Your member account can load the seeded trip.
+   - A non-member account cannot load trip data.
+   - Notes save and appear after reload.
+   - A small test photo uploads, renders on the map, and appears after reload.
+   - Realtime updates appear in another browser session.
+
+Before sharing beyond a small test group, tighten photo privacy, add a member invitation/admin flow, and test RLS with separate member and non-member users.
 
 ## Next-step roadmap
 
-- Add real Supabase Auth and trip membership roles.
-- Generate thumbnails on upload.
+- Deploy a test Vercel build and verify Supabase auth redirects, RLS, Storage uploads, and Realtime.
+- Move photo Storage from public URLs to private signed URLs before wider sharing.
+- Add a member invitation/admin flow so trip access does not require SQL edits.
+- Generate thumbnails and optionally compress large photos before upload.
 - Add route import from GPX/KML.
 - Add offline-friendly drafts for notes and uploads.
 - Add Mapbox 3D terrain/flyover scenic mode.
