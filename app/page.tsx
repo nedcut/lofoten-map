@@ -13,7 +13,7 @@ import { TripLayers } from "@/components/TripLayers";
 import { UploadPhotoPanel, type PhotoUploadItemInput } from "@/components/UploadPhotoPanel";
 import { PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import type { Day, LngLat, MapClickMode, Note, Place, RouteSegment, Trip, TripData } from "@/types/trip";
+import type { Day, LngLat, MapClickMode, Note, Place, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
 
@@ -27,8 +27,8 @@ const demoTrip: Trip = { id: demoTripId, title: "Lofoten 2026", slug: "lofoten-2
 const demoRoutes: RouteSegment[] = [{ id: "route-demo", trip_id: demoTripId, day_id: demoDays[1].id, name: "Reine to Kjerkfjorden scouting route", source: "seed", mode: "hike", geometry_geojson: { type: "LineString", coordinates: [[13.089, 67.932], [13.068, 67.941], [13.045, 67.954], [13.019, 67.967]] }, distance_meters: 6200, elevation_gain_meters: 420, created_at: new Date().toISOString() }];
 const demoNotes: Note[] = [{ id: "note-demo-1", trip_id: demoTripId, day_id: demoDays[0].id, author_name: "Maja", lat: 67.9328, lng: 13.0888, body: "Sunset light on Reinebringen looked unreal from the harbor.", note_type: "note", created_at: new Date().toISOString() }];
 const demoPlaces: Place[] = [{ id: "place-demo-1", trip_id: demoTripId, day_id: demoDays[2].id, name: "Coffee and cinnamon buns", lat: 67.9007, lng: 13.0461, place_type: "food", description: "Good meetup stop before the ferry.", created_at: new Date().toISOString() }];
-const demoData: TripData = { trip: demoTrip, days: demoDays, routeSegments: demoRoutes, photos: [], notes: demoNotes, places: demoPlaces };
-const emptyData: TripData = { trip: null, days: [], routeSegments: [], photos: [], notes: [], places: [] };
+const demoData: TripData = { trip: demoTrip, days: demoDays, routeSegments: demoRoutes, photos: [], notes: demoNotes, places: demoPlaces, members: [] };
+const emptyData: TripData = { trip: null, days: [], routeSegments: [], photos: [], notes: [], places: [], members: [] };
 const UPLOAD_CONCURRENCY = 4;
 
 async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
@@ -49,6 +49,8 @@ export default function Home() {
   const [authLoading, setAuthLoading] = useState(Boolean(supabase));
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [memberMessage, setMemberMessage] = useState<string | null>(null);
+  const [memberSaving, setMemberSaving] = useState(false);
   const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
   const [layerVisibility, setLayerVisibility] = useState({ photos: true, notes: true, routes: true });
   const [clickMode, setClickMode] = useState<MapClickMode>("idle");
@@ -91,16 +93,17 @@ export default function Home() {
       setLoading(false);
       return;
     }
-    const [days, routes, photos, notes, places] = await Promise.all([
+    const [days, routes, photos, notes, places, members] = await Promise.all([
       supabase.from("days").select("*").eq("trip_id", trip.id).order("day_number"),
       supabase.from("route_segments").select("*").eq("trip_id", trip.id).order("created_at"),
       supabase.from("photos").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
       supabase.from("notes").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
       supabase.from("places").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
+      supabase.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", trip.id).order("created_at"),
     ]);
-    const failure = [days.error, routes.error, photos.error, notes.error, places.error].find(Boolean);
+    const failure = [days.error, routes.error, photos.error, notes.error, places.error, members.error].find(Boolean);
     if (failure) setError(failure.message);
-    else setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: photos.data ?? [], notes: notes.data ?? [], places: places.data ?? [] });
+    else setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: photos.data ?? [], notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[] });
     setLoading(false);
   }, [supabase, tripSlug, user]);
 
@@ -159,6 +162,24 @@ export default function Home() {
     setData(emptyData);
   }
 
+  async function grantMember(input: { email: string; role: "admin" | "member" }) {
+    if (!supabase || !data.trip) return;
+    setMemberSaving(true);
+    setMemberMessage(null);
+    const { error: grantError } = await supabase.rpc("grant_trip_member_by_email", {
+      target_trip_slug: data.trip.slug,
+      target_email: input.email,
+      target_role: input.role,
+    });
+    if (grantError) {
+      setMemberMessage(grantError.message);
+    } else {
+      setMemberMessage(`${input.email} added as ${input.role}.`);
+      await loadData();
+    }
+    setMemberSaving(false);
+  }
+
   const filtered = useMemo(() => {
     const matches = (dayId: string | null) => !selectedDayId || dayId === selectedDayId;
     return {
@@ -168,6 +189,11 @@ export default function Home() {
       places: data.places.filter((item) => matches(item.day_id)),
     };
   }, [data, selectedDayId]);
+
+  const currentMember = useMemo(() => data.members.find((member) => member.user_id === user?.id) ?? null, [data.members, user?.id]);
+  const memberAdmin = currentMember?.role === "admin"
+    ? { members: data.members, message: memberMessage, isSaving: memberSaving, onGrantMember: grantMember }
+    : null;
 
   function startPanel(next: "photo" | "note") {
     setPanel(next);
@@ -285,13 +311,13 @@ export default function Home() {
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden md:block"><DaySidebar days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} /></div>
+        <div className="z-10 hidden md:block"><DaySidebar days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} memberAdmin={memberAdmin} /></div>
         <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={setMap} onCoordinatePick={setPendingCoordinate}>
           <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} />
           <MapLegend visibility={layerVisibility} />
         </MapView>
       </div>
-      {!panel ? <MobileSheet days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} counts={{ photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} /> : null}
+      {!panel ? <MobileSheet days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} counts={{ photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} memberAdmin={memberAdmin} /> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
       {supabase && !authLoading && !user ? <AuthPanel message={authMessage} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} /> : null}

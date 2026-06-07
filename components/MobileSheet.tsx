@@ -2,7 +2,7 @@
 
 import { ChevronUp } from "lucide-react";
 import { useState } from "react";
-import { DayList, LayersPanel, QuickActions, type SidebarProps } from "@/components/DaySidebar";
+import { DayList, LayersPanel, MemberAdminPanel, QuickActions, type SidebarProps } from "@/components/DaySidebar";
 import { cn } from "@/lib/utils";
 import type { Day } from "@/types/trip";
 
@@ -83,6 +83,7 @@ export function MobileSheet(props: MobileSheetProps) {
               <div className="max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
                 <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} />
                 <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} />
+                {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}
               </div>
             </div>
           </div>

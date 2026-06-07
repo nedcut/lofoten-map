@@ -45,8 +45,9 @@ Keep `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` empty to sta
 5. Put your project URL and anon key in `.env.local`, then start the app and sign in once with your email.
 6. In SQL Editor, edit and run `supabase/grant-member.sql` to add that email to `trip_members` as an admin.
 7. Reload the app. You should see the seeded trip while signed in as that member.
+8. Admin users can add friends from the Members panel after those friends have signed in once.
 
-`schema.sql` creates the `trip-photos` Storage bucket, grants authenticated API access, enables Realtime for collaborative tables, and applies RLS policies. Trip data is readable only by authenticated users in `trip_members`. Notes and photos can be created by trip members; route, day, place, and membership edits are admin-scoped.
+`schema.sql` creates the `trip-photos` Storage bucket, grants authenticated API access, enables Realtime for collaborative tables, adds an admin-only member grant RPC, and applies RLS policies. Trip data is readable only by authenticated users in `trip_members`. Notes and photos can be created by trip members; route, day, place, and membership edits are admin-scoped.
 
 Never expose a Supabase service role key in the browser. The client app only needs the public URL and anon key.
 
@@ -105,6 +106,7 @@ NEXT_PUBLIC_TRIP_SLUG=lofoten-2026
    - A non-member account cannot load trip data.
    - Notes save and appear after reload.
    - A small test photo uploads, renders on the map, and appears after reload.
+   - An admin can add a signed-in friend from the Members panel.
    - Realtime updates appear in another browser session.
 
 Before sharing beyond a small test group, tighten photo privacy, add a member invitation/admin flow, and test RLS with separate member and non-member users.
@@ -113,7 +115,7 @@ Before sharing beyond a small test group, tighten photo privacy, add a member in
 
 - Deploy a test Vercel build and verify Supabase auth redirects, RLS, Storage uploads, and Realtime.
 - Move photo Storage from public URLs to private signed URLs before wider sharing.
-- Add a member invitation/admin flow so trip access does not require SQL edits.
+- Expand member management with pending invites or email notifications.
 - Generate thumbnails and optionally compress large photos before upload.
 - Add route import from GPX/KML.
 - Add offline-friendly drafts for notes and uploads.

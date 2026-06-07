@@ -74,6 +74,14 @@ export type Place = {
   created_at: string;
 };
 
+export type TripMember = {
+  trip_id: string;
+  user_id: string;
+  role: "admin" | "member";
+  display_name: string | null;
+  created_at: string;
+};
+
 export type TripData = {
   trip: Trip | null;
   days: Day[];
@@ -81,6 +89,7 @@ export type TripData = {
   photos: Photo[];
   notes: Note[];
   places: Place[];
+  members: TripMember[];
 };
 
 export type MapClickMode = "idle" | "add-note" | "place-photo";

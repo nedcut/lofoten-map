@@ -142,6 +142,70 @@ grant execute on function public.is_trip_member(uuid) to authenticated;
 grant execute on function public.is_trip_admin(uuid) to authenticated;
 grant execute on function public.is_trip_member_by_slug(text) to authenticated;
 
+create or replace function public.grant_trip_member_by_email(target_trip_slug text, target_email text, target_role text default 'member')
+returns table (
+  trip_id uuid,
+  user_id uuid,
+  role text,
+  display_name text,
+  created_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  found_trip_id uuid;
+  found_user_id uuid;
+  found_display_name text;
+  normalized_email text;
+begin
+  normalized_email := lower(trim(target_email));
+
+  if normalized_email = '' then
+    raise exception 'Email is required';
+  end if;
+
+  if target_role not in ('admin', 'member') then
+    raise exception 'Role must be admin or member';
+  end if;
+
+  select id into found_trip_id
+  from public.trips
+  where slug = target_trip_slug;
+
+  if found_trip_id is null then
+    raise exception 'Trip not found';
+  end if;
+
+  if not public.is_trip_admin(found_trip_id) then
+    raise exception 'Only trip admins can add members' using errcode = '42501';
+  end if;
+
+  select id, coalesce(raw_user_meta_data ->> 'full_name', email)
+  into found_user_id, found_display_name
+  from auth.users
+  where lower(email) = normalized_email
+  limit 1;
+
+  if found_user_id is null then
+    raise exception 'No signed-in user found for %', normalized_email;
+  end if;
+
+  insert into public.trip_members (trip_id, user_id, role, display_name)
+  values (found_trip_id, found_user_id, target_role, found_display_name)
+  on conflict (trip_id, user_id) do update
+    set role = excluded.role,
+        display_name = coalesce(excluded.display_name, public.trip_members.display_name)
+  returning public.trip_members.trip_id, public.trip_members.user_id, public.trip_members.role, public.trip_members.display_name, public.trip_members.created_at
+  into grant_trip_member_by_email.trip_id, grant_trip_member_by_email.user_id, grant_trip_member_by_email.role, grant_trip_member_by_email.display_name, grant_trip_member_by_email.created_at;
+
+  return next;
+end;
+$$;
+
+grant execute on function public.grant_trip_member_by_email(text, text, text) to authenticated;
+
 grant usage on schema public to anon, authenticated;
 grant all on table trips, days, route_segments, photos, notes, places, trip_members to authenticated;
 grant usage on all sequences in schema public to authenticated;
