@@ -1,6 +1,6 @@
 -- Lofoten Logbook MVP schema
--- Development RLS policies below intentionally allow broad anonymous access.
--- Tighten these policies before any public deployment.
+-- Authenticated Supabase mode is private to trip members. Run seed.sql after
+-- this schema, then add at least one auth user to trip_members from SQL.
 
 create extension if not exists pgcrypto;
 
@@ -42,6 +42,7 @@ create table if not exists photos (
   id uuid primary key default gen_random_uuid(),
   trip_id uuid references trips(id) on delete cascade,
   day_id uuid references days(id) on delete set null,
+  user_id uuid references auth.users(id) on delete set null default auth.uid(),
   uploader_name text,
   image_url text not null,
   thumbnail_url text,
@@ -57,6 +58,7 @@ create table if not exists notes (
   id uuid primary key default gen_random_uuid(),
   trip_id uuid references trips(id) on delete cascade,
   day_id uuid references days(id) on delete set null,
+  user_id uuid references auth.users(id) on delete set null default auth.uid(),
   author_name text,
   lat double precision not null,
   lng double precision not null,
@@ -77,27 +79,167 @@ create table if not exists places (
   created_at timestamptz default now()
 );
 
+create table if not exists trip_members (
+  trip_id uuid references trips(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete cascade,
+  role text not null default 'member' check (role in ('admin', 'member')),
+  display_name text,
+  created_at timestamptz default now(),
+  primary key (trip_id, user_id)
+);
+
+alter table photos add column if not exists user_id uuid references auth.users(id) on delete set null default auth.uid();
+alter table notes add column if not exists user_id uuid references auth.users(id) on delete set null default auth.uid();
+
+create or replace function public.is_trip_member(check_trip_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.trip_members
+    where trip_id = check_trip_id
+      and user_id = auth.uid()
+  );
+$$;
+
+create or replace function public.is_trip_admin(check_trip_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.trip_members
+    where trip_id = check_trip_id
+      and user_id = auth.uid()
+      and role = 'admin'
+  );
+$$;
+
+create or replace function public.is_trip_member_by_slug(check_trip_slug text)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.trips
+    join public.trip_members on trip_members.trip_id = trips.id
+    where trips.slug = check_trip_slug
+      and trip_members.user_id = auth.uid()
+  );
+$$;
+
+grant execute on function public.is_trip_member(uuid) to authenticated;
+grant execute on function public.is_trip_admin(uuid) to authenticated;
+grant execute on function public.is_trip_member_by_slug(text) to authenticated;
+
+grant usage on schema public to anon, authenticated;
+grant all on table trips, days, route_segments, photos, notes, places, trip_members to authenticated;
+grant usage on all sequences in schema public to authenticated;
+
 alter table trips enable row level security;
 alter table days enable row level security;
 alter table route_segments enable row level security;
 alter table photos enable row level security;
 alter table notes enable row level security;
 alter table places enable row level security;
+alter table trip_members enable row level security;
 
--- DEV ONLY: anonymous clients can read and write MVP trip data.
--- Replace with authenticated, trip-scoped policies before public launch.
 do $$
 declare
   table_name text;
 begin
-  foreach table_name in array array['trips', 'days', 'route_segments', 'photos', 'notes', 'places'] loop
+  foreach table_name in array array['trips', 'days', 'route_segments', 'photos', 'notes', 'places', 'trip_members'] loop
     execute format('drop policy if exists "dev read %1$s" on %1$I', table_name);
     execute format('drop policy if exists "dev insert %1$s" on %1$I', table_name);
     execute format('drop policy if exists "dev update %1$s" on %1$I', table_name);
     execute format('drop policy if exists "dev delete %1$s" on %1$I', table_name);
-    execute format('create policy "dev read %1$s" on %1$I for select using (true)', table_name);
-    execute format('create policy "dev insert %1$s" on %1$I for insert with check (true)', table_name);
-    execute format('create policy "dev update %1$s" on %1$I for update using (true) with check (true)', table_name);
-    execute format('create policy "dev delete %1$s" on %1$I for delete using (true)', table_name);
+  end loop;
+end $$;
+
+drop policy if exists "members read trips" on trips;
+drop policy if exists "admins write trips" on trips;
+create policy "members read trips" on trips for select to authenticated using (public.is_trip_member(id));
+create policy "admins write trips" on trips for all to authenticated using (public.is_trip_admin(id)) with check (public.is_trip_admin(id));
+
+drop policy if exists "members read days" on days;
+drop policy if exists "admins write days" on days;
+create policy "members read days" on days for select to authenticated using (public.is_trip_member(trip_id));
+create policy "admins write days" on days for all to authenticated using (public.is_trip_admin(trip_id)) with check (public.is_trip_admin(trip_id));
+
+drop policy if exists "members read route segments" on route_segments;
+drop policy if exists "admins write route segments" on route_segments;
+create policy "members read route segments" on route_segments for select to authenticated using (public.is_trip_member(trip_id));
+create policy "admins write route segments" on route_segments for all to authenticated using (public.is_trip_admin(trip_id)) with check (public.is_trip_admin(trip_id));
+
+drop policy if exists "members read places" on places;
+drop policy if exists "admins write places" on places;
+create policy "members read places" on places for select to authenticated using (public.is_trip_member(trip_id));
+create policy "admins write places" on places for all to authenticated using (public.is_trip_admin(trip_id)) with check (public.is_trip_admin(trip_id));
+
+drop policy if exists "members read photos" on photos;
+drop policy if exists "members insert own photos" on photos;
+drop policy if exists "owners or admins update photos" on photos;
+drop policy if exists "owners or admins delete photos" on photos;
+create policy "members read photos" on photos for select to authenticated using (public.is_trip_member(trip_id));
+create policy "members insert own photos" on photos for insert to authenticated with check (public.is_trip_member(trip_id) and user_id = auth.uid());
+create policy "owners or admins update photos" on photos for update to authenticated using (user_id = auth.uid() or public.is_trip_admin(trip_id)) with check (user_id = auth.uid() or public.is_trip_admin(trip_id));
+create policy "owners or admins delete photos" on photos for delete to authenticated using (user_id = auth.uid() or public.is_trip_admin(trip_id));
+
+drop policy if exists "members read notes" on notes;
+drop policy if exists "members insert own notes" on notes;
+drop policy if exists "owners or admins update notes" on notes;
+drop policy if exists "owners or admins delete notes" on notes;
+create policy "members read notes" on notes for select to authenticated using (public.is_trip_member(trip_id));
+create policy "members insert own notes" on notes for insert to authenticated with check (public.is_trip_member(trip_id) and user_id = auth.uid());
+create policy "owners or admins update notes" on notes for update to authenticated using (user_id = auth.uid() or public.is_trip_admin(trip_id)) with check (user_id = auth.uid() or public.is_trip_admin(trip_id));
+create policy "owners or admins delete notes" on notes for delete to authenticated using (user_id = auth.uid() or public.is_trip_admin(trip_id));
+
+drop policy if exists "members read trip memberships" on trip_members;
+drop policy if exists "admins write trip memberships" on trip_members;
+create policy "members read trip memberships" on trip_members for select to authenticated using (public.is_trip_member(trip_id));
+create policy "admins write trip memberships" on trip_members for all to authenticated using (public.is_trip_admin(trip_id)) with check (public.is_trip_admin(trip_id));
+
+insert into storage.buckets (id, name, public)
+values ('trip-photos', 'trip-photos', true)
+on conflict (id) do update set public = excluded.public;
+
+drop policy if exists "trip members read photo objects" on storage.objects;
+drop policy if exists "trip members upload photo objects" on storage.objects;
+drop policy if exists "trip members update photo objects" on storage.objects;
+drop policy if exists "trip members delete photo objects" on storage.objects;
+create policy "trip members read photo objects" on storage.objects for select to authenticated
+  using (bucket_id = 'trip-photos' and public.is_trip_member_by_slug(split_part(name, '/', 1)));
+create policy "trip members upload photo objects" on storage.objects for insert to authenticated
+  with check (bucket_id = 'trip-photos' and public.is_trip_member_by_slug(split_part(name, '/', 1)));
+create policy "trip members update photo objects" on storage.objects for update to authenticated
+  using (bucket_id = 'trip-photos' and public.is_trip_member_by_slug(split_part(name, '/', 1)))
+  with check (bucket_id = 'trip-photos' and public.is_trip_member_by_slug(split_part(name, '/', 1)));
+create policy "trip members delete photo objects" on storage.objects for delete to authenticated
+  using (bucket_id = 'trip-photos' and public.is_trip_member_by_slug(split_part(name, '/', 1)));
+
+do $$
+declare
+  realtime_table text;
+begin
+  foreach realtime_table in array array['photos', 'notes', 'places', 'route_segments'] loop
+    if not exists (
+      select 1
+      from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = realtime_table
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', realtime_table);
+    end if;
   end loop;
 end $$;
