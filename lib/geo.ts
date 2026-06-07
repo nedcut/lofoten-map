@@ -8,8 +8,11 @@ export function routeFeatureCollection(routes: RouteSegment[]): FeatureCollectio
   return {
     type: "FeatureCollection",
     features: routes.map((route) => {
-      const geometry = route.geometry_geojson.type === "Feature" ? route.geometry_geojson.geometry : route.geometry_geojson;
-      return {
+      const geometry = (route.geometry_geojson.type === "Feature" ? route.geometry_geojson.geometry : route.geometry_geojson) as LineString;
+      const distanceKm = route.distance_meters
+        ? route.distance_meters / 1000
+        : length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" });
+      const feature: Feature<LineString> = {
         type: "Feature",
         geometry,
         properties: {
@@ -17,9 +20,10 @@ export function routeFeatureCollection(routes: RouteSegment[]): FeatureCollectio
           name: route.name ?? "Route segment",
           day_id: route.day_id,
           mode: route.mode,
-          distance_km: route.distance_meters ? route.distance_meters / 1000 : length(geometry, { units: "kilometers" }),
+          distance_km: distanceKm,
         },
       };
+      return feature;
     }),
   };
 }

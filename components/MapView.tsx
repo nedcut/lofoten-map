@@ -54,12 +54,14 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
     if (!map) return;
     const handler = (event: mapboxgl.MapMouseEvent) => onCoordinatePick({ lng: event.lngLat.lng, lat: event.lngLat.lat });
     if (clickMode !== "idle") {
-      map.getCanvas().style.cursor = "crosshair";
+      const canvas = map.getCanvas();
+      if (canvas) canvas.style.cursor = "crosshair";
       map.on("click", handler);
     }
     return () => {
       map.off("click", handler);
-      map.getCanvas().style.cursor = "";
+      const canvas = map.getCanvas();
+      if (canvas) canvas.style.cursor = "";
     };
   }, [clickMode, onCoordinatePick]);
 

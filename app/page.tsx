@@ -10,7 +10,7 @@ import { TripLayers } from "@/components/TripLayers";
 import { UploadPhotoPanel } from "@/components/UploadPhotoPanel";
 import { PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
 import type { ExtractedExif } from "@/lib/exif";
-import type { Day, LngLat, MapClickMode, Note, Photo, Place, RouteSegment, Trip, TripData } from "@/types/trip";
+import type { Day, LngLat, MapClickMode, Note, Place, RouteSegment, Trip, TripData } from "@/types/trip";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
 

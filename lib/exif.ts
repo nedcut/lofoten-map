@@ -10,14 +10,62 @@ export type ExtractedExif = {
 
 type TagValue = { value?: unknown; description?: string };
 
-function numberFromTag(tag: TagValue | undefined): number | null {
-  if (!tag) return null;
-  if (typeof tag.value === "number") return tag.value;
-  if (typeof tag.description === "string") {
-    const parsed = Number(tag.description);
-    return Number.isFinite(parsed) ? parsed : null;
+function isTagValue(value: unknown): value is TagValue {
+  return typeof value === "object" && value !== null && ("value" in value || "description" in value);
+}
+
+function rationalToNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (Array.isArray(value) && value.length === 2 && typeof value[0] === "number" && typeof value[1] === "number" && value[1] !== 0) {
+    return value[0] / value[1];
   }
   return null;
+}
+
+function numberFromValue(value: unknown): number | null {
+  const rawValue = isTagValue(value) ? value.value : value;
+  const direct = rationalToNumber(rawValue);
+  if (direct !== null) return direct;
+
+  if (typeof rawValue === "string") {
+    const parsed = Number(rawValue);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  if (isTagValue(value) && typeof value.description === "string") {
+    const parsed = Number(value.description);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function gpsRefFromValue(value: unknown): string | null {
+  const rawValue = isTagValue(value) ? value.value : value;
+  if (typeof rawValue === "string") return rawValue;
+  if (Array.isArray(rawValue)) return rawValue.join("");
+  if (isTagValue(value) && typeof value.description === "string") return value.description;
+  return null;
+}
+
+function coordinateFromExif(value: unknown, ref: unknown): number | null {
+  const direct = numberFromValue(value);
+  if (direct !== null) return applyGpsRef(direct, ref);
+
+  const rawValue = isTagValue(value) ? value.value : value;
+  if (!Array.isArray(rawValue) || rawValue.length < 3) return null;
+
+  const degrees = rationalToNumber(rawValue[0]);
+  const minutes = rationalToNumber(rawValue[1]);
+  const seconds = rationalToNumber(rawValue[2]);
+  if (degrees === null || minutes === null || seconds === null) return null;
+
+  return applyGpsRef(degrees + minutes / 60 + seconds / 3600, ref);
+}
+
+function applyGpsRef(coordinate: number, ref: unknown): number {
+  const gpsRef = gpsRefFromValue(ref)?.trim().toUpperCase();
+  return gpsRef === "S" || gpsRef === "W" ? -Math.abs(coordinate) : coordinate;
 }
 
 function parseExifDate(value: string | undefined): string | null {
@@ -29,13 +77,13 @@ function parseExifDate(value: string | undefined): string | null {
 
 export async function extractPhotoExif(file: File): Promise<ExtractedExif> {
   try {
-    const tags = (await ExifReader.load(file, { expanded: true })) as Record<string, Record<string, TagValue>>;
+    const tags = (await ExifReader.load(file, { expanded: true })) as Record<string, Record<string, unknown>>;
     const gps = tags.gps ?? {};
     const exif = tags.exif ?? {};
-    const lat = numberFromTag(gps.Latitude ?? gps.GPSLatitude);
-    const lng = numberFromTag(gps.Longitude ?? gps.GPSLongitude);
+    const lat = coordinateFromExif(gps.Latitude ?? exif.GPSLatitude, exif.GPSLatitudeRef);
+    const lng = coordinateFromExif(gps.Longitude ?? exif.GPSLongitude, exif.GPSLongitudeRef);
     const dateTag = exif.DateTimeOriginal ?? exif.CreateDate ?? exif.DateTimeDigitized;
-    const takenAt = parseExifDate(typeof dateTag?.description === "string" ? dateTag.description : undefined);
+    const takenAt = parseExifDate(isTagValue(dateTag) && typeof dateTag.description === "string" ? dateTag.description : undefined);
 
     if (lat !== null && lng !== null) {
       return { lat, lng, takenAt, exifFound: true, message: "GPS metadata found. Marker location is ready." };
