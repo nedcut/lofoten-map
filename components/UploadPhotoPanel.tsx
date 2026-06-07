@@ -111,7 +111,7 @@ export function UploadPhotoPanel({ days, defaultDayId, pendingCoordinate, isSavi
     });
 
     setItems((current) => [...current, ...nextItems]);
-    setActiveItemId((current) => current && items.some((item) => item.id === current) ? current : nextItems[0]?.id ?? null);
+    setActiveItemId((current) => current ?? nextItems[0]?.id ?? null);
 
     const readable = nextItems.filter((item) => item.status === "reading");
     await mapWithConcurrency(readable, EXIF_CONCURRENCY, async (item) => {
