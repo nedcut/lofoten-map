@@ -15,6 +15,7 @@ import { MobileSheet } from "@/components/MobileSheet";
 import { RouteDraftLayer } from "@/components/RouteDraftLayer";
 import { TripLayers } from "@/components/TripLayers";
 import { UploadPhotoPanel, type PhotoUploadItemInput } from "@/components/UploadPhotoPanel";
+import { preparePhotoFiles } from "@/lib/photo-processing";
 import { PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Day, LngLat, MapClickMode, Note, Place, RouteMode, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
@@ -66,6 +67,17 @@ function storagePathFromPublicUrl(imageUrl: string) {
   } catch {
     return null;
   }
+}
+
+function fileExtension(file: File) {
+  if (file.type === "image/jpeg") return "jpg";
+  if (file.type === "image/png") return "png";
+  if (file.type === "image/webp") return "webp";
+  return file.name.split(".").pop()?.toLowerCase() || "jpg";
+}
+
+function storagePathsForPhoto(photo: { image_url: string; thumbnail_url: string | null }) {
+  return [storagePathFromPublicUrl(photo.image_url), photo.thumbnail_url ? storagePathFromPublicUrl(photo.thumbnail_url) : null].filter((path): path is string => Boolean(path));
 }
 
 export default function Home() {
@@ -318,19 +330,22 @@ export default function Home() {
     let didSave = false;
     try {
       if (!supabase) {
-        const rows = inputs.map((input) => ({
-          id: crypto.randomUUID(),
-          trip_id: data.trip!.id,
-          day_id: input.dayId,
-          uploader_name: input.uploaderName || "Friend",
-          image_url: URL.createObjectURL(input.file),
-          thumbnail_url: null,
-          lat: input.coordinate.lat,
-          lng: input.coordinate.lng,
-          taken_at: input.exif?.takenAt ?? null,
-          caption: input.caption,
-          exif_found: input.exif?.exifFound ?? false,
-          created_at: new Date().toISOString(),
+        const rows = await Promise.all(inputs.map(async (input) => {
+          const prepared = await preparePhotoFiles(input.file);
+          return {
+            id: crypto.randomUUID(),
+            trip_id: data.trip!.id,
+            day_id: input.dayId,
+            uploader_name: input.uploaderName || "Friend",
+            image_url: URL.createObjectURL(prepared.imageFile),
+            thumbnail_url: prepared.thumbnailFile ? URL.createObjectURL(prepared.thumbnailFile) : null,
+            lat: input.coordinate.lat,
+            lng: input.coordinate.lng,
+            taken_at: input.exif?.takenAt ?? null,
+            caption: input.caption,
+            exif_found: input.exif?.exifFound ?? false,
+            created_at: new Date().toISOString(),
+          };
         }));
         setData((current) => ({ ...current, photos: [...rows, ...current.photos] }));
         didSave = true;
@@ -344,6 +359,7 @@ export default function Home() {
           day_id: string | null;
           uploader_name: string;
           image_url: string;
+          thumbnail_url: string | null;
           lat: number;
           lng: number;
           taken_at: string | null | undefined;
@@ -354,20 +370,34 @@ export default function Home() {
         const uploadedPaths: string[] = [];
 
         await mapWithConcurrency(inputs, UPLOAD_CONCURRENCY, async (input) => {
-          const extension = input.file.name.split(".").pop() || "jpg";
+          const prepared = await preparePhotoFiles(input.file);
+          const extension = fileExtension(prepared.imageFile);
           const path = `${data.trip!.slug}/${crypto.randomUUID()}.${extension}`;
-          const { error: uploadError } = await supabase.storage.from(PHOTO_BUCKET).upload(path, input.file, { cacheControl: "3600", upsert: false });
+          const { error: uploadError } = await supabase.storage.from(PHOTO_BUCKET).upload(path, prepared.imageFile, { cacheControl: "3600", upsert: false, contentType: prepared.imageFile.type || undefined });
           if (uploadError) {
             failures.push(`${input.file.name}: ${uploadError.message}`);
             return;
           }
           uploadedPaths.push(path);
           const { data: publicData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+          let thumbnailUrl: string | null = null;
+          if (prepared.thumbnailFile) {
+            const thumbnailPath = `${data.trip!.slug}/thumbs/${crypto.randomUUID()}.jpg`;
+            const { error: thumbnailError } = await supabase.storage.from(PHOTO_BUCKET).upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: "3600", upsert: false, contentType: prepared.thumbnailFile.type });
+            if (thumbnailError) {
+              failures.push(`${input.file.name} thumbnail: ${thumbnailError.message}`);
+            } else {
+              uploadedPaths.push(thumbnailPath);
+              const { data: thumbnailData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(thumbnailPath);
+              thumbnailUrl = thumbnailData.publicUrl;
+            }
+          }
           rows.push({
             trip_id: data.trip!.id,
             day_id: input.dayId,
             uploader_name: input.uploaderName || "Friend",
             image_url: publicData.publicUrl,
+            thumbnail_url: thumbnailUrl,
             lat: input.coordinate.lat,
             lng: input.coordinate.lng,
             taken_at: input.exif?.takenAt,
@@ -587,14 +617,14 @@ export default function Home() {
     if (!data.trip) return;
     await runAdminOperation(async () => {
       if (supabase) {
-        const photoStoragePath = table === "photos"
-          ? storagePathFromPublicUrl(data.photos.find((photo) => photo.id === id)?.image_url ?? "")
-          : null;
+        const photoStoragePaths = table === "photos"
+          ? storagePathsForPhoto(data.photos.find((photo) => photo.id === id) ?? { image_url: "", thumbnail_url: null })
+          : [];
         const { error: deleteError } = await supabase.from(table).delete().eq("id", id).eq("trip_id", data.trip!.id);
         if (deleteError) setAdminDataMessage(deleteError.message);
         else {
-          if (photoStoragePath) {
-            const { error: storageDeleteError } = await supabase.storage.from(PHOTO_BUCKET).remove([photoStoragePath]);
+          if (photoStoragePaths.length > 0) {
+            const { error: storageDeleteError } = await supabase.storage.from(PHOTO_BUCKET).remove(photoStoragePaths);
             setAdminDataMessage(storageDeleteError ? `Item deleted, but photo file cleanup failed: ${storageDeleteError.message}` : "Item deleted.");
           } else {
             setAdminDataMessage("Item deleted.");
@@ -604,6 +634,7 @@ export default function Home() {
       } else {
         const deletedPhoto = table === "photos" ? data.photos.find((item) => item.id === id) : null;
         if (deletedPhoto?.image_url.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.image_url);
+        if (deletedPhoto?.thumbnail_url?.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.thumbnail_url);
         setData((current) => ({
           ...current,
           days: table === "days" ? current.days.filter((item) => item.id !== id) : current.days,

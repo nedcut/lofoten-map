@@ -125,7 +125,8 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
       let content: string;
       if (props.kind === "photo") {
         const meta = [formatDateTime(String(props.taken_at || props.created_at || "")), props.uploader_name ? `by ${props.uploader_name}` : ""].filter(Boolean).join(" · ");
-        content = `<div class="lofoten-popup-card lofoten-popup-card-photo"><img src="${escapeHtml(props.image_url)}" alt="Trip photo" class="lofoten-popup-image"/><div class="lofoten-popup-body">${tag("photo")}<div class="lofoten-popup-title">${escapeHtml(props.caption || "Untitled photo")}</div><div class="lofoten-popup-meta">${escapeHtml(meta)}</div></div></div>`;
+        const imageUrl = props.thumbnail_url || props.image_url;
+        content = `<div class="lofoten-popup-card lofoten-popup-card-photo"><img src="${escapeHtml(imageUrl)}" alt="Trip photo" class="lofoten-popup-image"/><div class="lofoten-popup-body">${tag("photo")}<div class="lofoten-popup-title">${escapeHtml(props.caption || "Untitled photo")}</div><div class="lofoten-popup-meta">${escapeHtml(meta)}</div></div></div>`;
       } else if (props.kind === "note") {
         content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("note")}<div class="lofoten-popup-title">${escapeHtml(props.body || props.title || "Trail note")}</div><div class="lofoten-popup-meta">${byline(props.author_name)}</div></div></div>`;
       } else {
