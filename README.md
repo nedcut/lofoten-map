@@ -1,134 +1,195 @@
 # Lofoten Logbook
 
-A polished MVP for an interactive collaborative Lofoten trip map and journal. Friends can filter trip days, view route GeoJSON, add notes, upload photos, extract EXIF GPS metadata client-side, manually place missing geotags, and receive live Supabase updates.
+An interactive, collaborative trip map and journal. Trip members filter days,
+browse route segments, drop notes and photos on the map, and see each other's
+updates live. Photos extract their GPS/timestamp from EXIF in the browser, fall
+back to manual placement (or auto-placement along the day's route) when no
+geotag exists, and are downscaled with thumbnails before upload. Admins get
+in-app editors for the itinerary, routes, places, photo metadata, and
+membership.
 
-## Stack
+It runs in two modes:
 
-- Next.js App Router with TypeScript
-- Tailwind CSS
-- Mapbox GL JS
-- Supabase Postgres, Storage, Auth, trip membership roles, and Realtime
-- Turf.js for GeoJSON route utilities
-- ExifReader for client-side photo metadata parsing
+- **Demo mode** — zero config. With no Supabase keys set, the app loads bundled
+  sample data so you can explore the UI immediately. (A Mapbox token is still
+  needed for map tiles.)
+- **Supabase mode** — set the Supabase URL + anon key and the app becomes a
+  real multi-user app backed by Postgres, Storage, Auth, row-level security,
+  and Realtime.
 
-## Local setup
+## Quick start
 
 ```bash
 npm install
-cp .env.example .env.local
-npm run dev
+cp .env.example .env.local   # add at least NEXT_PUBLIC_MAPBOX_TOKEN
+npm run dev                  # http://localhost:3000
 ```
 
-Open http://localhost:3000.
+Leave the Supabase variables blank to stay in demo mode. To force demo mode even
+when Supabase keys are present, set `NEXT_PUBLIC_LOCAL_DEMO_MODE=1` — it only
+takes effect on `localhost`/`127.0.0.1` and is ignored everywhere else.
 
-The app runs in local demo mode if Supabase variables are missing. A Mapbox token is required for the live map tiles.
-Set `NEXT_PUBLIC_LOCAL_DEMO_MODE=1` to force demo mode on localhost even when Supabase variables are present; this is ignored away from localhost.
+## Stack
+
+- **Next.js** (App Router) + **TypeScript**
+- **Tailwind CSS**
+- **Mapbox GL JS** — `outdoors-v12` style centered on Reine/Lofoten
+- **Supabase** — Postgres, Storage, Auth, membership roles, RLS, Realtime
+- **Turf.js** — GeoJSON route/distance utilities
+- **ExifReader** — client-side photo metadata parsing
+- **Vitest** + **GitHub Actions** — unit tests and CI
 
 ## Environment variables
 
-```bash
-NEXT_PUBLIC_MAPBOX_TOKEN=
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-NEXT_PUBLIC_TRIP_SLUG=lofoten-2026
-NEXT_PUBLIC_LOCAL_DEMO_MODE=
-```
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_MAPBOX_TOKEN` | Yes | Mapbox access token for map tiles |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase mode | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase mode | Supabase public anon key |
+| `NEXT_PUBLIC_TRIP_SLUG` | Yes | Which trip to load (default `lofoten-2026`) |
+| `NEXT_PUBLIC_LOCAL_DEMO_MODE` | No | Set to `1` to force demo mode on localhost |
 
-Never expose a Supabase service role key in the browser or in Vercel public environment variables.
-
-## Supabase setup
-
-Keep `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` empty to stay in local demo mode. When you are ready for shared Supabase mode:
-
-1. Create a Supabase project.
-2. In Authentication settings, enable email magic links/OTP.
-3. In SQL Editor, run `supabase/schema.sql`.
-4. In SQL Editor, run `supabase/seed.sql`.
-5. Put your project URL and anon key in `.env.local`, then start the app and sign in once with your email.
-6. In SQL Editor, edit and run `supabase/grant-member.sql` to add that email to `trip_members` as an admin.
-7. Reload the app. You should see the seeded trip while signed in as that member.
-8. Admin users can add friends from the Members panel after those friends have signed in once.
-
-`schema.sql` creates the `trip-photos` Storage bucket, grants authenticated API access, enables Realtime for collaborative tables, adds an admin-only member grant RPC, and applies RLS policies. Trip data is readable only by authenticated users in `trip_members`. Notes and photos can be created by trip members; route, day, place, and membership edits are admin-scoped.
-
-Never expose a Supabase service role key in the browser. The client app only needs the public URL and anon key.
-
-For the current testing build, `trip-photos` is configured as a public bucket so uploaded image URLs render directly in Mapbox popups. Treat uploaded test photos as shareable-by-URL until the app moves to private buckets with signed image URLs.
+All variables are `NEXT_PUBLIC_*` and shipped to the browser. **Never** put a
+Supabase service role key here or in Vercel — the client only needs the public
+URL and anon key.
 
 ## Mapbox setup
 
-Create a Mapbox access token and set `NEXT_PUBLIC_MAPBOX_TOKEN` in `.env.local`. The MVP uses the `outdoors-v12` style centered around Reine/Lofoten. The map is structured so a future 3D terrain toggle can add a raster DEM source and call `setTerrain` without replacing the app architecture.
+Create a Mapbox access token and set `NEXT_PUBLIC_MAPBOX_TOKEN`. The map is
+structured so a future 3D terrain toggle can add a raster DEM source and call
+`setTerrain` without reworking the architecture.
 
-## Features included
+## Supabase setup
 
-- Full-screen responsive map layout
-- Desktop sidebar and mobile bottom sheet controls
-- Placeholder trip days and day filtering
-- GeoJSON route rendering
-- Photo, note, and place marker layers with popups
-- Add-note flow using map clicks/taps for location
-- Upload-photo flow with image validation, EXIF GPS/timestamp extraction, manual map placement fallback, Supabase Storage upload, and Postgres metadata insert
-- Supabase Realtime subscriptions for photos, notes, places, and route segments
-- Demo fallback data when Supabase is not configured
+Keep the Supabase variables empty to stay in demo mode. To enable shared mode:
 
-## Useful commands
+1. Create a Supabase project.
+2. In **Authentication**, enable email magic links / OTP.
+3. In the **SQL Editor**, run `supabase/schema.sql`, then `supabase/seed.sql`.
+4. Put the project URL and anon key in `.env.local`, start the app, and sign in
+   once with your email.
+5. Edit `supabase/grant-member.sql` with your email and run it to add yourself
+   to `trip_members` as an admin.
+6. Reload — you should see the seeded trip as a signed-in member.
+7. Admins can add friends from the Members panel after each friend has signed in
+   once.
+
+### What the schema sets up
+
+`schema.sql` creates the trip data model (`trips`, `days`, `route_segments`,
+`photos`, `notes`, `places`, `trip_members`), the `trip-photos` Storage bucket,
+an admin-only member-grant RPC, Realtime publication for the collaborative
+tables, and RLS policies:
+
+- **Reads** are restricted to authenticated users who are in `trip_members`.
+- **Notes and photos** can be created by any member; each row is updatable and
+  deletable by its owner or a trip admin.
+- **Trips, days, routes, places, and membership** are admin-scoped.
+
+### Photo storage privacy
+
+For this build, `trip-photos` is a **public** bucket so image URLs render
+directly in Mapbox popups. Because the bucket is public, anyone with an object's
+URL can view it regardless of the table-level read policies. Treat uploaded
+photos as **shareable-by-URL** until the app moves to private buckets with
+signed URLs (see roadmap).
+
+## Deploying to Vercel
+
+The app deploys as a standard Next.js project — Vercel runs `next build`
+automatically. Your CI also validates a production build on every PR.
+
+1. **Push to GitHub** (already done if you cloned this repo).
+2. **Import the repo in Vercel** (New Project → import).
+3. **Add environment variables** in Project Settings → Environment Variables:
+
+   ```bash
+   NEXT_PUBLIC_MAPBOX_TOKEN=
+   NEXT_PUBLIC_SUPABASE_URL=
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=
+   NEXT_PUBLIC_TRIP_SLUG=lofoten-2026
+   ```
+
+   (Omit the Supabase pair to deploy a public demo-mode build.)
+4. **Point Supabase Auth at the deployment** under Authentication → URL
+   Configuration:
+   - Site URL: `https://your-app.vercel.app`
+   - Redirect URLs: `https://your-app.vercel.app/**` (keep
+     `http://localhost:3000/**` while developing locally)
+5. **Run the SQL** if you haven't: `supabase/schema.sql`, then
+   `supabase/seed.sql`.
+6. **Sign in once** from the deployed app, then run `supabase/grant-member.sql`
+   for your email and reload.
+7. **Smoke test:**
+   - Signed-out visitors see the sign-in panel (Supabase mode).
+   - Your member account loads the seeded trip; a non-member cannot.
+   - A note saves and survives reload.
+   - A small photo uploads, renders on the map, and survives reload.
+   - An admin can add a signed-in friend from the Members panel.
+   - Realtime updates appear in a second browser session.
+
+Before sharing beyond a small test group: tighten photo privacy (private bucket
++ signed URLs), add a proper member-invitation flow, and verify RLS with
+separate member and non-member accounts.
+
+## Project structure
+
+```
+app/            Next.js App Router entry (single-page map UI in page.tsx)
+components/     Map view, layers, sidebar/mobile sheet, upload/note/route panels,
+                admin data panel, legend
+lib/            exif (EXIF parsing), photo-processing (downscale + thumbnails),
+                geo (GeoJSON helpers), supabase (browser client), utils
+                — with co-located *.test.ts suites
+supabase/       schema.sql, seed.sql, grant-member.sql
+types/          shared trip data types
+```
+
+## Development
 
 ```bash
-npm run dev
-npm run typecheck
-npm run lint
-npm run test          # run the unit suite once
-npm run test:watch    # re-run on change while developing
-npm run test:coverage # unit suite with a coverage report
-npm run build
-npm run ci            # lint + typecheck + test (what CI runs)
+npm run dev            # local dev server
+npm run lint           # ESLint
+npm run typecheck      # next typegen + tsc --noEmit
+npm run test           # Vitest unit suite (one-off)
+npm run test:watch     # Vitest in watch mode
+npm run test:coverage  # unit suite with a coverage report
+npm run build          # production build
+npm run ci             # lint + typecheck + test (mirrors CI)
 ```
 
 Unit tests live next to the code they cover (`lib/*.test.ts`) and run under
 [Vitest](https://vitest.dev). GitHub Actions runs `lint`, `typecheck`, `test`,
-and `build` on every push and pull request to `main` (see
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+and a demo-mode `build` on every push and pull request to `main`
+(see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
-## Deploying to Vercel
+## Features
 
-This app is ready for a test deployment once Mapbox and Supabase are configured.
+- Full-screen responsive map with a desktop sidebar and a mobile bottom sheet
+- Trip-day filtering over a seeded itinerary, with admin-editable day details
+- Route segments (ferry / bus / other modes) rendered and styled from GeoJSON
+- Photo, note, and place marker layers with popups and a map legend
+- Add-note flow that uses a map click/tap for location
+- Photo upload pipeline:
+  - bulk queue with per-photo review and day assignment
+  - client-side EXIF GPS + timestamp extraction
+  - image downscaling and thumbnail generation before upload
+  - manual map placement, or automatic placement along the day's route, when no
+    geotag is present
+  - retryable failures and storage cleanup when a database insert fails
+- Admin tools: draw/import route segments, edit trip/day/route/place/photo data,
+  and manage membership (admin-only grant RPC)
+- Supabase Realtime for photos, notes, places, and route segments
+- Row-level security: member-scoped reads, owner/admin writes
+- Demo fallback data when Supabase is not configured
 
-1. Push the repository to GitHub.
-2. Import it in Vercel.
-3. Add these environment variables in Vercel Project Settings:
+## Roadmap
 
-```bash
-NEXT_PUBLIC_MAPBOX_TOKEN=
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-NEXT_PUBLIC_TRIP_SLUG=lofoten-2026
-```
-
-4. In Supabase, add the deployed URL to Authentication > URL Configuration:
-   - Site URL: `https://your-vercel-app.vercel.app`
-   - Redirect URLs: `https://your-vercel-app.vercel.app/**`
-   - Keep `http://localhost:3000/**` while testing locally.
-5. Run `supabase/schema.sql`, then `supabase/seed.sql`.
-6. Sign in once from the deployed app with your email.
-7. Edit `supabase/grant-member.sql`, run it for that email, then reload the deployed app.
-8. Smoke test:
-   - Signed-out visitors see the sign-in panel in Supabase mode.
-   - Your member account can load the seeded trip.
-   - A non-member account cannot load trip data.
-   - Notes save and appear after reload.
-   - A small test photo uploads, renders on the map, and appears after reload.
-   - An admin can add a signed-in friend from the Members panel.
-   - Realtime updates appear in another browser session.
-
-Before sharing beyond a small test group, tighten photo privacy, add a member invitation/admin flow, and test RLS with separate member and non-member users.
-
-## Next-step roadmap
-
-- Deploy a test Vercel build and verify Supabase auth redirects, RLS, Storage uploads, and Realtime.
-- Move photo Storage from public URLs to private signed URLs before wider sharing.
-- Expand member management with pending invites or email notifications.
-- Generate thumbnails and optionally compress large photos before upload.
-- Add route import from GPX/KML.
-- Add offline-friendly drafts for notes and uploads.
-- Add Mapbox 3D terrain/flyover scenic mode.
-- Add comments/reactions and richer day journal entries.
+- Move photo Storage from public URLs to private signed URLs before wider
+  sharing
+- Expand member management with pending invites or email notifications
+- Extend test coverage to the EXIF File-reading and canvas/thumbnail paths
+- Add route import from GPX/KML
+- Add offline-friendly drafts for notes and uploads
+- Add a Mapbox 3D terrain / flyover scenic mode
+- Add comments/reactions and richer day journal entries
