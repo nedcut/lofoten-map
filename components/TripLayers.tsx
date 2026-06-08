@@ -15,6 +15,37 @@ function escapeHtml(value: unknown) {
     .replaceAll("'", "&#039;");
 }
 
+function canUseStyle(map: mapboxgl.Map) {
+  try {
+    return Boolean(map.getStyle());
+  } catch {
+    return false;
+  }
+}
+
+function getSource(map: mapboxgl.Map, id: string) {
+  if (!canUseStyle(map)) return undefined;
+  try {
+    return map.getSource(id);
+  } catch {
+    return undefined;
+  }
+}
+
+function hasLayer(map: mapboxgl.Map, id: string) {
+  if (!canUseStyle(map)) return false;
+  try {
+    return Boolean(map.getLayer(id));
+  } catch {
+    return false;
+  }
+}
+
+function setLayerVisibility(map: mapboxgl.Map, id: string, visible: boolean) {
+  if (!hasLayer(map, id)) return;
+  map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+}
+
 type Props = {
   map: mapboxgl.Map | null;
   routes: RouteSegment[];
@@ -32,44 +63,52 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
 
   useEffect(() => {
     if (!map) return;
+    let cancelled = false;
 
     const addOrUpdate = () => {
-      if (!map.getSource("routes")) {
+      if (cancelled || !canUseStyle(map)) return;
+
+      if (!getSource(map, "routes")) {
         map.addSource("routes", { type: "geojson", data: routeData });
         map.addLayer({ id: "routes-shadow", type: "line", source: "routes", paint: { "line-color": "#26423b", "line-width": 8, "line-opacity": 0.28 } });
         map.addLayer({ id: "routes-line", type: "line", source: "routes", paint: { "line-color": ["match", ["get", "mode"], "ferry", "#2b8aa0", "bus", "#d0872f", "#0f766e"], "line-width": 4, "line-opacity": 0.95 } });
       } else {
-        (map.getSource("routes") as mapboxgl.GeoJSONSource).setData(routeData);
+        (getSource(map, "routes") as mapboxgl.GeoJSONSource).setData(routeData);
       }
 
-      if (!map.getSource("photos")) {
+      if (!getSource(map, "photos")) {
         map.addSource("photos", { type: "geojson", data: photoData });
         map.addLayer({ id: "photos-circle", type: "circle", source: "photos", paint: { "circle-radius": 9, "circle-color": "#fffdf6", "circle-stroke-width": 4, "circle-stroke-color": "#e7a13d" } });
       } else {
-        (map.getSource("photos") as mapboxgl.GeoJSONSource).setData(photoData);
+        (getSource(map, "photos") as mapboxgl.GeoJSONSource).setData(photoData);
       }
 
-      if (!map.getSource("notes")) {
+      if (!getSource(map, "notes")) {
         map.addSource("notes", { type: "geojson", data: noteData });
         map.addLayer({ id: "notes-circle", type: "circle", source: "notes", paint: { "circle-radius": 8, "circle-color": "#f6d28f", "circle-stroke-width": 3, "circle-stroke-color": "#7c4a14" } });
       } else {
-        (map.getSource("notes") as mapboxgl.GeoJSONSource).setData(noteData);
+        (getSource(map, "notes") as mapboxgl.GeoJSONSource).setData(noteData);
       }
 
-      if (!map.getSource("places")) {
+      if (!getSource(map, "places")) {
         map.addSource("places", { type: "geojson", data: placeData });
         map.addLayer({ id: "places-circle", type: "circle", source: "places", paint: { "circle-radius": 8, "circle-color": "#c8e4d4", "circle-stroke-width": 3, "circle-stroke-color": "#0f5f55" } });
       } else {
-        (map.getSource("places") as mapboxgl.GeoJSONSource).setData(placeData);
+        (getSource(map, "places") as mapboxgl.GeoJSONSource).setData(placeData);
       }
 
-      for (const id of ["routes-shadow", "routes-line"]) map.setLayoutProperty(id, "visibility", visibility.routes ? "visible" : "none");
-      map.setLayoutProperty("photos-circle", "visibility", visibility.photos ? "visible" : "none");
-      for (const id of ["notes-circle", "places-circle"]) map.setLayoutProperty(id, "visibility", visibility.notes ? "visible" : "none");
+      for (const id of ["routes-shadow", "routes-line"]) setLayerVisibility(map, id, visibility.routes);
+      setLayerVisibility(map, "photos-circle", visibility.photos);
+      for (const id of ["notes-circle", "places-circle"]) setLayerVisibility(map, id, visibility.notes);
     };
 
     if (map.isStyleLoaded()) addOrUpdate();
     else map.once("load", addOrUpdate);
+
+    return () => {
+      cancelled = true;
+      map.off("load", addOrUpdate);
+    };
   }, [map, noteData, photoData, placeData, routeData, visibility]);
 
   useEffect(() => {

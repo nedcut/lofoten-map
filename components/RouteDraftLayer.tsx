@@ -14,6 +14,32 @@ const sourceId = "route-draft";
 const lineLayerId = "route-draft-line";
 const pointLayerId = "route-draft-points";
 
+function canUseStyle(map: mapboxgl.Map) {
+  try {
+    return Boolean(map.getStyle());
+  } catch {
+    return false;
+  }
+}
+
+function getLayer(map: mapboxgl.Map, layerId: string) {
+  if (!canUseStyle(map)) return undefined;
+  try {
+    return map.getLayer(layerId);
+  } catch {
+    return undefined;
+  }
+}
+
+function getSource(map: mapboxgl.Map, id: string) {
+  if (!canUseStyle(map)) return undefined;
+  try {
+    return map.getSource(id);
+  } catch {
+    return undefined;
+  }
+}
+
 function draftFeatureCollection(points: LngLat[]): FeatureCollection<LineString | Point> {
   const pointFeatures: Feature<Point>[] = points.map((point, index) => ({
     type: "Feature",
@@ -40,9 +66,11 @@ export function RouteDraftLayer({ map, points }: Props) {
 
   useEffect(() => {
     if (!map) return;
+    let cancelled = false;
 
     const addOrUpdate = () => {
-      if (!map.getSource(sourceId)) {
+      if (cancelled || !canUseStyle(map)) return;
+      if (!getSource(map, sourceId)) {
         map.addSource(sourceId, { type: "geojson", data: draftData });
         map.addLayer({
           id: lineLayerId,
@@ -69,20 +97,26 @@ export function RouteDraftLayer({ map, points }: Props) {
           },
         });
       } else {
-        (map.getSource(sourceId) as mapboxgl.GeoJSONSource).setData(draftData);
+        (getSource(map, sourceId) as mapboxgl.GeoJSONSource).setData(draftData);
       }
     };
 
     if (map.isStyleLoaded()) addOrUpdate();
     else map.once("load", addOrUpdate);
+
+    return () => {
+      cancelled = true;
+      map.off("load", addOrUpdate);
+    };
   }, [draftData, map]);
 
   useEffect(() => {
     return () => {
       if (!map) return;
-      if (map.getLayer(pointLayerId)) map.removeLayer(pointLayerId);
-      if (map.getLayer(lineLayerId)) map.removeLayer(lineLayerId);
-      if (map.getSource(sourceId)) map.removeSource(sourceId);
+      if (!canUseStyle(map)) return;
+      if (getLayer(map, pointLayerId)) map.removeLayer(pointLayerId);
+      if (getLayer(map, lineLayerId)) map.removeLayer(lineLayerId);
+      if (getSource(map, sourceId)) map.removeSource(sourceId);
     };
   }, [map]);
 
