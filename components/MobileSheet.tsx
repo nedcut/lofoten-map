@@ -27,10 +27,10 @@ function dayLabel(selectedDay: Day | null): string {
 // The prominent line: how much is on the map right now. Tweak to taste — e.g.
 // add routes, or change the empty-state copy.
 function countsLabel(counts: PeekCounts): string {
-  const notes = counts.notes + counts.places;
+  const journalPins = counts.notes + counts.places;
   const parts = [];
   if (counts.photos) parts.push(pluralize(counts.photos, "photo"));
-  if (notes) parts.push(pluralize(notes, "note"));
+  if (journalPins) parts.push(pluralize(journalPins, "journal pin"));
   return parts.length > 0 ? parts.join(" · ") : "No pins on the map yet";
 }
 
