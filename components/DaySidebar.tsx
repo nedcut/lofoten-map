@@ -1,6 +1,7 @@
 "use client";
 
-import { CalendarDays, Camera, FileText, Loader2, Map, Mountain, Route, UserPlus, Users } from "lucide-react";
+import { CalendarDays, Camera, FileText, Loader2, Map, Mountain, PenLine, Route, UserPlus, Users } from "lucide-react";
+import { AdminDataPanel, type AdminDataProps } from "@/components/AdminDataPanel";
 import { cn } from "@/lib/utils";
 import type { Day, TripMember } from "@/types/trip";
 
@@ -14,6 +15,8 @@ export type SidebarProps = {
   onLayerVisibilityChange: (next: LayerVisibility) => void;
   onStartPhotoUpload: () => void;
   onStartAddNote: () => void;
+  onStartRouteDraw?: () => void;
+  adminData?: AdminDataProps | null;
   memberAdmin?: MemberAdminProps | null;
 };
 
@@ -36,7 +39,7 @@ export function SidebarHeader() {
   );
 }
 
-export function QuickActions({ onStartPhotoUpload, onStartAddNote }: Pick<SidebarProps, "onStartPhotoUpload" | "onStartAddNote">) {
+export function QuickActions({ onStartPhotoUpload, onStartAddNote, onStartRouteDraw }: Pick<SidebarProps, "onStartPhotoUpload" | "onStartAddNote" | "onStartRouteDraw">) {
   return (
     <div className="grid grid-cols-2 gap-2">
       <button
@@ -51,6 +54,14 @@ export function QuickActions({ onStartPhotoUpload, onStartAddNote }: Pick<Sideba
       >
         <FileText className="h-4 w-4" /> Add note
       </button>
+      {onStartRouteDraw ? (
+        <button
+          onClick={onStartRouteDraw}
+          className="col-span-2 flex items-center justify-center gap-2 rounded-xl border border-teal-700/25 bg-teal-50 px-4 py-3 text-sm font-bold text-teal-950 transition-all duration-150 hover:-translate-y-0.5 hover:border-teal-700/40 hover:bg-teal-100 hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:translate-y-0 active:scale-[0.98]"
+        >
+          <PenLine className="h-4 w-4" /> Draw route
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -148,9 +159,10 @@ export function DaySidebar(props: SidebarProps) {
   return (
     <aside className="flex h-full max-h-[78dvh] min-h-0 flex-col gap-4 overflow-y-auto rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.94)] p-4 text-stone-950 shadow-[0_24px_80px_rgba(46,61,54,0.2)] backdrop-blur-xl md:max-h-none md:w-96 md:p-5">
       <SidebarHeader />
-      <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} />
+      <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} onStartRouteDraw={props.onStartRouteDraw} />
       <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} />
       <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} />
+      {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
       {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}
     </aside>
   );

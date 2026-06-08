@@ -92,5 +92,5 @@ export type TripData = {
   members: TripMember[];
 };
 
-export type MapClickMode = "idle" | "add-note" | "place-photo";
+export type MapClickMode = "idle" | "add-note" | "place-photo" | "draw-route";
 export type LngLat = { lng: number; lat: number };

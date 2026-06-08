@@ -2,6 +2,7 @@
 
 import { ChevronUp } from "lucide-react";
 import { useState } from "react";
+import { AdminDataPanel } from "@/components/AdminDataPanel";
 import { DayList, LayersPanel, MemberAdminPanel, QuickActions, type SidebarProps } from "@/components/DaySidebar";
 import { cn } from "@/lib/utils";
 import type { Day } from "@/types/trip";
@@ -74,7 +75,7 @@ export function MobileSheet(props: MobileSheetProps) {
 
           {/* Quick actions stay reachable even when collapsed. */}
           <div className="px-4 pb-3">
-            <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} />
+            <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} onStartRouteDraw={props.onStartRouteDraw} />
           </div>
 
           {/* Expandable region animates via grid-template-rows 0fr -> 1fr. */}
@@ -83,6 +84,7 @@ export function MobileSheet(props: MobileSheetProps) {
               <div className="max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
                 <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} />
                 <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} />
+                {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
                 {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}
               </div>
             </div>

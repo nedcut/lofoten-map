@@ -2,18 +2,22 @@
 
 import dynamic from "next/dynamic";
 import mapboxgl from "mapbox-gl";
+import { length } from "@turf/turf";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import type { LineString } from "geojson";
 import type { User } from "@supabase/supabase-js";
 import { AlertCircle, Loader2, LogIn, Mail, ShieldCheck, Sparkles, X } from "lucide-react";
 import { AddNotePanel } from "@/components/AddNotePanel";
 import { DaySidebar } from "@/components/DaySidebar";
+import { ManualRoutePanel } from "@/components/ManualRoutePanel";
 import { MapLegend } from "@/components/MapLegend";
 import { MobileSheet } from "@/components/MobileSheet";
+import { RouteDraftLayer } from "@/components/RouteDraftLayer";
 import { TripLayers } from "@/components/TripLayers";
 import { UploadPhotoPanel, type PhotoUploadItemInput } from "@/components/UploadPhotoPanel";
 import { PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import type { Day, LngLat, MapClickMode, Note, Place, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
+import type { Day, LngLat, MapClickMode, Note, Place, RouteMode, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
 
@@ -42,6 +46,16 @@ async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T
   await Promise.all(runners);
 }
 
+function routeGeometry(points: LngLat[]): LineString {
+  return { type: "LineString", coordinates: points.map((point) => [point.lng, point.lat]) };
+}
+
+function routeDistanceMeters(points: LngLat[]) {
+  if (points.length < 2) return 0;
+  const geometry = routeGeometry(points);
+  return Math.round(length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" }) * 1000);
+}
+
 export default function Home() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [data, setData] = useState<TripData>(() => (supabase ? emptyData : demoData));
@@ -51,12 +65,15 @@ export default function Home() {
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [memberMessage, setMemberMessage] = useState<string | null>(null);
   const [memberSaving, setMemberSaving] = useState(false);
+  const [adminDataMessage, setAdminDataMessage] = useState<string | null>(null);
+  const [adminDataSaving, setAdminDataSaving] = useState(false);
   const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
   const [layerVisibility, setLayerVisibility] = useState({ photos: true, notes: true, routes: true });
   const [clickMode, setClickMode] = useState<MapClickMode>("idle");
   const [pendingCoordinate, setPendingCoordinate] = useState<LngLat | null>(null);
+  const [routeDraftPoints, setRouteDraftPoints] = useState<LngLat[]>([]);
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
-  const [panel, setPanel] = useState<"photo" | "note" | null>(null);
+  const [panel, setPanel] = useState<"photo" | "note" | "route" | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(Boolean(supabase));
   const [error, setError] = useState<string | null>(null);
@@ -191,20 +208,57 @@ export default function Home() {
   }, [data, selectedDayId]);
 
   const currentMember = useMemo(() => data.members.find((member) => member.user_id === user?.id) ?? null, [data.members, user?.id]);
+  const isAdmin = !supabase || currentMember?.role === "admin";
   const memberAdmin = currentMember?.role === "admin"
     ? { members: data.members, message: memberMessage, isSaving: memberSaving, onGrantMember: grantMember }
     : null;
+  const routeDraftDistance = useMemo(() => routeDistanceMeters(routeDraftPoints), [routeDraftPoints]);
+  const adminData = isAdmin
+    ? {
+      trip: data.trip,
+      days: data.days,
+      routes: data.routeSegments,
+      notes: data.notes,
+      places: data.places,
+      photos: data.photos,
+      message: adminDataMessage,
+      isSaving: adminDataSaving,
+      onUpdateTrip: updateTrip,
+      onCreateDay: createDay,
+      onUpdateDay: updateDay,
+      onUpdateRoute: updateRoute,
+      onUpdateNote: updateNote,
+      onUpdatePlace: updatePlace,
+      onUpdatePhoto: updatePhoto,
+      onDeleteItem: deleteDataItem,
+    }
+    : null;
 
-  function startPanel(next: "photo" | "note") {
+  const handleCoordinatePick = useCallback((coordinate: LngLat) => {
+    if (clickMode === "draw-route") {
+      setRouteDraftPoints((current) => [...current, coordinate]);
+      return;
+    }
+    setPendingCoordinate(coordinate);
+  }, [clickMode]);
+
+  function startPanel(next: "photo" | "note" | "route") {
     setPanel(next);
     setPendingCoordinate(null);
-    setClickMode(next === "photo" ? "place-photo" : "add-note");
+    if (next === "route") {
+      setRouteDraftPoints([]);
+      setClickMode("draw-route");
+    } else {
+      setRouteDraftPoints([]);
+      setClickMode(next === "photo" ? "place-photo" : "add-note");
+    }
   }
 
   function closePanel() {
     setPanel(null);
     setClickMode("idle");
     setPendingCoordinate(null);
+    setRouteDraftPoints([]);
   }
 
   async function saveNote(input: { body: string; authorName: string; dayId: string | null }) {
@@ -298,6 +352,203 @@ export default function Home() {
     closePanel();
   }
 
+  async function saveRoute(input: { name: string; dayId: string | null; mode: RouteMode }) {
+    if (routeDraftPoints.length < 2 || !data.trip) return;
+    if (supabase && !isAdmin) {
+      setError("Only trip admins can save routes.");
+      return;
+    }
+
+    setSaving(true);
+    const geometry = routeGeometry(routeDraftPoints);
+    const row = {
+      trip_id: data.trip.id,
+      day_id: input.dayId,
+      name: input.name || "Manual route",
+      source: "manual",
+      mode: input.mode,
+      geometry_geojson: geometry,
+      distance_meters: routeDistanceMeters(routeDraftPoints),
+      elevation_gain_meters: null,
+    };
+
+    if (supabase) {
+      if (!user) {
+        setError("Sign in before saving routes to Supabase.");
+        setSaving(false);
+        return;
+      }
+      const { error: insertError } = await supabase.from("route_segments").insert(row);
+      if (insertError) setError(insertError.message);
+      else await loadData();
+    } else {
+      setData((current) => ({
+        ...current,
+        routeSegments: [...current.routeSegments, { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }],
+      }));
+    }
+
+    setSaving(false);
+    closePanel();
+  }
+
+  async function updateTrip(input: { title: string; description: string | null; start_date: string | null; end_date: string | null }) {
+    if (!data.trip) return;
+    setAdminDataSaving(true);
+    setAdminDataMessage(null);
+    if (supabase) {
+      const { error: updateError } = await supabase.from("trips").update(input).eq("id", data.trip.id);
+      if (updateError) setAdminDataMessage(updateError.message);
+      else {
+        setAdminDataMessage("Trip updated.");
+        await loadData();
+      }
+    } else {
+      setData((current) => ({ ...current, trip: current.trip ? { ...current.trip, ...input } : current.trip }));
+      setAdminDataMessage("Trip updated.");
+    }
+    setAdminDataSaving(false);
+  }
+
+  async function updateDay(dayId: string, input: { day_number: number; date: string | null; title: string | null; summary: string | null }) {
+    if (!data.trip) return;
+    setAdminDataSaving(true);
+    setAdminDataMessage(null);
+    if (supabase) {
+      const { error: updateError } = await supabase.from("days").update(input).eq("id", dayId).eq("trip_id", data.trip.id);
+      if (updateError) setAdminDataMessage(updateError.message);
+      else {
+        setAdminDataMessage("Day updated.");
+        await loadData();
+      }
+    } else {
+      setData((current) => ({ ...current, days: current.days.map((day) => day.id === dayId ? { ...day, ...input } : day).sort((a, b) => a.day_number - b.day_number) }));
+      setAdminDataMessage("Day updated.");
+    }
+    setAdminDataSaving(false);
+  }
+
+  async function createDay(input: { day_number: number; date: string | null; title: string | null; summary: string | null }) {
+    if (!data.trip) return;
+    setAdminDataSaving(true);
+    setAdminDataMessage(null);
+    const row = { ...input, trip_id: data.trip.id };
+    if (supabase) {
+      const { error: insertError } = await supabase.from("days").insert(row);
+      if (insertError) setAdminDataMessage(insertError.message);
+      else {
+        setAdminDataMessage("Day added.");
+        await loadData();
+      }
+    } else {
+      setData((current) => ({
+        ...current,
+        days: [...current.days, { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }].sort((a, b) => a.day_number - b.day_number),
+      }));
+      setAdminDataMessage("Day added.");
+    }
+    setAdminDataSaving(false);
+  }
+
+  async function updateRoute(routeId: string, input: { day_id: string | null; name: string | null; mode: RouteMode; source: string | null }) {
+    if (!data.trip) return;
+    setAdminDataSaving(true);
+    setAdminDataMessage(null);
+    if (supabase) {
+      const { error: updateError } = await supabase.from("route_segments").update(input).eq("id", routeId).eq("trip_id", data.trip.id);
+      if (updateError) setAdminDataMessage(updateError.message);
+      else {
+        setAdminDataMessage("Route updated.");
+        await loadData();
+      }
+    } else {
+      setData((current) => ({ ...current, routeSegments: current.routeSegments.map((route) => route.id === routeId ? { ...route, ...input } : route) }));
+      setAdminDataMessage("Route updated.");
+    }
+    setAdminDataSaving(false);
+  }
+
+  async function updateNote(noteId: string, input: { day_id: string | null; author_name: string | null; body: string }) {
+    if (!data.trip) return;
+    setAdminDataSaving(true);
+    setAdminDataMessage(null);
+    if (supabase) {
+      const { error: updateError } = await supabase.from("notes").update(input).eq("id", noteId).eq("trip_id", data.trip.id);
+      if (updateError) setAdminDataMessage(updateError.message);
+      else {
+        setAdminDataMessage("Note updated.");
+        await loadData();
+      }
+    } else {
+      setData((current) => ({ ...current, notes: current.notes.map((note) => note.id === noteId ? { ...note, ...input } : note) }));
+      setAdminDataMessage("Note updated.");
+    }
+    setAdminDataSaving(false);
+  }
+
+  async function updatePlace(placeId: string, input: { day_id: string | null; name: string; place_type: string | null; description: string | null; lat: number; lng: number }) {
+    if (!data.trip) return;
+    setAdminDataSaving(true);
+    setAdminDataMessage(null);
+    if (supabase) {
+      const { error: updateError } = await supabase.from("places").update(input).eq("id", placeId).eq("trip_id", data.trip.id);
+      if (updateError) setAdminDataMessage(updateError.message);
+      else {
+        setAdminDataMessage("Place updated.");
+        await loadData();
+      }
+    } else {
+      setData((current) => ({ ...current, places: current.places.map((place) => place.id === placeId ? { ...place, ...input } : place) }));
+      setAdminDataMessage("Place updated.");
+    }
+    setAdminDataSaving(false);
+  }
+
+  async function updatePhoto(photoId: string, input: { day_id: string | null; uploader_name: string | null; caption: string | null }) {
+    if (!data.trip) return;
+    setAdminDataSaving(true);
+    setAdminDataMessage(null);
+    if (supabase) {
+      const { error: updateError } = await supabase.from("photos").update(input).eq("id", photoId).eq("trip_id", data.trip.id);
+      if (updateError) setAdminDataMessage(updateError.message);
+      else {
+        setAdminDataMessage("Photo updated.");
+        await loadData();
+      }
+    } else {
+      setData((current) => ({ ...current, photos: current.photos.map((photo) => photo.id === photoId ? { ...photo, ...input } : photo) }));
+      setAdminDataMessage("Photo updated.");
+    }
+    setAdminDataSaving(false);
+  }
+
+  async function deleteDataItem(table: "days" | "route_segments" | "notes" | "places" | "photos", id: string) {
+    if (!data.trip) return;
+    setAdminDataSaving(true);
+    setAdminDataMessage(null);
+    if (supabase) {
+      const { error: deleteError } = await supabase.from(table).delete().eq("id", id).eq("trip_id", data.trip.id);
+      if (deleteError) setAdminDataMessage(deleteError.message);
+      else {
+        setAdminDataMessage("Item deleted.");
+        await loadData();
+      }
+    } else {
+      setData((current) => ({
+        ...current,
+        days: table === "days" ? current.days.filter((item) => item.id !== id) : current.days,
+        notes: table === "notes" ? current.notes.filter((item) => item.id !== id) : current.notes.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
+        places: table === "places" ? current.places.filter((item) => item.id !== id) : current.places.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
+        photos: table === "photos" ? current.photos.filter((item) => item.id !== id) : current.photos.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
+        routeSegments: table === "route_segments"
+          ? current.routeSegments.filter((item) => item.id !== id)
+          : current.routeSegments.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
+      }));
+      setAdminDataMessage("Item deleted.");
+    }
+    setAdminDataSaving(false);
+  }
+
   return (
     <main className="relative h-dvh overflow-hidden bg-[#e7efe8] text-stone-950">
       <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(135deg,rgba(255,253,246,0.92),rgba(211,229,222,0.5)_44%,rgba(234,198,132,0.26))]" />
@@ -311,18 +562,20 @@ export default function Home() {
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden min-h-0 md:block"><DaySidebar days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} memberAdmin={memberAdmin} /></div>
-        <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={setMap} onCoordinatePick={setPendingCoordinate}>
+        <div className="z-10 hidden min-h-0 md:block"><DaySidebar days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} /></div>
+        <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={setMap} onCoordinatePick={handleCoordinatePick}>
           <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} />
+          <RouteDraftLayer map={map} points={routeDraftPoints} />
           <MapLegend visibility={layerVisibility} />
         </MapView>
       </div>
-      {!panel ? <MobileSheet days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} counts={{ photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} memberAdmin={memberAdmin} /> : null}
+      {!panel ? <MobileSheet days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={() => startPanel("photo")} onStartAddNote={() => startPanel("note")} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} counts={{ photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} /> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
       {supabase && !authLoading && !user ? <AuthPanel message={authMessage} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} /> : null}
       {panel === "note" ? <AddNotePanel days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
+      {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
     </main>
   );
 }

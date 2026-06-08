@@ -19,6 +19,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [tokenMissing, setTokenMissing] = useState(false);
+  const clickPrompt = clickMode === "draw-route" ? "Tap the map to add route points" : "Tap the map to set the location";
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -97,7 +98,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-600/60" />
             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-teal-700" />
           </span>
-          <MapPin className="h-4 w-4" /> Tap the map to set the location
+          <MapPin className="h-4 w-4" /> {clickPrompt}
         </div>
       ) : null}
       {children}
