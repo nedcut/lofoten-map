@@ -365,6 +365,8 @@ export default function Home() {
     setSaving(true);
     setError(null);
     setNotice(null);
+    // Uploader is the signed-in user — no name field needed in the upload flow.
+    const uploaderName = currentMember?.display_name || user?.email || "Friend";
     let didSave = false;
     const savedClientIds: string[] = [];
     const failedClientIds: string[] = [];
@@ -377,7 +379,7 @@ export default function Home() {
             trip_id: data.trip!.id,
             day_id: input.dayId,
             user_id: user?.id ?? null,
-            uploader_name: input.uploaderName || "Friend",
+            uploader_name: uploaderName,
             // Demo mode has no Storage: preview straight from local blob URLs and
             // leave the storage paths empty (never read in this branch).
             image_path: "",
@@ -443,7 +445,7 @@ export default function Home() {
             client_id: input.clientId,
             trip_id: data.trip!.id,
             day_id: input.dayId,
-            uploader_name: input.uploaderName || "Friend",
+            uploader_name: uploaderName,
             image_path: path,
             thumbnail_path: thumbnailStoragePath,
             lat: input.coordinate.lat,

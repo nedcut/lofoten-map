@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, Camera, CheckCircle2, ChevronRight, FileImage, Images, Loader2, MapPin, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { along, length as turfLength, lineString, point, pointToLineDistance } from "@turf/turf";
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -13,7 +13,6 @@ export type PhotoUploadItemInput = {
   clientId: string;
   file: File;
   caption: string;
-  uploaderName: string;
   dayId: string | null;
   coordinate: LngLat;
   exif: ExtractedExif | null;
@@ -42,9 +41,9 @@ const BATCH_OVERRIDE_IDLE = "__idle";
 const ALL_DAYS_VALUE = "__all";
 
 // The import flow is a small linear state machine. "place" is conditional — it is
-// only reachable when some photos lack a location, otherwise Review goes straight
-// to Upload. See stepFlow() for how the visible steps are derived.
-type Step = "select" | "review" | "place" | "upload";
+// only shown when some photos lack a location. Uploading is the primary action on
+// both Review and Place, so there is no separate final step.
+type Step = "select" | "review" | "place";
 
 type QueueStatus = "reading" | "ready" | "needs-location" | "invalid";
 type QueueFilter = "all" | "review" | "needs-location" | "invalid";
@@ -212,14 +211,13 @@ function locationLabel(item: QueueItem) {
 
 // Steps shown in the progress header. Place is hidden unless something needs a pin.
 function stepFlow(hasPlacement: boolean): Step[] {
-  return hasPlacement ? ["select", "review", "place", "upload"] : ["select", "review", "upload"];
+  return hasPlacement ? ["select", "review", "place"] : ["select", "review"];
 }
 
 const STEP_TITLES: Record<Step, string> = {
   select: "Add photos",
   review: "Review",
   place: "Place on map",
-  upload: "Upload",
 };
 
 async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
@@ -236,7 +234,9 @@ async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T
 export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate, isSaving, onCancel, onCoordinatePreview, onSave }: Props) {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
-  const [uploaderName, setUploaderName] = useState("");
+  // Lets the map-tap effect target the active photo without depending on
+  // activeItemId — so merely selecting a photo never triggers a coordinate write.
+  const activeItemIdRef = useRef(activeItemId);
   const [batchOverrideDayId, setBatchOverrideDayId] = useState(BATCH_OVERRIDE_IDLE);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
   const [step, setStep] = useState<Step>("select");
@@ -309,18 +309,27 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     onCoordinatePreview(null);
   }, [activeItem?.coordinate, activeItem?.id, activeItem?.status, onCoordinatePreview]);
 
-  // A genuine map tap (key differs from our echo) assigns the location manually.
   useEffect(() => {
-    if (!pendingCoordinate || !activeItemId) return;
+    activeItemIdRef.current = activeItemId;
+  }, [activeItemId]);
+
+  // A genuine map tap (key differs from our echo) assigns the location to the
+  // active photo. This must depend ONLY on pendingCoordinate — if it also reacted
+  // to activeItemId, simply selecting a photo would write a stale pending pin onto
+  // it, flipping it to "ready" and making it vanish from the needs-location list.
+  useEffect(() => {
+    if (!pendingCoordinate) return;
+    const targetId = activeItemIdRef.current;
+    if (!targetId) return;
     const nextKey = coordinateKey(pendingCoordinate);
     if (previewCoordinateKeyRef.current === nextKey) {
       previewCoordinateKeyRef.current = null;
       return;
     }
-    setItems((current) => current.map((item) => item.id === activeItemId && item.status !== "invalid" && item.status !== "reading"
+    setItems((current) => current.map((item) => item.id === targetId && item.status !== "invalid" && item.status !== "reading"
       ? { ...item, coordinate: pendingCoordinate, locationSource: "manual", status: "ready", message: "Location set from the map." }
       : item));
-  }, [activeItemId, pendingCoordinate]);
+  }, [pendingCoordinate]);
 
   // Keep the active selection valid as the filtered list changes.
   useEffect(() => {
@@ -343,7 +352,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
       setActiveItemId(next.id);
     } else {
       setPlaceMode(null);
-      setStep("upload");
+      setStep("review");
     }
   }, [placeMode, activeItem, items]);
 
@@ -427,14 +436,13 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     event.currentTarget.value = "";
   }
 
-  async function submit(formData: FormData) {
+  async function submit() {
     const readyItems = items.filter((item) => item.status === "ready" && item.coordinate);
     if (readyItems.length === 0) return;
     const result = await onSave(readyItems.map((item) => ({
       clientId: item.id,
       file: item.file,
       caption: item.caption,
-      uploaderName: String(formData.get("uploaderName") ?? "").trim(),
       dayId: item.dayId,
       coordinate: item.coordinate!,
       exif: item.exif,
@@ -509,14 +517,6 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     setStep("review");
   }
 
-  function continueFromReview() {
-    if (counts.needsLocation > 0) {
-      setStep("place");
-    } else {
-      setStep("upload");
-    }
-  }
-
   // Collapse the overlay onto a target photo so the map underneath can be tapped.
   // "single" nudges one chosen photo; "bulk" walks the whole unplaced queue.
   function startPlacing(itemId?: string, mode: "bulk" | "single" = "bulk") {
@@ -524,7 +524,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
       ?? items.find((item) => item.id === activeItemId && item.status === "needs-location")
       ?? placementItems[0];
     if (!target) {
-      setStep("upload");
+      setStep("review");
       return;
     }
     setActiveItemId(target.id);
@@ -753,35 +753,6 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
                 )}
               </div>
             ) : null}
-
-            {step === "upload" ? (
-              <div className="space-y-3">
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900">
-                  <div className="flex items-center gap-2 text-sm font-black"><CheckCircle2 className="h-4 w-4" /> {counts.ready} photo{counts.ready === 1 ? "" : "s"} ready to upload</div>
-                  {dayBuckets.length > 0 ? <div className="mt-1 text-xs text-emerald-800/80">{dayBuckets.map((bucket) => `${bucket.count} ${dayLabel(days, bucket.dayId)}`).join(" · ")}</div> : null}
-                </div>
-
-                {counts.needsLocation > 0 ? (
-                  <button type="button" onClick={() => setStep("place")} className="flex w-full items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-left text-xs font-semibold text-amber-900 transition hover:bg-amber-100">
-                    <AlertTriangle className="h-4 w-4 shrink-0" />
-                    <span className="flex-1">{counts.needsLocation} photo{counts.needsLocation === 1 ? "" : "s"} still need a location and will be skipped. Tap to place them.</span>
-                    <ChevronRight className="h-4 w-4 shrink-0" />
-                  </button>
-                ) : null}
-                {counts.invalid > 0 ? (
-                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">{counts.invalid} file{counts.invalid === 1 ? "" : "s"} can&apos;t be uploaded and will be skipped.</div>
-                ) : null}
-
-                <label className="block">
-                  <span className="mb-1 block text-xs font-bold uppercase tracking-[0.08em] text-stone-500">Your name</span>
-                  <input name="uploaderName" value={uploaderName} onChange={(event) => setUploaderName(event.target.value)} placeholder="Who's uploading?" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-                </label>
-
-                <button type="button" onClick={clearQueue} disabled={isSaving} className="flex w-full items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45">
-                  <RotateCcw className="h-3.5 w-3.5" /> Start over
-                </button>
-              </div>
-            ) : null}
           </div>
 
           {/* Sticky footer with the per-step primary action. */}
@@ -790,24 +761,19 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
               {step === "review" ? (
                 <>
                   <button type="button" onClick={clearQueue} disabled={isSaving} className="rounded-lg border border-stone-300 bg-white px-3 py-3 text-stone-600 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45" aria-label="Clear queue"><RotateCcw className="h-4 w-4" /></button>
-                  <button type="button" onClick={continueFromReview} disabled={counts.reading > 0 || counts.total === counts.invalid} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
-                    {counts.reading > 0 ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading photos…</> : counts.needsLocation > 0 ? <>Place {counts.needsLocation} photo{counts.needsLocation === 1 ? "" : "s"} <ChevronRight className="h-4 w-4" /></> : <>Continue <ChevronRight className="h-4 w-4" /></>}
+                  {counts.needsLocation > 0 ? (
+                    <button type="button" onClick={() => setStep("place")} className="flex items-center gap-1.5 rounded-lg border border-teal-700/30 bg-teal-50 px-3 py-3 text-sm font-bold text-teal-900 transition hover:bg-teal-100"><MapPin className="h-4 w-4" /> Place {counts.needsLocation}</button>
+                  ) : null}
+                  <button type="submit" disabled={counts.ready === 0 || counts.reading > 0 || isSaving} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
+                    {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</> : counts.reading > 0 ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading…</> : <><Upload className="h-4 w-4" /> Upload {counts.ready > 1 ? `${counts.ready} photos` : "photo"}</>}
                   </button>
                 </>
               ) : null}
               {step === "place" ? (
                 <>
                   <button type="button" onClick={goToReview} className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm font-bold text-stone-600 transition hover:bg-stone-50"><ArrowLeft className="h-4 w-4" /> Review</button>
-                  <button type="button" onClick={() => setStep("upload")} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99]">
-                    {placementDone ? <>Continue <ChevronRight className="h-4 w-4" /></> : <>Skip rest · upload {counts.ready} <ChevronRight className="h-4 w-4" /></>}
-                  </button>
-                </>
-              ) : null}
-              {step === "upload" ? (
-                <>
-                  <button type="button" onClick={() => setStep("review")} className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm font-bold text-stone-600 transition hover:bg-stone-50"><ArrowLeft className="h-4 w-4" /> Back</button>
-                  <button disabled={counts.ready === 0 || counts.reading > 0 || isSaving} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
-                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Upload {counts.ready > 1 ? `${counts.ready} photos` : "photo"}
+                  <button type="submit" disabled={counts.ready === 0 || isSaving} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
+                    {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</> : <><Upload className="h-4 w-4" /> Upload {counts.ready > 1 ? `${counts.ready} photos` : "photo"}</>}
                   </button>
                 </>
               ) : null}

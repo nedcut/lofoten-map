@@ -118,9 +118,21 @@ export function parseExifDate(value: string | undefined): { takenAt: string | nu
   return { takenAt: Number.isNaN(parsed.getTime()) ? null : parsed.toISOString(), takenDate };
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("EXIF read timed out")), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 export async function extractPhotoExif(file: File): Promise<ExtractedExif> {
   try {
-    const tags = (await ExifReader.load(file, { expanded: true })) as Record<string, Record<string, unknown>>;
+    // Cap the read so a single corrupt/huge file in a big batch can never hang
+    // the queue (which would otherwise leave items stuck "reading" forever).
+    const tags = (await withTimeout(ExifReader.load(file, { expanded: true }), 15000)) as Record<string, Record<string, unknown>>;
     const gps = tags.gps ?? {};
     const exif = tags.exif ?? {};
     const lat = coordinateFromExif(gps.Latitude ?? gps.GPSLatitude ?? exif.GPSLatitude, gps.LatitudeRef ?? gps.GPSLatitudeRef ?? exif.GPSLatitudeRef);
