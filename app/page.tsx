@@ -133,26 +133,33 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setNotice(null);
-    const { data: trip, error: tripError } = await supabase.from("trips").select("*").eq("slug", tripSlug).maybeSingle();
-    if (tripError || !trip) {
-      setError(tripError
-        ? `We could not load the trip right now. Try refreshing, or ask an admin to check access. ${tripError.message}`
-        : "You are signed in, but this account is not on the trip yet. Ask an admin to add you, then refresh.");
+    try {
+      const { data: trip, error: tripError } = await supabase.from("trips").select("*").eq("slug", tripSlug).maybeSingle();
+      if (tripError || !trip) {
+        setError(tripError
+          ? `We could not load the trip right now. Try refreshing, or ask an admin to check access. ${tripError.message}`
+          : "You are signed in, but this account is not on the trip yet. Ask an admin to add you, then refresh.");
+        return;
+      }
+      const [days, routes, photos, notes, places, members] = await Promise.all([
+        supabase.from("days").select("*").eq("trip_id", trip.id).order("day_number"),
+        supabase.from("route_segments").select("*").eq("trip_id", trip.id).order("created_at"),
+        supabase.from("photos").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
+        supabase.from("notes").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
+        supabase.from("places").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
+        supabase.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", trip.id).order("created_at"),
+      ]);
+      const failure = [days.error, routes.error, photos.error, notes.error, places.error, members.error].find(Boolean);
+      if (failure) {
+        setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
+      } else {
+        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: photos.data ?? [], notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[] });
+      }
+    } catch (loadError) {
+      setError(loadError instanceof Error ? `We could not sync the trip right now. Try refreshing. ${loadError.message}` : "We could not sync the trip right now. Try refreshing.");
+    } finally {
       setLoading(false);
-      return;
     }
-    const [days, routes, photos, notes, places, members] = await Promise.all([
-      supabase.from("days").select("*").eq("trip_id", trip.id).order("day_number"),
-      supabase.from("route_segments").select("*").eq("trip_id", trip.id).order("created_at"),
-      supabase.from("photos").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
-      supabase.from("notes").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
-      supabase.from("places").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
-      supabase.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", trip.id).order("created_at"),
-    ]);
-    const failure = [days.error, routes.error, photos.error, notes.error, places.error, members.error].find(Boolean);
-    if (failure) setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
-    else setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: photos.data ?? [], notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[] });
-    setLoading(false);
   }, [supabase, tripSlug, user]);
 
   useEffect(() => {
