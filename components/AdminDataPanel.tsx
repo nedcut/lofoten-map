@@ -194,7 +194,7 @@ function photoLabel(photo: Photo) {
 export function AdminDataPanel(props: AdminDataProps) {
   async function submitTrip(formData: FormData) {
     await props.onUpdateTrip({
-      title: String(formData.get("title") ?? "").trim() || "Lofoten 2026",
+      title: String(formData.get("title") ?? "").trim() || props.trip?.title || "Trip Logbook",
       description: optionalString(formData, "description"),
       start_date: optionalDate(formData, "start_date"),
       end_date: optionalDate(formData, "end_date"),

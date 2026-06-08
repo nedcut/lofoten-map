@@ -88,7 +88,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
         <div className="absolute inset-0 flex items-center justify-center bg-[#e7efe8] p-6 text-center">
           <div className="max-w-md rounded-[1.25rem] border border-stone-200 bg-[rgba(255,253,246,0.94)] p-6 shadow-2xl">
             <h2 className="font-serif text-3xl font-semibold text-stone-950">Mapbox token needed</h2>
-            <p className="mt-2 text-sm leading-6 text-stone-600">Add NEXT_PUBLIC_MAPBOX_TOKEN to your environment to load the interactive Lofoten map.</p>
+            <p className="mt-2 text-sm leading-6 text-stone-600">Add NEXT_PUBLIC_MAPBOX_TOKEN to your environment to load the interactive trip map.</p>
           </div>
         </div>
       ) : null}
