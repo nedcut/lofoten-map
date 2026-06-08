@@ -49,6 +49,15 @@ function gpsRefFromValue(value: unknown): string | null {
   return null;
 }
 
+function stringFromTag(value: unknown): string | undefined {
+  if (!value) return undefined;
+  if (typeof value === "string") return value;
+  if (!isTagValue(value)) return undefined;
+  if (typeof value.description === "string") return value.description;
+  if (typeof value.value === "string") return value.value;
+  return undefined;
+}
+
 function coordinateFromExif(value: unknown, ref: unknown): number | null {
   const direct = numberFromValue(value);
   if (direct !== null) return applyGpsRef(direct, ref);
@@ -69,9 +78,41 @@ function applyGpsRef(coordinate: number, ref: unknown): number {
   return gpsRef === "S" || gpsRef === "W" ? -Math.abs(coordinate) : coordinate;
 }
 
-function parseExifDate(value: string | undefined): { takenAt: string | null; takenDate: string | null } {
+export function parseExifDate(value: string | undefined): { takenAt: string | null; takenDate: string | null } {
   if (!value) return { takenAt: null, takenDate: null };
-  const normalized = value.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
+
+  const localDateTime = value.trim().match(/^(\d{4})[:-](\d{2})[:-](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (localDateTime) {
+    const [, year, month, day, hour, minute, second = "0"] = localDateTime;
+    const parsed = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    const isValidLocalDate = !Number.isNaN(parsed.getTime())
+      && parsed.getFullYear() === Number(year)
+      && parsed.getMonth() === Number(month) - 1
+      && parsed.getDate() === Number(day)
+      && parsed.getHours() === Number(hour)
+      && parsed.getMinutes() === Number(minute)
+      && parsed.getSeconds() === Number(second);
+    return {
+      takenAt: isValidLocalDate ? parsed.toISOString() : null,
+      takenDate: `${year}-${month}-${day}`,
+    };
+  }
+
+  const localDate = value.trim().match(/^(\d{4})[:-](\d{2})[:-](\d{2})$/);
+  if (localDate) {
+    const [, year, month, day] = localDate;
+    const parsed = new Date(Number(year), Number(month) - 1, Number(day));
+    const isValidLocalDate = !Number.isNaN(parsed.getTime())
+      && parsed.getFullYear() === Number(year)
+      && parsed.getMonth() === Number(month) - 1
+      && parsed.getDate() === Number(day);
+    return {
+      takenAt: isValidLocalDate ? parsed.toISOString() : null,
+      takenDate: `${year}-${month}-${day}`,
+    };
+  }
+
+  const normalized = value.trim().replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
   const takenDate = normalized.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
   const parsed = new Date(normalized);
   return { takenAt: Number.isNaN(parsed.getTime()) ? null : parsed.toISOString(), takenDate };
@@ -82,10 +123,10 @@ export async function extractPhotoExif(file: File): Promise<ExtractedExif> {
     const tags = (await ExifReader.load(file, { expanded: true })) as Record<string, Record<string, unknown>>;
     const gps = tags.gps ?? {};
     const exif = tags.exif ?? {};
-    const lat = coordinateFromExif(gps.Latitude ?? exif.GPSLatitude, exif.GPSLatitudeRef);
-    const lng = coordinateFromExif(gps.Longitude ?? exif.GPSLongitude, exif.GPSLongitudeRef);
+    const lat = coordinateFromExif(gps.Latitude ?? gps.GPSLatitude ?? exif.GPSLatitude, gps.LatitudeRef ?? gps.GPSLatitudeRef ?? exif.GPSLatitudeRef);
+    const lng = coordinateFromExif(gps.Longitude ?? gps.GPSLongitude ?? exif.GPSLongitude, gps.LongitudeRef ?? gps.GPSLongitudeRef ?? exif.GPSLongitudeRef);
     const dateTag = exif.DateTimeOriginal ?? exif.CreateDate ?? exif.DateTimeDigitized;
-    const { takenAt, takenDate } = parseExifDate(isTagValue(dateTag) && typeof dateTag.description === "string" ? dateTag.description : undefined);
+    const { takenAt, takenDate } = parseExifDate(stringFromTag(dateTag));
 
     if (lat !== null && lng !== null) {
       return { lat, lng, takenAt, takenDate, exifFound: true, message: "GPS metadata found. Marker location is ready." };
