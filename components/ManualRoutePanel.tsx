@@ -28,6 +28,12 @@ function formatDistance(meters: number) {
   return `${(meters / 1000).toFixed(1)} km`;
 }
 
+function routeDraftHint(pointCount: number) {
+  if (pointCount === 0) return "Add at least 2 points on the map to save a route.";
+  if (pointCount === 1) return "Add 1 more point to make this a saveable route.";
+  return "Route is ready to save. Add more points to refine the path.";
+}
+
 export function ManualRoutePanel({ days, defaultDayId, points, distanceMeters, isSaving, onCancel, onUndoPoint, onClear, onSave }: Props) {
   async function submit(formData: FormData) {
     await onSave({
@@ -62,6 +68,10 @@ export function ManualRoutePanel({ days, defaultDayId, points, distanceMeters, i
         </div>
 
         <input name="name" placeholder="Route name" className="w-full rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+
+        <div aria-live="polite" className="rounded-lg border border-teal-700/15 bg-teal-50 px-3 py-2 text-xs font-semibold leading-5 text-teal-950">
+          {routeDraftHint(points.length)}
+        </div>
 
         <div className="grid grid-cols-2 gap-2">
           <select name="dayId" defaultValue={defaultDayId ?? ""} className="rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">
