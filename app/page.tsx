@@ -504,7 +504,7 @@ export default function Home() {
     setAdminDataSaving(false);
   }
 
-  async function updatePhoto(photoId: string, input: { day_id: string | null; uploader_name: string | null; caption: string | null }) {
+  async function updatePhoto(photoId: string, input: { day_id: string | null; uploader_name: string | null; caption: string | null; lat: number | null; lng: number | null; taken_at: string | null }) {
     if (!data.trip) return;
     setAdminDataSaving(true);
     setAdminDataMessage(null);

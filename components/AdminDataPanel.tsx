@@ -43,6 +43,9 @@ type PhotoUpdate = {
   day_id: string | null;
   uploader_name: string | null;
   caption: string | null;
+  lat: number | null;
+  lng: number | null;
+  taken_at: string | null;
 };
 
 export type AdminDataProps = {
@@ -78,6 +81,28 @@ function optionalString(formData: FormData, key: string) {
 
 function optionalDate(formData: FormData, key: string) {
   return String(formData.get(key) ?? "") || null;
+}
+
+function optionalNumber(formData: FormData, key: string) {
+  const value = String(formData.get(key) ?? "").trim();
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function datetimeLocalValue(value: string | null) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function optionalDateTime(formData: FormData, key: string) {
+  const value = String(formData.get(key) ?? "").trim();
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function dayOptions(days: Day[]) {
@@ -284,6 +309,9 @@ function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo: Photo
       day_id: String(formData.get("day_id") || "") || null,
       uploader_name: optionalString(formData, "uploader_name"),
       caption: optionalString(formData, "caption"),
+      lat: optionalNumber(formData, "lat"),
+      lng: optionalNumber(formData, "lng"),
+      taken_at: optionalDateTime(formData, "taken_at"),
     });
   }
 
@@ -296,6 +324,20 @@ function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo: Photo
       <div className="min-w-0 space-y-2">
         <select name="day_id" defaultValue={photo.day_id ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">{dayOptions(days)}</select>
         <input name="uploader_name" defaultValue={photo.uploader_name ?? ""} placeholder="Uploader" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+        <div className="grid grid-cols-2 gap-2">
+          <label className="space-y-1 text-[11px] font-bold uppercase tracking-[0.08em] text-stone-500">
+            Latitude
+            <input name="lat" type="number" step="any" defaultValue={photo.lat ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-normal tracking-normal text-stone-950 outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+          </label>
+          <label className="space-y-1 text-[11px] font-bold uppercase tracking-[0.08em] text-stone-500">
+            Longitude
+            <input name="lng" type="number" step="any" defaultValue={photo.lng ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-normal tracking-normal text-stone-950 outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+          </label>
+        </div>
+        <label className="block space-y-1 text-[11px] font-bold uppercase tracking-[0.08em] text-stone-500">
+          Taken time
+          <input name="taken_at" type="datetime-local" defaultValue={datetimeLocalValue(photo.taken_at)} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-normal tracking-normal text-stone-950 outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+        </label>
         <textarea name="caption" defaultValue={photo.caption ?? ""} placeholder="Caption" className="min-h-14 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
         <EditorActions isSaving={isSaving} saveLabel="Save photo" onDelete={onDelete} />
       </div>
