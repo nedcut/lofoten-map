@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Upload, X } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { along, length as turfLength, lineString, point, pointToLineDistance } from "@turf/turf";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { extractPhotoExif, type ExtractedExif } from "@/lib/exif";
@@ -289,6 +289,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
   async function handleFiles(files: FileList | null) {
     const selected = Array.from(files ?? []);
     if (selected.length === 0) return;
+    setBatchOverrideDayId(BATCH_OVERRIDE_IDLE);
 
     const nextItems: QueueItem[] = selected.map((file) => {
       const id = crypto.randomUUID();
@@ -385,7 +386,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
 
   function applyBatchDay(nextDayId: string) {
     if (nextDayId === BATCH_OVERRIDE_IDLE) return;
-    setBatchOverrideDayId(nextDayId);
+    setBatchOverrideDayId(BATCH_OVERRIDE_IDLE);
     const dayId = nextDayId === ALL_DAYS_VALUE ? null : nextDayId;
     setItems((current) => routePlaceQueueItems(current.map((item) => {
       if (item.status === "invalid") return item;
@@ -398,6 +399,33 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
         message: item.coordinate || !dayId ? item.message : "Day set. Tap map to place if it is not on the route.",
       };
     }), routes));
+  }
+
+  function removeItem(itemId: string) {
+    setItems((current) => {
+      const removedIndex = current.findIndex((item) => item.id === itemId);
+      const nextItems = current.filter((item) => item.id !== itemId);
+      if (nextItems.length === 0) {
+        setActiveItemId(null);
+        setQueueFilter("all");
+        setBatchOverrideDayId(BATCH_OVERRIDE_IDLE);
+        onCoordinatePreview(null);
+        return nextItems;
+      }
+      if (activeItemId === itemId) {
+        const nextActiveIndex = Math.min(Math.max(removedIndex, 0), nextItems.length - 1);
+        setActiveItemId(nextItems[nextActiveIndex].id);
+      }
+      return nextItems;
+    });
+  }
+
+  function clearQueue() {
+    setItems([]);
+    setActiveItemId(null);
+    setQueueFilter("all");
+    setBatchOverrideDayId(BATCH_OVERRIDE_IDLE);
+    onCoordinatePreview(null);
   }
 
   return (
@@ -471,8 +499,15 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
               ) : <div className="flex h-full items-center justify-center text-stone-400"><Camera className="h-5 w-5" /></div>}
             </div>
             <div className="min-w-0 py-1">
-              <div className="truncate text-sm font-bold text-stone-950">{activeItem.file.name}</div>
-              <div className="mt-1 text-xs text-stone-500">{formatBytes(activeItem.file.size)}</div>
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-bold text-stone-950">{activeItem.file.name}</div>
+                  <div className="mt-1 text-xs text-stone-500">{formatBytes(activeItem.file.size)}</div>
+                </div>
+                <button type="button" onClick={() => removeItem(activeItem.id)} disabled={isSaving} className="rounded-md p-1.5 text-stone-500 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-45" aria-label="Remove selected photo">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
               <div className={cn("mt-3 flex items-start gap-2 rounded-md px-3 py-2 text-xs leading-5", activeItem.status === "ready" ? "bg-emerald-50 text-emerald-900" : activeItem.status === "needs-location" ? "bg-amber-50 text-amber-900" : activeItem.status === "invalid" ? "bg-rose-50 text-rose-900" : "bg-stone-100 text-stone-700")}>
                 {activeItem.status === "reading" ? <Loader2 className="mt-0.5 h-3.5 w-3.5 animate-spin" /> : activeItem.status === "ready" ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5" /> : activeItem.status === "invalid" ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5" /> : <MapPin className="mt-0.5 h-3.5 w-3.5" />}
                 <span>{activeItem.message}{activeItem.exif?.takenAt ? <> Taken {new Date(activeItem.exif.takenAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}.</> : null}</span>
@@ -541,7 +576,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
             </label>
 
             <div className="grid grid-cols-[auto_1fr] gap-2">
-              <button type="button" onClick={() => { setItems([]); setActiveItemId(null); onCoordinatePreview(null); }} disabled={isSaving} className="rounded-lg border border-stone-300 bg-white px-3 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45" aria-label="Clear queue"><RotateCcw className="h-4 w-4" /></button>
+              <button type="button" onClick={clearQueue} disabled={isSaving} className="rounded-lg border border-stone-300 bg-white px-3 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45" aria-label="Clear queue"><RotateCcw className="h-4 w-4" /></button>
               <button disabled={counts.ready === 0 || counts.reading > 0 || isSaving} className="rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
                 {isSaving ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <Upload className="mr-2 inline h-4 w-4" />} Upload {counts.ready > 1 ? `${counts.ready} photos` : "photo"}
               </button>
