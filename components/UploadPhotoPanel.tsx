@@ -1,8 +1,8 @@
 "use client";
 
 import { AlertTriangle, Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Upload, X } from "lucide-react";
-import { point, pointToLineDistance } from "@turf/turf";
-import { useEffect, useMemo, useState } from "react";
+import { along, length as turfLength, lineString, point, pointToLineDistance } from "@turf/turf";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { extractPhotoExif, type ExtractedExif } from "@/lib/exif";
 import { cn } from "@/lib/utils";
 import type { LineString } from "geojson";
@@ -44,10 +44,15 @@ type QueueItem = {
   caption: string;
   dayId: string | null;
   dayMatchSource: "date" | "route" | null;
+  locationSource: "gps" | "route" | "manual" | null;
   exif: ExtractedExif | null;
   coordinate: LngLat | null;
   status: QueueStatus;
   message: string;
+};
+
+type AnalyzedItem = Pick<QueueItem, "id" | "dayId" | "dayMatchSource" | "locationSource" | "exif" | "coordinate" | "status" | "message"> & {
+  order: number;
 };
 
 function isSupportedImage(file: File) {
@@ -79,6 +84,28 @@ function routeGeometry(route: RouteSegment): LineString {
   return (route.geometry_geojson.type === "Feature" ? route.geometry_geojson.geometry : route.geometry_geojson) as LineString;
 }
 
+function routeLengthKilometers(route: RouteSegment) {
+  if (route.distance_meters && route.distance_meters > 0) return route.distance_meters / 1000;
+  return turfLength({ type: "Feature", geometry: routeGeometry(route), properties: {} }, { units: "kilometers" });
+}
+
+function routeForDay(routes: RouteSegment[], dayId: string) {
+  return routes
+    .filter((route) => route.day_id === dayId && routeGeometry(route).coordinates.length >= 2)
+    .sort((a, b) => routeLengthKilometers(b) - routeLengthKilometers(a))[0] ?? null;
+}
+
+function coordinateAlongRoute(route: RouteSegment, fraction: number): LngLat | null {
+  const geometry = routeGeometry(route);
+  if (geometry.coordinates.length < 2) return null;
+  const line = lineString(geometry.coordinates);
+  const totalKilometers = turfLength(line, { units: "kilometers" });
+  if (totalKilometers <= 0) return null;
+  const position = along(line, totalKilometers * Math.min(0.96, Math.max(0.04, fraction)), { units: "kilometers" });
+  const [lng, lat] = position.geometry.coordinates;
+  return { lng, lat };
+}
+
 function findDayIdForCoordinate(routes: RouteSegment[], coordinate: LngLat | null) {
   if (!coordinate) return null;
   let nearest: { dayId: string; meters: number } | null = null;
@@ -91,10 +118,57 @@ function findDayIdForCoordinate(routes: RouteSegment[], coordinate: LngLat | nul
   return nearest && nearest.meters <= 500 ? nearest.dayId : null;
 }
 
+function coordinateKey(coordinate: LngLat) {
+  return `${coordinate.lat.toFixed(7)},${coordinate.lng.toFixed(7)}`;
+}
+
+function routePlaceNoGpsItems(items: AnalyzedItem[], routes: RouteSegment[]) {
+  const byDay = new Map<string, AnalyzedItem[]>();
+  for (const item of items) {
+    if (item.status === "invalid" || item.coordinate || !item.dayId) continue;
+    if (!routeForDay(routes, item.dayId)) continue;
+    const dayItems = byDay.get(item.dayId) ?? [];
+    dayItems.push(item);
+    byDay.set(item.dayId, dayItems);
+  }
+
+  for (const [dayId, dayItems] of byDay.entries()) {
+    const route = routeForDay(routes, dayId);
+    if (!route) continue;
+    dayItems
+      .sort((a, b) => {
+        const aTime = a.exif?.takenAt ? new Date(a.exif.takenAt).getTime() : Number.NaN;
+        const bTime = b.exif?.takenAt ? new Date(b.exif.takenAt).getTime() : Number.NaN;
+        if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) return aTime - bTime;
+        return a.order - b.order;
+      })
+      .forEach((item, index) => {
+        const coordinate = coordinateAlongRoute(route, dayItems.length === 1 ? 0.5 : (index + 1) / (dayItems.length + 1));
+        if (!coordinate) return;
+        item.coordinate = coordinate;
+        item.locationSource = "route";
+        item.status = "ready";
+        item.message = "No GPS found. Placed on the day's route by photo time/order. Tap map to adjust.";
+      });
+  }
+
+  return items;
+}
+
 function dayLabel(days: Day[], dayId: string | null) {
   const day = days.find((item) => item.id === dayId);
   if (!day) return "All days";
   return `Day ${day.day_number}${day.title ? `: ${day.title}` : ""}`;
+}
+
+function locationLabel(item: QueueItem) {
+  if (item.status === "ready" && item.locationSource === "gps") return "GPS ready";
+  if (item.status === "ready" && item.locationSource === "route") return "Placed on route";
+  if (item.status === "ready" && item.locationSource === "manual") return "Placed manually";
+  if (item.status === "ready") return "Ready to upload";
+  if (item.status === "needs-location") return "Tap map to place";
+  if (item.status === "reading") return "Reading metadata";
+  return item.message;
 }
 
 async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
@@ -114,6 +188,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
   const [uploaderName, setUploaderName] = useState("");
   const [batchOverrideDayId, setBatchOverrideDayId] = useState(BATCH_OVERRIDE_IDLE);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
+  const previewCoordinateKeyRef = useRef<string | null>(null);
   const activeItem = items.find((item) => item.id === activeItemId) ?? items[0] ?? null;
   const activePreviewUrl = useMemo(() => activeItem ? URL.createObjectURL(activeItem.file) : null, [activeItem]);
 
@@ -122,14 +197,24 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
   }, [activePreviewUrl]);
 
   useEffect(() => {
-    if (activeItem?.coordinate) onCoordinatePreview(activeItem.coordinate);
-    else if (activeItem?.status === "needs-location") onCoordinatePreview(null);
+    if (activeItem?.coordinate) {
+      previewCoordinateKeyRef.current = coordinateKey(activeItem.coordinate);
+      onCoordinatePreview(activeItem.coordinate);
+    } else if (activeItem?.status === "needs-location") {
+      previewCoordinateKeyRef.current = null;
+      onCoordinatePreview(null);
+    }
   }, [activeItem?.coordinate, activeItem?.id, activeItem?.status, onCoordinatePreview]);
 
   useEffect(() => {
     if (!pendingCoordinate || !activeItemId) return;
-    setItems((current) => current.map((item) => item.id === activeItemId && item.status === "needs-location"
-      ? { ...item, coordinate: pendingCoordinate, status: "ready", message: "Location set from the map." }
+    const nextKey = coordinateKey(pendingCoordinate);
+    if (previewCoordinateKeyRef.current === nextKey) {
+      previewCoordinateKeyRef.current = null;
+      return;
+    }
+    setItems((current) => current.map((item) => item.id === activeItemId && item.status !== "invalid" && item.status !== "reading"
+      ? { ...item, coordinate: pendingCoordinate, locationSource: "manual", status: "ready", message: "Location set from the map." }
       : item));
   }, [activeItemId, pendingCoordinate]);
 
@@ -141,6 +226,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     invalid: items.filter((item) => item.status === "invalid").length,
     matchedByDate: items.filter((item) => item.dayMatchSource === "date").length,
     matchedByRoute: items.filter((item) => item.dayMatchSource === "route").length,
+    placedOnRoute: items.filter((item) => item.locationSource === "route").length,
     unassigned: items.filter((item) => item.status !== "invalid" && item.dayId === null).length,
   }), [items]);
 
@@ -172,36 +258,60 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     const nextItems: QueueItem[] = selected.map((file) => {
       const id = crypto.randomUUID();
       if (!isSupportedImage(file)) {
-        return { id, file, caption: "", dayId: null, dayMatchSource: null, exif: null, coordinate: null, status: "invalid", message: "Unsupported file type." };
+        return { id, file, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: "Unsupported file type." };
       }
       if (file.size > MAX_FILE_SIZE) {
-        return { id, file, caption: "", dayId: null, dayMatchSource: null, exif: null, coordinate: null, status: "invalid", message: `Over ${formatBytes(MAX_FILE_SIZE)}. Export a smaller copy first.` };
+        return { id, file, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: `Over ${formatBytes(MAX_FILE_SIZE)}. Export a smaller copy first.` };
       }
-      return { id, file, caption: "", dayId: defaultDayId, dayMatchSource: null, exif: null, coordinate: null, status: "reading", message: "Reading photo metadata..." };
+      return { id, file, caption: "", dayId: defaultDayId, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "reading", message: "Reading photo metadata..." };
     });
 
     setItems((current) => [...current, ...nextItems]);
     setActiveItemId((current) => current ?? nextItems[0]?.id ?? null);
 
     const readable = nextItems.filter((item) => item.status === "reading");
+    const extracted = new Map<string, ExtractedExif>();
     await mapWithConcurrency(readable, EXIF_CONCURRENCY, async (item) => {
       const exif = await extractPhotoExif(item.file);
-      setItems((current) => current.map((currentItem) => {
-        if (currentItem.id !== item.id) return currentItem;
-        const coordinate = exif.lat !== null && exif.lng !== null ? { lat: exif.lat, lng: exif.lng } : null;
-        const matchedDayId = findDayIdForExifDate(days, exif);
-        const routeDayId = matchedDayId ? null : findDayIdForCoordinate(routes, coordinate);
-        return {
-          ...currentItem,
-          dayId: matchedDayId ?? routeDayId ?? currentItem.dayId,
-          dayMatchSource: matchedDayId ? "date" : routeDayId ? "route" : null,
-          exif,
-          coordinate,
-          status: coordinate ? "ready" : "needs-location",
-          message: exif.message,
-        };
-      }));
+      extracted.set(item.id, exif);
     });
+
+    const analyzed = routePlaceNoGpsItems(readable.map((item, order) => {
+      const exif = extracted.get(item.id);
+      if (!exif) {
+        return { id: item.id, order, dayId: item.dayId, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid" as const, message: "We could not read this photo." };
+      }
+      const coordinate = exif.lat !== null && exif.lng !== null ? { lat: exif.lat, lng: exif.lng } : null;
+      const matchedDayId = findDayIdForExifDate(days, exif);
+      const routeDayId = matchedDayId ? null : findDayIdForCoordinate(routes, coordinate);
+      return {
+        id: item.id,
+        order,
+        dayId: matchedDayId ?? routeDayId ?? item.dayId,
+        dayMatchSource: matchedDayId ? "date" as const : routeDayId ? "route" as const : null,
+        locationSource: coordinate ? "gps" as const : null,
+        exif,
+        coordinate,
+        status: coordinate ? "ready" as const : "needs-location" as const,
+        message: exif.message,
+      };
+    }), routes);
+    const analyzedById = new Map(analyzed.map((item) => [item.id, item]));
+
+    setItems((current) => current.map((currentItem) => {
+      const analyzedItem = analyzedById.get(currentItem.id);
+      if (!analyzedItem) return currentItem;
+      return {
+        ...currentItem,
+        dayId: analyzedItem.dayId,
+        dayMatchSource: analyzedItem.dayMatchSource,
+        locationSource: analyzedItem.locationSource,
+        exif: analyzedItem.exif,
+        coordinate: analyzedItem.coordinate,
+        status: analyzedItem.status,
+        message: analyzedItem.message,
+      };
+    }));
   }
 
   async function submit(formData: FormData) {
@@ -236,7 +346,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="font-serif text-2xl font-semibold tracking-tight text-stone-950">Upload photo</h2>
-          <p className="mt-1 text-sm leading-5 text-stone-600">Choose one shot or a whole camera roll batch. GPS is read locally before upload.</p>
+          <p className="mt-1 text-sm leading-5 text-stone-600">Choose one shot or a whole camera roll batch. GPS, dates, and route placement are prepared locally.</p>
         </div>
         <button onClick={onCancel} className="rounded-full p-2 text-stone-500 hover:bg-stone-900/5" aria-label="Close upload panel"><X className="h-4 w-4" /></button>
       </div>
@@ -264,7 +374,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
 
         {items.length > 0 ? (
           <div className="rounded-lg border border-teal-700/15 bg-teal-50 px-3 py-2 text-xs leading-5 text-teal-950">
-            <div className="font-bold">{counts.matchedByDate} date matched · {counts.matchedByRoute} route matched · {counts.unassigned} unassigned</div>
+            <div className="font-bold">{counts.matchedByDate} date matched · {counts.matchedByRoute} GPS near route · {counts.placedOnRoute} route placed · {counts.unassigned} unassigned</div>
             {dayBuckets.length > 0 ? <div className="mt-1 text-teal-900/80">{dayBuckets.map((bucket) => `${bucket.count} ${dayLabel(days, bucket.dayId)}`).join(" · ")}</div> : null}
           </div>
         ) : null}
@@ -303,7 +413,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
               <div className="truncate text-sm font-bold text-stone-950">{activeItem.file.name}</div>
               <div className="mt-1 text-xs text-stone-500">{formatBytes(activeItem.file.size)}</div>
               <div className={cn("mt-3 flex items-start gap-2 rounded-md px-3 py-2 text-xs leading-5", activeItem.status === "ready" ? "bg-emerald-50 text-emerald-900" : activeItem.status === "needs-location" ? "bg-amber-50 text-amber-900" : activeItem.status === "invalid" ? "bg-rose-50 text-rose-900" : "bg-stone-100 text-stone-700")}>
-                {activeItem.status === "reading" ? <Loader2 className="mt-0.5 h-3.5 w-3.5 animate-spin" /> : activeItem.status === "ready" ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5" /> : <MapPin className="mt-0.5 h-3.5 w-3.5" />}
+                {activeItem.status === "reading" ? <Loader2 className="mt-0.5 h-3.5 w-3.5 animate-spin" /> : activeItem.status === "ready" ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5" /> : activeItem.status === "invalid" ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5" /> : <MapPin className="mt-0.5 h-3.5 w-3.5" />}
                 <span>{activeItem.message}{activeItem.exif?.takenAt ? <> Taken {new Date(activeItem.exif.takenAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}.</> : null}</span>
               </div>
             </div>
@@ -329,7 +439,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
                   <span className="text-xs font-bold text-stone-400">{index + 1}</span>
                   <span className="min-w-0">
                     <span className="block truncate text-xs font-bold text-stone-900">{item.file.name}</span>
-                    <span className="block truncate text-[11px] text-stone-500">{item.status === "ready" ? "Ready to upload" : item.status === "needs-location" ? "Tap map to place" : item.status === "reading" ? "Reading metadata" : item.message}</span>
+                    <span className="block truncate text-[11px] text-stone-500">{locationLabel(item)}</span>
                     <span className="block truncate text-[11px] font-semibold text-teal-800">{dayLabel(days, item.dayId)}{item.dayMatchSource ? ` · ${item.dayMatchSource} matched` : ""}</span>
                   </span>
                   {item.status === "invalid" ? <AlertTriangle className="h-4 w-4 text-rose-500" /> : <span className={cn("h-2.5 w-2.5 rounded-full", item.status === "ready" ? "bg-emerald-500" : item.status === "needs-location" ? "bg-amber-500" : "bg-stone-300")} />}
@@ -342,7 +452,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
 
         <label className="rounded-lg border border-teal-700/25 bg-teal-50 px-3 py-2 text-sm text-teal-950">
           <MapPin className="mr-2 inline h-4 w-4" />
-          {activeItem?.coordinate ? `${activeItem.coordinate.lat.toFixed(5)}, ${activeItem.coordinate.lng.toFixed(5)}` : activeItem?.status === "needs-location" ? "Tap the map to place the selected photo." : "GPS coordinates appear here when available."}
+          {activeItem?.coordinate ? `${activeItem.coordinate.lat.toFixed(5)}, ${activeItem.coordinate.lng.toFixed(5)} · Tap map to adjust selected photo.` : activeItem?.status === "needs-location" ? "Tap the map to place the selected photo." : "GPS coordinates appear here when available."}
         </label>
 
         <textarea value={activeItem?.caption ?? ""} onChange={(event) => {
