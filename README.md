@@ -22,6 +22,7 @@ npm run dev
 Open http://localhost:3000.
 
 The app runs in local demo mode if Supabase variables are missing. A Mapbox token is required for the live map tiles.
+Set `NEXT_PUBLIC_LOCAL_DEMO_MODE=1` to force demo mode on localhost even when Supabase variables are present; this is ignored away from localhost.
 
 ## Environment variables
 
@@ -30,6 +31,7 @@ NEXT_PUBLIC_MAPBOX_TOKEN=
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 NEXT_PUBLIC_TRIP_SLUG=lofoten-2026
+NEXT_PUBLIC_LOCAL_DEMO_MODE=
 ```
 
 Never expose a Supabase service role key in the browser or in Vercel public environment variables.
