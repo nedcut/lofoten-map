@@ -31,7 +31,7 @@ export function SidebarHeader() {
         <Mountain className="h-3.5 w-3.5" /> Lofoten 2026
       </div>
       <h1 className="font-serif text-[2.6rem] font-semibold leading-[0.95] tracking-tight text-stone-950">Lofoten Logbook</h1>
-      <p className="max-w-[28rem] text-sm leading-6 text-stone-600">Routes, trail notes, and geotagged memories from a long summer week around Reine and Moskenes.</p>
+      <p className="max-w-[28rem] text-sm leading-6 text-stone-600">Norway graduation trip.</p>
     </div>
   );
 }
