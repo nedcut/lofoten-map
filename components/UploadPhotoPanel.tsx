@@ -223,11 +223,19 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
   const previewCoordinateKeyRef = useRef<string | null>(null);
   const activeItem = items.find((item) => item.id === activeItemId) ?? items[0] ?? null;
-  const activePreviewUrl = useMemo(() => activeItem ? URL.createObjectURL(activeItem.file) : null, [activeItem]);
+  const activeFile = activeItem?.file ?? null;
+  const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
 
-  useEffect(() => () => {
-    if (activePreviewUrl) URL.revokeObjectURL(activePreviewUrl);
-  }, [activePreviewUrl]);
+  useEffect(() => {
+    if (!activeFile) {
+      setActivePreviewUrl(null);
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(activeFile);
+    setActivePreviewUrl(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [activeFile]);
 
   useEffect(() => {
     if (activeItem?.coordinate) {
