@@ -264,92 +264,115 @@ export default function Home() {
   async function saveNote(input: { body: string; authorName: string; dayId: string | null }) {
     if (!pendingCoordinate || !input.body || !data.trip) return;
     setSaving(true);
-    const row = { trip_id: data.trip.id, day_id: input.dayId, author_name: input.authorName || "Friend", lat: pendingCoordinate.lat, lng: pendingCoordinate.lng, body: input.body, note_type: "note" };
-    if (supabase) {
-      if (!user) {
-        setError("Sign in before saving notes to Supabase.");
-        setSaving(false);
-        return;
+    setError(null);
+    let didSave = false;
+    try {
+      const row = { trip_id: data.trip.id, day_id: input.dayId, author_name: input.authorName || "Friend", lat: pendingCoordinate.lat, lng: pendingCoordinate.lng, body: input.body, note_type: "note" };
+      if (supabase) {
+        if (!user) {
+          setError("Sign in before saving notes to Supabase.");
+          return;
+        }
+        const { error: insertError } = await supabase.from("notes").insert(row);
+        if (insertError) setError(insertError.message);
+        else {
+          await loadData();
+          didSave = true;
+        }
+      } else {
+        setData((current) => ({ ...current, notes: [{ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }, ...current.notes] }));
+        didSave = true;
       }
-      const { error: insertError } = await supabase.from("notes").insert(row);
-      if (insertError) setError(insertError.message);
-      else await loadData();
-    } else {
-      setData((current) => ({ ...current, notes: [{ ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }, ...current.notes] }));
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save note.");
+    } finally {
+      setSaving(false);
+      if (didSave) closePanel();
     }
-    setSaving(false);
-    closePanel();
   }
 
   async function savePhotos(inputs: PhotoUploadItemInput[]) {
     if (inputs.length === 0 || !data.trip) return;
     setSaving(true);
-    if (!supabase) {
-      const rows = inputs.map((input) => ({
-        id: crypto.randomUUID(),
-        trip_id: data.trip!.id,
-        day_id: input.dayId,
-        uploader_name: input.uploaderName || "Friend",
-        image_url: URL.createObjectURL(input.file),
-        thumbnail_url: null,
-        lat: input.coordinate.lat,
-        lng: input.coordinate.lng,
-        taken_at: input.exif?.takenAt ?? null,
-        caption: input.caption,
-        exif_found: input.exif?.exifFound ?? false,
-        created_at: new Date().toISOString(),
-      }));
-      setData((current) => ({ ...current, photos: [...rows, ...current.photos] }));
-    } else {
-      if (!user) {
-        setError("Sign in before uploading photos to Supabase.");
-        setSaving(false);
-        return;
-      }
-      const rows: Array<{
-        trip_id: string;
-        day_id: string | null;
-        uploader_name: string;
-        image_url: string;
-        lat: number;
-        lng: number;
-        taken_at: string | null | undefined;
-        caption: string;
-        exif_found: boolean;
-      }> = [];
-      const failures: string[] = [];
-
-      await mapWithConcurrency(inputs, UPLOAD_CONCURRENCY, async (input) => {
-        const extension = input.file.name.split(".").pop() || "jpg";
-        const path = `${data.trip!.slug}/${crypto.randomUUID()}.${extension}`;
-        const { error: uploadError } = await supabase.storage.from(PHOTO_BUCKET).upload(path, input.file, { cacheControl: "3600", upsert: false });
-        if (uploadError) {
-          failures.push(`${input.file.name}: ${uploadError.message}`);
-          return;
-        }
-        const { data: publicData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
-        rows.push({
+    setError(null);
+    let didSave = false;
+    try {
+      if (!supabase) {
+        const rows = inputs.map((input) => ({
+          id: crypto.randomUUID(),
           trip_id: data.trip!.id,
           day_id: input.dayId,
           uploader_name: input.uploaderName || "Friend",
-          image_url: publicData.publicUrl,
+          image_url: URL.createObjectURL(input.file),
+          thumbnail_url: null,
           lat: input.coordinate.lat,
           lng: input.coordinate.lng,
-          taken_at: input.exif?.takenAt,
+          taken_at: input.exif?.takenAt ?? null,
           caption: input.caption,
           exif_found: input.exif?.exifFound ?? false,
-        });
-      });
+          created_at: new Date().toISOString(),
+        }));
+        setData((current) => ({ ...current, photos: [...rows, ...current.photos] }));
+        didSave = true;
+      } else {
+        if (!user) {
+          setError("Sign in before uploading photos to Supabase.");
+          return;
+        }
+        const rows: Array<{
+          trip_id: string;
+          day_id: string | null;
+          uploader_name: string;
+          image_url: string;
+          lat: number;
+          lng: number;
+          taken_at: string | null | undefined;
+          caption: string;
+          exif_found: boolean;
+        }> = [];
+        const failures: string[] = [];
 
-      if (rows.length > 0) {
-        const { error: insertError } = await supabase.from("photos").insert(rows);
-        if (insertError) setError(insertError.message);
-        else await loadData();
+        await mapWithConcurrency(inputs, UPLOAD_CONCURRENCY, async (input) => {
+          const extension = input.file.name.split(".").pop() || "jpg";
+          const path = `${data.trip!.slug}/${crypto.randomUUID()}.${extension}`;
+          const { error: uploadError } = await supabase.storage.from(PHOTO_BUCKET).upload(path, input.file, { cacheControl: "3600", upsert: false });
+          if (uploadError) {
+            failures.push(`${input.file.name}: ${uploadError.message}`);
+            return;
+          }
+          const { data: publicData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+          rows.push({
+            trip_id: data.trip!.id,
+            day_id: input.dayId,
+            uploader_name: input.uploaderName || "Friend",
+            image_url: publicData.publicUrl,
+            lat: input.coordinate.lat,
+            lng: input.coordinate.lng,
+            taken_at: input.exif?.takenAt,
+            caption: input.caption,
+            exif_found: input.exif?.exifFound ?? false,
+          });
+        });
+
+        if (rows.length > 0) {
+          const { error: insertError } = await supabase.from("photos").insert(rows);
+          if (insertError) setError(insertError.message);
+          else {
+            await loadData();
+            didSave = true;
+          }
+        }
+        if (failures.length > 0) {
+          setError(`${failures.length} photo${failures.length === 1 ? "" : "s"} failed to upload. ${failures.slice(0, 2).join(" ")}`);
+          if (rows.length === 0) didSave = false;
+        }
       }
-      if (failures.length > 0) setError(`${failures.length} photo${failures.length === 1 ? "" : "s"} failed to upload. ${failures.slice(0, 2).join(" ")}`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not upload photos.");
+    } finally {
+      setSaving(false);
+      if (didSave) closePanel();
     }
-    setSaving(false);
-    closePanel();
   }
 
   async function saveRoute(input: { name: string; dayId: string | null; mode: RouteMode }) {
@@ -360,36 +383,45 @@ export default function Home() {
     }
 
     setSaving(true);
-    const geometry = routeGeometry(routeDraftPoints);
-    const row = {
-      trip_id: data.trip.id,
-      day_id: input.dayId,
-      name: input.name || "Manual route",
-      source: "manual",
-      mode: input.mode,
-      geometry_geojson: geometry,
-      distance_meters: routeDistanceMeters(routeDraftPoints),
-      elevation_gain_meters: null,
-    };
+    setError(null);
+    let didSave = false;
+    try {
+      const geometry = routeGeometry(routeDraftPoints);
+      const row = {
+        trip_id: data.trip.id,
+        day_id: input.dayId,
+        name: input.name || "Manual route",
+        source: "manual",
+        mode: input.mode,
+        geometry_geojson: geometry,
+        distance_meters: routeDistanceMeters(routeDraftPoints),
+        elevation_gain_meters: null,
+      };
 
-    if (supabase) {
-      if (!user) {
-        setError("Sign in before saving routes to Supabase.");
-        setSaving(false);
-        return;
+      if (supabase) {
+        if (!user) {
+          setError("Sign in before saving routes to Supabase.");
+          return;
+        }
+        const { error: insertError } = await supabase.from("route_segments").insert(row);
+        if (insertError) setError(insertError.message);
+        else {
+          await loadData();
+          didSave = true;
+        }
+      } else {
+        setData((current) => ({
+          ...current,
+          routeSegments: [...current.routeSegments, { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }],
+        }));
+        didSave = true;
       }
-      const { error: insertError } = await supabase.from("route_segments").insert(row);
-      if (insertError) setError(insertError.message);
-      else await loadData();
-    } else {
-      setData((current) => ({
-        ...current,
-        routeSegments: [...current.routeSegments, { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }],
-      }));
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save route.");
+    } finally {
+      setSaving(false);
+      if (didSave) closePanel();
     }
-
-    setSaving(false);
-    closePanel();
   }
 
   async function updateTrip(input: { title: string; description: string | null; start_date: string | null; end_date: string | null }) {
