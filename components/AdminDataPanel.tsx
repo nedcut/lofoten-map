@@ -130,7 +130,7 @@ export function AdminDataPanel(props: AdminDataProps) {
       {props.message ? <div className="rounded-lg border border-teal-700/15 bg-teal-50 px-3 py-2 text-xs leading-5 text-teal-950">{props.message}</div> : null}
 
       {props.trip ? (
-        <details className="group rounded-lg bg-[#f7f1e7] p-3" open>
+        <details className="group rounded-lg bg-[#f7f1e7] p-3">
           <summary className="cursor-pointer text-sm font-bold text-stone-900">Trip</summary>
           <form action={submitTrip} className="mt-3 space-y-2">
             <input name="title" defaultValue={props.trip.title} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
