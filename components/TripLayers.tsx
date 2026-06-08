@@ -113,6 +113,10 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
 
   useEffect(() => {
     if (!map) return;
+    const activeMap = map;
+    let cancelled = false;
+    let handlersAttached = false;
+    const popupLayers = ["photos-circle", "notes-circle", "places-circle"];
 
     function showPopup(event: mapboxgl.MapLayerMouseEvent) {
       const feature = event.features?.[0];
@@ -133,18 +137,38 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
         const meta = [props.place_type, props.description].filter(Boolean).map((value) => escapeHtml(value)).join(" · ");
         content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("place")}<div class="lofoten-popup-title">${escapeHtml(props.name || props.title || "Place")}</div><div class="lofoten-popup-meta">${meta || "Shared trip marker"}</div></div></div>`;
       }
-      new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(coordinates).setHTML(content).addTo(map!);
+      new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(coordinates).setHTML(content).addTo(activeMap);
     }
 
-    for (const layer of ["photos-circle", "notes-circle", "places-circle"]) {
-      map.on("click", layer, showPopup);
-      map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = ""; });
+    function setPointerCursor() {
+      activeMap.getCanvas().style.setProperty("cursor", "pointer");
     }
+
+    function resetPointerCursor() {
+      activeMap.getCanvas().style.setProperty("cursor", "");
+    }
+
+    function attachHandlers() {
+      if (cancelled || !popupLayers.every((layer) => hasLayer(activeMap, layer))) return;
+      for (const layer of popupLayers) {
+        activeMap.on("click", layer, showPopup);
+        activeMap.on("mouseenter", layer, setPointerCursor);
+        activeMap.on("mouseleave", layer, resetPointerCursor);
+      }
+      handlersAttached = true;
+    }
+
+    if (activeMap.isStyleLoaded()) attachHandlers();
+    else activeMap.once("load", attachHandlers);
 
     return () => {
-      for (const layer of ["photos-circle", "notes-circle", "places-circle"]) {
-        map.off("click", layer, showPopup);
+      cancelled = true;
+      activeMap.off("load", attachHandlers);
+      if (!handlersAttached) return;
+      for (const layer of popupLayers) {
+        activeMap.off("click", layer, showPopup);
+        activeMap.off("mouseenter", layer, setPointerCursor);
+        activeMap.off("mouseleave", layer, resetPointerCursor);
       }
     };
   }, [map]);
