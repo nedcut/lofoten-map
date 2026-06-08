@@ -13,8 +13,8 @@ export type SidebarProps = {
   onSelectDay: (dayId: string | null) => void;
   layerVisibility: LayerVisibility;
   onLayerVisibilityChange: (next: LayerVisibility) => void;
-  onStartPhotoUpload: () => void;
-  onStartAddNote: () => void;
+  onStartPhotoUpload?: () => void;
+  onStartAddNote?: () => void;
   onStartRouteDraw?: () => void;
   adminData?: AdminDataProps | null;
   memberAdmin?: MemberAdminProps | null;
@@ -40,24 +40,30 @@ export function SidebarHeader() {
 }
 
 export function QuickActions({ onStartPhotoUpload, onStartAddNote, onStartRouteDraw }: Pick<SidebarProps, "onStartPhotoUpload" | "onStartAddNote" | "onStartRouteDraw">) {
+  if (!onStartPhotoUpload && !onStartAddNote && !onStartRouteDraw) return null;
+
   return (
     <div className="grid grid-cols-2 gap-2">
-      <button
-        onClick={onStartPhotoUpload}
-        className="flex items-center justify-center gap-2 rounded-xl bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_28px_rgba(184,106,31,0.22)] transition-all duration-150 hover:-translate-y-0.5 hover:bg-[#f0ae4b] hover:shadow-[0_16px_34px_rgba(184,106,31,0.3)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:translate-y-0 active:scale-[0.98]"
-      >
-        <Camera className="h-4 w-4" /> Upload photo
-      </button>
-      <button
-        onClick={onStartAddNote}
-        className="flex items-center justify-center gap-2 rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-800 transition-all duration-150 hover:-translate-y-0.5 hover:border-stone-400 hover:bg-stone-50 hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:translate-y-0 active:scale-[0.98]"
-      >
-        <FileText className="h-4 w-4" /> Add note
-      </button>
+      {onStartPhotoUpload ? (
+        <button
+          onClick={onStartPhotoUpload}
+          className="flex items-center justify-center gap-2 rounded-xl bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_28px_rgba(184,106,31,0.22)] transition-all duration-150 hover:-translate-y-0.5 hover:bg-[#f0ae4b] hover:shadow-[0_16px_34px_rgba(184,106,31,0.3)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:translate-y-0 active:scale-[0.98]"
+        >
+          <Camera className="h-4 w-4" /> Upload photo
+        </button>
+      ) : null}
+      {onStartAddNote ? (
+        <button
+          onClick={onStartAddNote}
+          className="flex items-center justify-center gap-2 rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-800 transition-all duration-150 hover:-translate-y-0.5 hover:border-stone-400 hover:bg-stone-50 hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:translate-y-0 active:scale-[0.98]"
+        >
+          <FileText className="h-4 w-4" /> Add note
+        </button>
+      ) : null}
       {onStartRouteDraw ? (
         <button
           onClick={onStartRouteDraw}
-          className="col-span-2 flex items-center justify-center gap-2 rounded-xl border border-teal-700/25 bg-teal-50 px-4 py-3 text-sm font-bold text-teal-950 transition-all duration-150 hover:-translate-y-0.5 hover:border-teal-700/40 hover:bg-teal-100 hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:translate-y-0 active:scale-[0.98]"
+          className="col-span-full flex items-center justify-center gap-2 rounded-xl border border-teal-700/25 bg-teal-50 px-4 py-3 text-sm font-bold text-teal-950 transition-all duration-150 hover:-translate-y-0.5 hover:border-teal-700/40 hover:bg-teal-100 hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:translate-y-0 active:scale-[0.98]"
         >
           <PenLine className="h-4 w-4" /> Draw route
         </button>
