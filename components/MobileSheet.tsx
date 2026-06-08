@@ -3,7 +3,7 @@
 import { ChevronUp } from "lucide-react";
 import { useState } from "react";
 import { AdminDataPanel } from "@/components/AdminDataPanel";
-import { DayList, LayersPanel, MemberAdminPanel, QuickActions, type SidebarProps } from "@/components/DaySidebar";
+import { DayList, LayersPanel, MemberAdminPanel, QuickActions, SidebarHeader, type SidebarProps } from "@/components/DaySidebar";
 import { cn } from "@/lib/utils";
 import type { Day } from "@/types/trip";
 
@@ -84,6 +84,7 @@ export function MobileSheet(props: MobileSheetProps) {
             <div className="overflow-hidden">
               {expanded ? (
                 <div className="max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
+                  <SidebarHeader trip={props.trip} />
                   <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} />
                   <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} />
                   {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}

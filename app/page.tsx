@@ -267,6 +267,7 @@ export default function Home() {
     ? { members: data.members, message: memberMessage, messageTone: memberMessageTone, isSaving: memberSaving, onGrantMember: grantMember }
     : null;
   const routeDraftDistance = useMemo(() => routeDistanceMeters(routeDraftPoints), [routeDraftPoints]);
+  const tripTitle = data.trip?.title ?? "Trip Logbook";
   const adminData = isAdmin
     ? {
       trip: data.trip,
@@ -717,8 +718,8 @@ export default function Home() {
     <main className="relative h-dvh overflow-hidden bg-[#e7efe8] text-stone-950">
       <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(135deg,rgba(255,253,246,0.92),rgba(211,229,222,0.5)_44%,rgba(234,198,132,0.26))]" />
       <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 px-3 py-3 md:px-6">
-        <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-sm font-black shadow-lg backdrop-blur">
-          <Sparkles className="h-3.5 w-3.5 text-[#d0872f]" /> Lofoten Logbook
+        <div className="pointer-events-auto flex max-w-[min(18rem,calc(100vw-11rem))] items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-sm font-black shadow-lg backdrop-blur sm:max-w-none">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#d0872f]" /> <span className="truncate">{tripTitle}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{supabase ? (user ? `Signed in ${user.email ?? ""}` : "Supabase sign-in") : "Local demo mode"}</div>
@@ -726,14 +727,14 @@ export default function Home() {
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden min-h-0 md:block"><DaySidebar days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} /></div>
+        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} /></div>
         <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={setMap} onCoordinatePick={handleCoordinatePick}>
           <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} />
           <RouteDraftLayer map={map} points={routeDraftPoints} />
           <MapLegend visibility={layerVisibility} />
         </MapView>
       </div>
-      {!panel ? <MobileSheet days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} /> : null}
+      {!panel ? <MobileSheet trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} /> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}

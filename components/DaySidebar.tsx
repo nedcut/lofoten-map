@@ -3,11 +3,12 @@
 import { CalendarDays, Camera, FileText, Loader2, Map, Mountain, PenLine, Route, UserPlus, Users } from "lucide-react";
 import { AdminDataPanel, type AdminDataProps } from "@/components/AdminDataPanel";
 import { cn, formatDateOnly } from "@/lib/utils";
-import type { Day, TripMember } from "@/types/trip";
+import type { Day, Trip, TripMember } from "@/types/trip";
 
 export type LayerVisibility = { photos: boolean; notes: boolean; routes: boolean };
 
 export type SidebarProps = {
+  trip: Trip | null;
   days: Day[];
   selectedDayId: string | null;
   onSelectDay: (dayId: string | null) => void;
@@ -28,14 +29,14 @@ export type MemberAdminProps = {
   onGrantMember: (input: { email: string; role: "admin" | "member" }) => Promise<void>;
 };
 
-export function SidebarHeader() {
+export function SidebarHeader({ trip }: { trip: Trip | null }) {
   return (
     <div className="space-y-2">
       <div className="inline-flex items-center gap-2 rounded-full border border-teal-700/20 bg-teal-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-teal-900">
-        <Mountain className="h-3.5 w-3.5" /> Lofoten 2026
+        <Mountain className="h-3.5 w-3.5" /> {trip?.start_date ? trip.start_date.slice(0, 4) : "Trip"}
       </div>
-      <h1 className="font-serif text-[2.6rem] font-semibold leading-[0.95] tracking-tight text-stone-950">Lofoten Logbook</h1>
-      <p className="max-w-[28rem] text-sm leading-6 text-stone-600">Norway graduation trip.</p>
+      <h1 className="font-serif text-[2.6rem] font-semibold leading-[0.95] tracking-tight text-stone-950">{trip?.title ?? "Trip Logbook"}</h1>
+      <p className="max-w-[28rem] text-sm leading-6 text-stone-600">{trip?.description ?? "Shared route planning, photos, and trail notes."}</p>
     </div>
   );
 }
@@ -174,7 +175,7 @@ export function MemberAdminPanel({ members, message, messageTone, isSaving, onGr
 export function DaySidebar(props: SidebarProps) {
   return (
     <aside className="flex h-full max-h-[78dvh] min-h-0 flex-col gap-4 overflow-y-auto rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.94)] p-4 text-stone-950 shadow-[0_24px_80px_rgba(46,61,54,0.2)] backdrop-blur-xl md:max-h-none md:w-96 md:p-5">
-      <SidebarHeader />
+      <SidebarHeader trip={props.trip} />
       <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} onStartRouteDraw={props.onStartRouteDraw} />
       <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} />
       <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} />
