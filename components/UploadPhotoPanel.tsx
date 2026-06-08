@@ -247,10 +247,10 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     if (activeItem?.coordinate) {
       previewCoordinateKeyRef.current = coordinateKey(activeItem.coordinate);
       onCoordinatePreview(activeItem.coordinate);
-    } else if (activeItem?.status === "needs-location") {
-      previewCoordinateKeyRef.current = null;
-      onCoordinatePreview(null);
+      return;
     }
+    previewCoordinateKeyRef.current = null;
+    onCoordinatePreview(null);
   }, [activeItem?.coordinate, activeItem?.id, activeItem?.status, onCoordinatePreview]);
 
   useEffect(() => {
