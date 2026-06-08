@@ -87,6 +87,7 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(Boolean(supabase));
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [authMessageTone, setAuthMessageTone] = useState<"info" | "error">("info");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [memberMessage, setMemberMessage] = useState<string | null>(null);
   const [memberSaving, setMemberSaving] = useState(false);
@@ -118,6 +119,7 @@ export default function Home() {
       setUser(session?.user ?? null);
       setAuthLoading(false);
       setAuthMessage(null);
+      setAuthMessageTone("info");
       if (!session?.user) setData(emptyData);
     });
     return () => {
@@ -179,10 +181,12 @@ export default function Home() {
     if (!supabase) return;
     setAuthSubmitting(true);
     setAuthMessage(null);
+    setAuthMessageTone("info");
     const { error: signInError } = await supabase.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: window.location.origin },
     });
+    setAuthMessageTone(signInError ? "error" : "info");
     setAuthMessage(signInError ? signInError.message : "Check your email for a sign-in link.");
     setAuthSubmitting(false);
   }
@@ -191,11 +195,13 @@ export default function Home() {
     if (!supabase) return;
     setAuthSubmitting(true);
     setAuthMessage(null);
+    setAuthMessageTone("info");
     const { error: signInError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: window.location.origin },
     });
     if (signInError) {
+      setAuthMessageTone("error");
       setAuthMessage(signInError.message);
       setAuthSubmitting(false);
     }
@@ -705,7 +711,7 @@ export default function Home() {
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
-      {supabase && !authLoading && !user ? <AuthPanel message={authMessage} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} /> : null}
+      {supabase && !authLoading && !user ? <AuthPanel message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} /> : null}
       {panel === "note" ? <AddNotePanel days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
@@ -728,7 +734,7 @@ function StatusPill({ children, tone = "info", onDismiss }: { children: ReactNod
   );
 }
 
-function AuthPanel({ message, isSubmitting, onSignIn, onSignInWithGoogle }: { message: string | null; isSubmitting: boolean; onSignIn: (email: string) => Promise<void>; onSignInWithGoogle: () => Promise<void> }) {
+function AuthPanel({ message, messageTone, isSubmitting, onSignIn, onSignInWithGoogle }: { message: string | null; messageTone: "info" | "error"; isSubmitting: boolean; onSignIn: (email: string) => Promise<void>; onSignInWithGoogle: () => Promise<void> }) {
   async function submit(formData: FormData) {
     const email = String(formData.get("email") ?? "").trim();
     if (email) await onSignIn(email);
@@ -741,7 +747,7 @@ function AuthPanel({ message, isSubmitting, onSignIn, onSignInWithGoogle }: { me
           <div className="rounded-lg bg-teal-50 p-3 text-teal-800"><ShieldCheck className="h-5 w-5" /></div>
           <div>
             <h2 className="font-serif text-2xl font-semibold">Sign in to Lofoten</h2>
-            <p className="text-sm leading-6 text-stone-600">Supabase mode is private to trip members.</p>
+            <p className="text-sm leading-6 text-stone-600">Use an invited Google or email account.</p>
           </div>
         </div>
         <button type="button" disabled={isSubmitting} onClick={onSignInWithGoogle} className="mb-4 flex w-full items-center justify-center gap-3 rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm font-black text-stone-900 shadow-sm transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
@@ -755,7 +761,16 @@ function AuthPanel({ message, isSubmitting, onSignIn, onSignInWithGoogle }: { me
           <Mail className="h-4 w-4 text-teal-800" />
           <input id="email" name="email" type="email" required placeholder="you@example.com" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-stone-400" />
         </div>
-        {message ? <div className="mb-3 rounded-lg border border-teal-700/20 bg-teal-50 p-3 text-sm text-teal-950">{message}</div> : null}
+        {message ? (
+          <div
+            className={cn(
+              "mb-3 rounded-lg border p-3 text-sm",
+              messageTone === "error" ? "border-rose-200 bg-rose-50 text-rose-950" : "border-teal-700/20 bg-teal-50 text-teal-950",
+            )}
+          >
+            {message}
+          </div>
+        ) : null}
         <button disabled={isSubmitting} className="w-full rounded-lg bg-[#e7a13d] px-4 py-3 font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
           {isSubmitting ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <LogIn className="mr-2 inline h-4 w-4" />} Send sign-in link
         </button>
