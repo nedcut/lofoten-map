@@ -14,7 +14,7 @@ import { MapLegend } from "@/components/MapLegend";
 import { MobileSheet } from "@/components/MobileSheet";
 import { RouteDraftLayer } from "@/components/RouteDraftLayer";
 import { TripLayers } from "@/components/TripLayers";
-import { UploadPhotoPanel, type PhotoUploadItemInput } from "@/components/UploadPhotoPanel";
+import { UploadPhotoPanel, type PhotoUploadItemInput, type PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
 import { preparePhotoFiles } from "@/lib/photo-processing";
 import { PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -323,11 +323,13 @@ export default function Home() {
     }
   }
 
-  async function savePhotos(inputs: PhotoUploadItemInput[]) {
+  async function savePhotos(inputs: PhotoUploadItemInput[]): Promise<PhotoUploadSaveResult | void> {
     if (inputs.length === 0 || !data.trip) return;
     setSaving(true);
     setError(null);
     let didSave = false;
+    const savedClientIds: string[] = [];
+    const failedClientIds: string[] = [];
     try {
       if (!supabase) {
         const rows = await Promise.all(inputs.map(async (input) => {
@@ -348,6 +350,7 @@ export default function Home() {
           };
         }));
         setData((current) => ({ ...current, photos: [...rows, ...current.photos] }));
+        savedClientIds.push(...inputs.map((input) => input.clientId));
         didSave = true;
       } else {
         if (!user) {
@@ -355,6 +358,7 @@ export default function Home() {
           return;
         }
         const rows: Array<{
+          client_id: string;
           trip_id: string;
           day_id: string | null;
           uploader_name: string;
@@ -367,6 +371,7 @@ export default function Home() {
           exif_found: boolean;
         }> = [];
         const failures: string[] = [];
+        const warnings: string[] = [];
         const uploadedPaths: string[] = [];
 
         await mapWithConcurrency(inputs, UPLOAD_CONCURRENCY, async (input) => {
@@ -376,6 +381,7 @@ export default function Home() {
           const { error: uploadError } = await supabase.storage.from(PHOTO_BUCKET).upload(path, prepared.imageFile, { cacheControl: "3600", upsert: false, contentType: prepared.imageFile.type || undefined });
           if (uploadError) {
             failures.push(`${input.file.name}: ${uploadError.message}`);
+            failedClientIds.push(input.clientId);
             return;
           }
           uploadedPaths.push(path);
@@ -385,7 +391,7 @@ export default function Home() {
             const thumbnailPath = `${data.trip!.slug}/thumbs/${crypto.randomUUID()}.jpg`;
             const { error: thumbnailError } = await supabase.storage.from(PHOTO_BUCKET).upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: "3600", upsert: false, contentType: prepared.thumbnailFile.type });
             if (thumbnailError) {
-              failures.push(`${input.file.name} thumbnail: ${thumbnailError.message}`);
+              warnings.push(`${input.file.name}: thumbnail skipped`);
             } else {
               uploadedPaths.push(thumbnailPath);
               const { data: thumbnailData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(thumbnailPath);
@@ -393,6 +399,7 @@ export default function Home() {
             }
           }
           rows.push({
+            client_id: input.clientId,
             trip_id: data.trip!.id,
             day_id: input.dayId,
             uploader_name: input.uploaderName || "Friend",
@@ -407,22 +414,40 @@ export default function Home() {
         });
 
         if (rows.length > 0) {
-          const { error: insertError } = await supabase.from("photos").insert(rows);
+          const insertRows = rows.map((row) => ({
+            trip_id: row.trip_id,
+            day_id: row.day_id,
+            uploader_name: row.uploader_name,
+            image_url: row.image_url,
+            thumbnail_url: row.thumbnail_url,
+            lat: row.lat,
+            lng: row.lng,
+            taken_at: row.taken_at,
+            caption: row.caption,
+            exif_found: row.exif_found,
+          }));
+          const { error: insertError } = await supabase.from("photos").insert(insertRows);
           if (insertError) {
             if (uploadedPaths.length > 0) await supabase.storage.from(PHOTO_BUCKET).remove(uploadedPaths);
             setError(insertError.message);
+            failedClientIds.push(...rows.map((row) => row.client_id));
           } else {
+            savedClientIds.push(...rows.map((row) => row.client_id));
             await loadData();
             didSave = true;
           }
         }
         if (failures.length > 0) {
           setError(`${failures.length} photo${failures.length === 1 ? "" : "s"} failed to upload. ${failures.slice(0, 2).join(" ")}`);
-          if (rows.length === 0) didSave = false;
+          didSave = false;
+        } else if (warnings.length > 0) {
+          setError(`${rows.length} photo${rows.length === 1 ? "" : "s"} uploaded. ${warnings.length} thumbnail${warnings.length === 1 ? "" : "s"} could not be created, but the original photos are saved.`);
         }
       }
+      return { savedClientIds, failedClientIds };
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not upload photos.");
+      return { savedClientIds, failedClientIds: inputs.filter((input) => !savedClientIds.includes(input.clientId)).map((input) => input.clientId) };
     } finally {
       setSaving(false);
       if (didSave) closePanel();

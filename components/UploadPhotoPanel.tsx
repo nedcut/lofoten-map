@@ -18,6 +18,11 @@ export type PhotoUploadItemInput = {
   exif: ExtractedExif | null;
 };
 
+export type PhotoUploadSaveResult = {
+  savedClientIds: string[];
+  failedClientIds: string[];
+};
+
 type Props = {
   days: Day[];
   routes: RouteSegment[];
@@ -26,7 +31,7 @@ type Props = {
   isSaving: boolean;
   onCancel: () => void;
   onCoordinatePreview: (coordinate: LngLat | null) => void;
-  onSave: (items: PhotoUploadItemInput[]) => Promise<void>;
+  onSave: (items: PhotoUploadItemInput[]) => Promise<PhotoUploadSaveResult | void>;
 };
 
 const MAX_FILE_SIZE = 30 * 1024 * 1024;
@@ -347,7 +352,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
   async function submit(formData: FormData) {
     const readyItems = items.filter((item) => item.status === "ready" && item.coordinate);
     if (readyItems.length === 0) return;
-    await onSave(readyItems.map((item) => ({
+    const result = await onSave(readyItems.map((item) => ({
       clientId: item.id,
       file: item.file,
       caption: item.caption,
@@ -356,6 +361,10 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
       coordinate: item.coordinate!,
       exif: item.exif,
     })));
+    if (!result || result.savedClientIds.length === 0 || result.failedClientIds.length === 0) return;
+    const savedIds = new Set(result.savedClientIds);
+    setItems((current) => current.filter((item) => !savedIds.has(item.id)));
+    setActiveItemId(result.failedClientIds[0] ?? null);
   }
 
   function setActiveDay(nextDayId: string) {
