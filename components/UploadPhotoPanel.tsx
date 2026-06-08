@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Upload, X } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Upload, X } from "lucide-react";
 import { point, pointToLineDistance } from "@turf/turf";
 import { useEffect, useMemo, useState } from "react";
 import { extractPhotoExif, type ExtractedExif } from "@/lib/exif";
@@ -35,7 +35,8 @@ const IMAGE_EXTENSIONS = [".heic", ".heif", ".jpg", ".jpeg", ".png", ".webp", ".
 const BATCH_OVERRIDE_IDLE = "__idle";
 const ALL_DAYS_VALUE = "__all";
 
-type QueueStatus = "reading" | "ready" | "needs-location" | "invalid" | "uploaded";
+type QueueStatus = "reading" | "ready" | "needs-location" | "invalid";
+type QueueFilter = "all" | "needs-location" | "invalid";
 
 type QueueItem = {
   id: string;
@@ -112,6 +113,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [uploaderName, setUploaderName] = useState("");
   const [batchOverrideDayId, setBatchOverrideDayId] = useState(BATCH_OVERRIDE_IDLE);
+  const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
   const activeItem = items.find((item) => item.id === activeItemId) ?? items[0] ?? null;
   const activePreviewUrl = useMemo(() => activeItem ? URL.createObjectURL(activeItem.file) : null, [activeItem]);
 
@@ -151,6 +153,17 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     }
     return Array.from(buckets.entries()).map(([key, count]) => ({ dayId: key || null, count }));
   }, [items]);
+
+  const visibleItems = useMemo(() => {
+    if (queueFilter === "all") return items;
+    return items.filter((item) => item.status === queueFilter);
+  }, [items, queueFilter]);
+
+  useEffect(() => {
+    if (visibleItems.length === 0) return;
+    if (activeItemId && visibleItems.some((item) => item.id === activeItemId)) return;
+    setActiveItemId(visibleItems[0].id);
+  }, [activeItemId, visibleItems]);
 
   async function handleFiles(files: FileList | null) {
     const selected = Array.from(files ?? []);
@@ -256,6 +269,28 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
           </div>
         ) : null}
 
+        {items.length > 0 ? (
+          <div className="grid grid-cols-3 gap-1 rounded-lg border border-stone-200 bg-white p-1 text-xs font-bold text-stone-600">
+            {([
+              ["all", "All", counts.total],
+              ["needs-location", "Place", counts.needsLocation],
+              ["invalid", "Issues", counts.invalid],
+            ] as const).map(([key, label, count]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setQueueFilter(key)}
+                className={cn(
+                  "rounded-md px-2 py-1.5 transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/15",
+                  queueFilter === key ? "bg-teal-700 text-white shadow-sm" : "hover:bg-stone-100",
+                )}
+              >
+                {label} <span className={cn("ml-1", queueFilter === key ? "text-white/80" : "text-stone-400")}>{count}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         {activeItem ? (
           <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 rounded-lg border border-stone-200 bg-white p-2 shadow-sm">
             <div className="h-28 overflow-hidden rounded-md bg-stone-100">
@@ -283,7 +318,13 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
             </div>
           ) : (
             <div className="space-y-1">
-              {items.map((item, index) => (
+              {visibleItems.length === 0 ? (
+                <div className="flex min-h-20 items-center justify-center rounded-md bg-stone-50 px-3 text-center text-xs leading-5 text-stone-500">
+                  No photos in this view.
+                </div>
+              ) : visibleItems.map((item) => {
+                const index = items.findIndex((candidate) => candidate.id === item.id);
+                return (
                 <button type="button" key={item.id} onClick={() => setActiveItemId(item.id)} className={cn("grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left transition", activeItemId === item.id ? "bg-teal-50 ring-1 ring-teal-700/30" : "hover:bg-stone-100")}>
                   <span className="text-xs font-bold text-stone-400">{index + 1}</span>
                   <span className="min-w-0">
@@ -291,9 +332,10 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
                     <span className="block truncate text-[11px] text-stone-500">{item.status === "ready" ? "Ready to upload" : item.status === "needs-location" ? "Tap map to place" : item.status === "reading" ? "Reading metadata" : item.message}</span>
                     <span className="block truncate text-[11px] font-semibold text-teal-800">{dayLabel(days, item.dayId)}{item.dayMatchSource ? ` · ${item.dayMatchSource} matched` : ""}</span>
                   </span>
-                  <span className={cn("h-2.5 w-2.5 rounded-full", item.status === "ready" ? "bg-emerald-500" : item.status === "needs-location" ? "bg-amber-500" : item.status === "invalid" ? "bg-rose-500" : "bg-stone-300")} />
+                  {item.status === "invalid" ? <AlertTriangle className="h-4 w-4 text-rose-500" /> : <span className={cn("h-2.5 w-2.5 rounded-full", item.status === "ready" ? "bg-emerald-500" : item.status === "needs-location" ? "bg-amber-500" : "bg-stone-300")} />}
                 </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
