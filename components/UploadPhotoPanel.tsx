@@ -36,7 +36,7 @@ const BATCH_OVERRIDE_IDLE = "__idle";
 const ALL_DAYS_VALUE = "__all";
 
 type QueueStatus = "reading" | "ready" | "needs-location" | "invalid";
-type QueueFilter = "all" | "needs-location" | "invalid";
+type QueueFilter = "all" | "review" | "needs-location" | "invalid";
 
 type QueueItem = {
   id: string;
@@ -125,7 +125,7 @@ function coordinateKey(coordinate: LngLat) {
 function routePlaceNoGpsItems(items: AnalyzedItem[], routes: RouteSegment[]) {
   const byDay = new Map<string, AnalyzedItem[]>();
   for (const item of items) {
-    if (item.status === "invalid" || item.coordinate || !item.dayId) continue;
+    if (item.status === "invalid" || item.status === "reading" || item.coordinate || !item.dayId) continue;
     if (!routeForDay(routes, item.dayId)) continue;
     const dayItems = byDay.get(item.dayId) ?? [];
     dayItems.push(item);
@@ -153,6 +153,34 @@ function routePlaceNoGpsItems(items: AnalyzedItem[], routes: RouteSegment[]) {
   }
 
   return items;
+}
+
+function routePlaceQueueItems(items: QueueItem[], routes: RouteSegment[]) {
+  const analyzed = routePlaceNoGpsItems(items.map((item, order) => ({
+    id: item.id,
+    order,
+    dayId: item.dayId,
+    dayMatchSource: item.dayMatchSource,
+    locationSource: item.locationSource,
+    exif: item.exif,
+    coordinate: item.coordinate,
+    status: item.status,
+    message: item.message,
+  })), routes);
+  const analyzedById = new Map(analyzed.map((item) => [item.id, item]));
+  return items.map((item) => {
+    const analyzedItem = analyzedById.get(item.id);
+    return analyzedItem ? {
+      ...item,
+      dayId: analyzedItem.dayId,
+      dayMatchSource: analyzedItem.dayMatchSource,
+      locationSource: analyzedItem.locationSource,
+      exif: analyzedItem.exif,
+      coordinate: analyzedItem.coordinate,
+      status: analyzedItem.status,
+      message: analyzedItem.message,
+    } : item;
+  });
 }
 
 function dayLabel(days: Day[], dayId: string | null) {
@@ -228,6 +256,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     matchedByRoute: items.filter((item) => item.dayMatchSource === "route").length,
     placedOnRoute: items.filter((item) => item.locationSource === "route").length,
     unassigned: items.filter((item) => item.status !== "invalid" && item.dayId === null).length,
+    review: items.filter((item) => item.status !== "invalid" && (item.status === "needs-location" || item.dayId === null)).length,
   }), [items]);
 
   const dayBuckets = useMemo(() => {
@@ -242,6 +271,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
 
   const visibleItems = useMemo(() => {
     if (queueFilter === "all") return items;
+    if (queueFilter === "review") return items.filter((item) => item.status !== "invalid" && (item.status === "needs-location" || item.dayId === null));
     return items.filter((item) => item.status === queueFilter);
   }, [items, queueFilter]);
 
@@ -330,14 +360,35 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
 
   function setActiveDay(nextDayId: string) {
     if (!activeItem) return;
-    setItems((current) => current.map((item) => item.id === activeItem.id ? { ...item, dayId: nextDayId || null, dayMatchSource: null } : item));
+    setItems((current) => routePlaceQueueItems(current.map((item) => {
+      if (item.id !== activeItem.id) return item;
+      const dayId = nextDayId || null;
+      return {
+        ...item,
+        dayId,
+        dayMatchSource: null,
+        locationSource: item.coordinate ? item.locationSource : null,
+        status: item.status === "invalid" || item.status === "reading" || item.coordinate ? item.status : "needs-location",
+        message: item.coordinate || !dayId ? item.message : "Day set. Tap map to place if it is not on the route.",
+      };
+    }), routes));
   }
 
   function applyBatchDay(nextDayId: string) {
     if (nextDayId === BATCH_OVERRIDE_IDLE) return;
     setBatchOverrideDayId(nextDayId);
     const dayId = nextDayId === ALL_DAYS_VALUE ? null : nextDayId;
-    setItems((current) => current.map((item) => item.status === "invalid" ? item : { ...item, dayId, dayMatchSource: null }));
+    setItems((current) => routePlaceQueueItems(current.map((item) => {
+      if (item.status === "invalid") return item;
+      return {
+        ...item,
+        dayId,
+        dayMatchSource: null,
+        locationSource: item.coordinate ? item.locationSource : null,
+        status: item.status === "reading" || item.coordinate ? item.status : "needs-location",
+        message: item.coordinate || !dayId ? item.message : "Day set. Tap map to place if it is not on the route.",
+      };
+    }), routes));
   }
 
   return (
@@ -380,9 +431,10 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
         ) : null}
 
         {items.length > 0 ? (
-          <div className="grid grid-cols-3 gap-1 rounded-lg border border-stone-200 bg-white p-1 text-xs font-bold text-stone-600">
+          <div className="grid grid-cols-4 gap-1 rounded-lg border border-stone-200 bg-white p-1 text-xs font-bold text-stone-600">
             {([
               ["all", "All", counts.total],
+              ["review", "Review", counts.review],
               ["needs-location", "Place", counts.needsLocation],
               ["invalid", "Issues", counts.invalid],
             ] as const).map(([key, label, count]) => (
