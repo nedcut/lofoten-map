@@ -146,7 +146,7 @@ export function MemberAdminPanel({ members, message, isSaving, onGrantMember }: 
 
 export function DaySidebar(props: SidebarProps) {
   return (
-    <aside className="flex max-h-[78dvh] flex-col gap-4 overflow-y-auto rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.94)] p-4 text-stone-950 shadow-[0_24px_80px_rgba(46,61,54,0.2)] backdrop-blur-xl md:h-full md:max-h-none md:w-96 md:p-5">
+    <aside className="flex h-full max-h-[78dvh] min-h-0 flex-col gap-4 overflow-y-auto rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.94)] p-4 text-stone-950 shadow-[0_24px_80px_rgba(46,61,54,0.2)] backdrop-blur-xl md:max-h-none md:w-96 md:p-5">
       <SidebarHeader />
       <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} />
       <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} />
