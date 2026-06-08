@@ -195,18 +195,23 @@ export default function Home() {
     if (!supabase || !data.trip) return;
     setMemberSaving(true);
     setMemberMessage(null);
-    const { error: grantError } = await supabase.rpc("grant_trip_member_by_email", {
-      target_trip_slug: data.trip.slug,
-      target_email: input.email,
-      target_role: input.role,
-    });
-    if (grantError) {
-      setMemberMessage(grantError.message);
-    } else {
-      setMemberMessage(`${input.email} added as ${input.role}.`);
-      await loadData();
+    try {
+      const { error: grantError } = await supabase.rpc("grant_trip_member_by_email", {
+        target_trip_slug: data.trip.slug,
+        target_email: input.email,
+        target_role: input.role,
+      });
+      if (grantError) {
+        setMemberMessage(grantError.message);
+      } else {
+        setMemberMessage(`${input.email} added as ${input.role}.`);
+        await loadData();
+      }
+    } catch (grantError) {
+      setMemberMessage(grantError instanceof Error ? grantError.message : "Could not update members.");
+    } finally {
+      setMemberSaving(false);
     }
-    setMemberSaving(false);
   }
 
   const filtered = useMemo(() => {
@@ -440,171 +445,175 @@ export default function Home() {
     }
   }
 
-  async function updateTrip(input: { title: string; description: string | null; start_date: string | null; end_date: string | null }) {
-    if (!data.trip) return;
+  async function runAdminOperation(operation: () => Promise<void>) {
     setAdminDataSaving(true);
     setAdminDataMessage(null);
-    if (supabase) {
-      const { error: updateError } = await supabase.from("trips").update(input).eq("id", data.trip.id);
-      if (updateError) setAdminDataMessage(updateError.message);
-      else {
-        setAdminDataMessage("Trip updated.");
-        await loadData();
-      }
-    } else {
-      setData((current) => ({ ...current, trip: current.trip ? { ...current.trip, ...input } : current.trip }));
-      setAdminDataMessage("Trip updated.");
+    try {
+      await operation();
+    } catch (adminError) {
+      setAdminDataMessage(adminError instanceof Error ? adminError.message : "Admin action failed.");
+    } finally {
+      setAdminDataSaving(false);
     }
-    setAdminDataSaving(false);
+  }
+
+  async function updateTrip(input: { title: string; description: string | null; start_date: string | null; end_date: string | null }) {
+    if (!data.trip) return;
+    await runAdminOperation(async () => {
+      if (supabase) {
+        const { error: updateError } = await supabase.from("trips").update(input).eq("id", data.trip!.id);
+        if (updateError) setAdminDataMessage(updateError.message);
+        else {
+          setAdminDataMessage("Trip updated.");
+          await loadData();
+        }
+      } else {
+        setData((current) => ({ ...current, trip: current.trip ? { ...current.trip, ...input } : current.trip }));
+        setAdminDataMessage("Trip updated.");
+      }
+    });
   }
 
   async function updateDay(dayId: string, input: { day_number: number; date: string | null; title: string | null; summary: string | null }) {
     if (!data.trip) return;
-    setAdminDataSaving(true);
-    setAdminDataMessage(null);
-    if (supabase) {
-      const { error: updateError } = await supabase.from("days").update(input).eq("id", dayId).eq("trip_id", data.trip.id);
-      if (updateError) setAdminDataMessage(updateError.message);
-      else {
+    await runAdminOperation(async () => {
+      if (supabase) {
+        const { error: updateError } = await supabase.from("days").update(input).eq("id", dayId).eq("trip_id", data.trip!.id);
+        if (updateError) setAdminDataMessage(updateError.message);
+        else {
+          setAdminDataMessage("Day updated.");
+          await loadData();
+        }
+      } else {
+        setData((current) => ({ ...current, days: current.days.map((day) => day.id === dayId ? { ...day, ...input } : day).sort((a, b) => a.day_number - b.day_number) }));
         setAdminDataMessage("Day updated.");
-        await loadData();
       }
-    } else {
-      setData((current) => ({ ...current, days: current.days.map((day) => day.id === dayId ? { ...day, ...input } : day).sort((a, b) => a.day_number - b.day_number) }));
-      setAdminDataMessage("Day updated.");
-    }
-    setAdminDataSaving(false);
+    });
   }
 
   async function createDay(input: { day_number: number; date: string | null; title: string | null; summary: string | null }) {
     if (!data.trip) return;
-    setAdminDataSaving(true);
-    setAdminDataMessage(null);
-    const row = { ...input, trip_id: data.trip.id };
-    if (supabase) {
-      const { error: insertError } = await supabase.from("days").insert(row);
-      if (insertError) setAdminDataMessage(insertError.message);
-      else {
+    await runAdminOperation(async () => {
+      const row = { ...input, trip_id: data.trip!.id };
+      if (supabase) {
+        const { error: insertError } = await supabase.from("days").insert(row);
+        if (insertError) setAdminDataMessage(insertError.message);
+        else {
+          setAdminDataMessage("Day added.");
+          await loadData();
+        }
+      } else {
+        setData((current) => ({
+          ...current,
+          days: [...current.days, { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }].sort((a, b) => a.day_number - b.day_number),
+        }));
         setAdminDataMessage("Day added.");
-        await loadData();
       }
-    } else {
-      setData((current) => ({
-        ...current,
-        days: [...current.days, { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }].sort((a, b) => a.day_number - b.day_number),
-      }));
-      setAdminDataMessage("Day added.");
-    }
-    setAdminDataSaving(false);
+    });
   }
 
   async function updateRoute(routeId: string, input: { day_id: string | null; name: string | null; mode: RouteMode; source: string | null }) {
     if (!data.trip) return;
-    setAdminDataSaving(true);
-    setAdminDataMessage(null);
-    if (supabase) {
-      const { error: updateError } = await supabase.from("route_segments").update(input).eq("id", routeId).eq("trip_id", data.trip.id);
-      if (updateError) setAdminDataMessage(updateError.message);
-      else {
+    await runAdminOperation(async () => {
+      if (supabase) {
+        const { error: updateError } = await supabase.from("route_segments").update(input).eq("id", routeId).eq("trip_id", data.trip!.id);
+        if (updateError) setAdminDataMessage(updateError.message);
+        else {
+          setAdminDataMessage("Route updated.");
+          await loadData();
+        }
+      } else {
+        setData((current) => ({ ...current, routeSegments: current.routeSegments.map((route) => route.id === routeId ? { ...route, ...input } : route) }));
         setAdminDataMessage("Route updated.");
-        await loadData();
       }
-    } else {
-      setData((current) => ({ ...current, routeSegments: current.routeSegments.map((route) => route.id === routeId ? { ...route, ...input } : route) }));
-      setAdminDataMessage("Route updated.");
-    }
-    setAdminDataSaving(false);
+    });
   }
 
   async function updateNote(noteId: string, input: { day_id: string | null; author_name: string | null; body: string }) {
     if (!data.trip) return;
-    setAdminDataSaving(true);
-    setAdminDataMessage(null);
-    if (supabase) {
-      const { error: updateError } = await supabase.from("notes").update(input).eq("id", noteId).eq("trip_id", data.trip.id);
-      if (updateError) setAdminDataMessage(updateError.message);
-      else {
+    await runAdminOperation(async () => {
+      if (supabase) {
+        const { error: updateError } = await supabase.from("notes").update(input).eq("id", noteId).eq("trip_id", data.trip!.id);
+        if (updateError) setAdminDataMessage(updateError.message);
+        else {
+          setAdminDataMessage("Note updated.");
+          await loadData();
+        }
+      } else {
+        setData((current) => ({ ...current, notes: current.notes.map((note) => note.id === noteId ? { ...note, ...input } : note) }));
         setAdminDataMessage("Note updated.");
-        await loadData();
       }
-    } else {
-      setData((current) => ({ ...current, notes: current.notes.map((note) => note.id === noteId ? { ...note, ...input } : note) }));
-      setAdminDataMessage("Note updated.");
-    }
-    setAdminDataSaving(false);
+    });
   }
 
   async function updatePlace(placeId: string, input: { day_id: string | null; name: string; place_type: string | null; description: string | null; lat: number; lng: number }) {
     if (!data.trip) return;
-    setAdminDataSaving(true);
-    setAdminDataMessage(null);
-    if (supabase) {
-      const { error: updateError } = await supabase.from("places").update(input).eq("id", placeId).eq("trip_id", data.trip.id);
-      if (updateError) setAdminDataMessage(updateError.message);
-      else {
+    await runAdminOperation(async () => {
+      if (supabase) {
+        const { error: updateError } = await supabase.from("places").update(input).eq("id", placeId).eq("trip_id", data.trip!.id);
+        if (updateError) setAdminDataMessage(updateError.message);
+        else {
+          setAdminDataMessage("Place updated.");
+          await loadData();
+        }
+      } else {
+        setData((current) => ({ ...current, places: current.places.map((place) => place.id === placeId ? { ...place, ...input } : place) }));
         setAdminDataMessage("Place updated.");
-        await loadData();
       }
-    } else {
-      setData((current) => ({ ...current, places: current.places.map((place) => place.id === placeId ? { ...place, ...input } : place) }));
-      setAdminDataMessage("Place updated.");
-    }
-    setAdminDataSaving(false);
+    });
   }
 
   async function updatePhoto(photoId: string, input: { day_id: string | null; uploader_name: string | null; caption: string | null; lat: number | null; lng: number | null; taken_at: string | null }) {
     if (!data.trip) return;
-    setAdminDataSaving(true);
-    setAdminDataMessage(null);
-    if (supabase) {
-      const { error: updateError } = await supabase.from("photos").update(input).eq("id", photoId).eq("trip_id", data.trip.id);
-      if (updateError) setAdminDataMessage(updateError.message);
-      else {
+    await runAdminOperation(async () => {
+      if (supabase) {
+        const { error: updateError } = await supabase.from("photos").update(input).eq("id", photoId).eq("trip_id", data.trip!.id);
+        if (updateError) setAdminDataMessage(updateError.message);
+        else {
+          setAdminDataMessage("Photo updated.");
+          await loadData();
+        }
+      } else {
+        setData((current) => ({ ...current, photos: current.photos.map((photo) => photo.id === photoId ? { ...photo, ...input } : photo) }));
         setAdminDataMessage("Photo updated.");
-        await loadData();
       }
-    } else {
-      setData((current) => ({ ...current, photos: current.photos.map((photo) => photo.id === photoId ? { ...photo, ...input } : photo) }));
-      setAdminDataMessage("Photo updated.");
-    }
-    setAdminDataSaving(false);
+    });
   }
 
   async function deleteDataItem(table: "days" | "route_segments" | "notes" | "places" | "photos", id: string) {
     if (!data.trip) return;
-    setAdminDataSaving(true);
-    setAdminDataMessage(null);
-    if (supabase) {
-      const photoStoragePath = table === "photos"
-        ? storagePathFromPublicUrl(data.photos.find((photo) => photo.id === id)?.image_url ?? "")
-        : null;
-      const { error: deleteError } = await supabase.from(table).delete().eq("id", id).eq("trip_id", data.trip.id);
-      if (deleteError) setAdminDataMessage(deleteError.message);
-      else {
-        if (photoStoragePath) {
-          const { error: storageDeleteError } = await supabase.storage.from(PHOTO_BUCKET).remove([photoStoragePath]);
-          setAdminDataMessage(storageDeleteError ? `Item deleted, but photo file cleanup failed: ${storageDeleteError.message}` : "Item deleted.");
-        } else {
-          setAdminDataMessage("Item deleted.");
+    await runAdminOperation(async () => {
+      if (supabase) {
+        const photoStoragePath = table === "photos"
+          ? storagePathFromPublicUrl(data.photos.find((photo) => photo.id === id)?.image_url ?? "")
+          : null;
+        const { error: deleteError } = await supabase.from(table).delete().eq("id", id).eq("trip_id", data.trip!.id);
+        if (deleteError) setAdminDataMessage(deleteError.message);
+        else {
+          if (photoStoragePath) {
+            const { error: storageDeleteError } = await supabase.storage.from(PHOTO_BUCKET).remove([photoStoragePath]);
+            setAdminDataMessage(storageDeleteError ? `Item deleted, but photo file cleanup failed: ${storageDeleteError.message}` : "Item deleted.");
+          } else {
+            setAdminDataMessage("Item deleted.");
+          }
+          await loadData();
         }
-        await loadData();
+      } else {
+        const deletedPhoto = table === "photos" ? data.photos.find((item) => item.id === id) : null;
+        if (deletedPhoto?.image_url.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.image_url);
+        setData((current) => ({
+          ...current,
+          days: table === "days" ? current.days.filter((item) => item.id !== id) : current.days,
+          notes: table === "notes" ? current.notes.filter((item) => item.id !== id) : current.notes.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
+          places: table === "places" ? current.places.filter((item) => item.id !== id) : current.places.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
+          photos: table === "photos" ? current.photos.filter((item) => item.id !== id) : current.photos.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
+          routeSegments: table === "route_segments"
+            ? current.routeSegments.filter((item) => item.id !== id)
+            : current.routeSegments.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
+        }));
+        setAdminDataMessage("Item deleted.");
       }
-    } else {
-      const deletedPhoto = table === "photos" ? data.photos.find((item) => item.id === id) : null;
-      if (deletedPhoto?.image_url.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.image_url);
-      setData((current) => ({
-        ...current,
-        days: table === "days" ? current.days.filter((item) => item.id !== id) : current.days,
-        notes: table === "notes" ? current.notes.filter((item) => item.id !== id) : current.notes.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
-        places: table === "places" ? current.places.filter((item) => item.id !== id) : current.places.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
-        photos: table === "photos" ? current.photos.filter((item) => item.id !== id) : current.photos.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
-        routeSegments: table === "route_segments"
-          ? current.routeSegments.filter((item) => item.id !== id)
-          : current.routeSegments.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
-      }));
-      setAdminDataMessage("Item deleted.");
-    }
-    setAdminDataSaving(false);
+    });
   }
 
   return (
