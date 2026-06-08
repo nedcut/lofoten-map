@@ -317,7 +317,7 @@ function DayEditor({ day, isSaving, onSave, onDelete }: { day: Day; isSaving: bo
   );
 }
 
-function RouteEditor({ route, days, isSaving, onSave, onDelete }: { route: RouteSegment; days: Day[]; isSaving: boolean; onSave: AdminDataProps["onUpdateRoute"]; onDelete: () => Promise<void> }) {
+export function RouteEditor({ route, days, isSaving, onSave, onDelete }: { route: RouteSegment; days: Day[]; isSaving: boolean; onSave: AdminDataProps["onUpdateRoute"]; onDelete: () => Promise<void> }) {
   async function submit(formData: FormData) {
     await onSave(route.id, {
       day_id: String(formData.get("day_id") || "") || null,
@@ -342,7 +342,7 @@ function RouteEditor({ route, days, isSaving, onSave, onDelete }: { route: Route
   );
 }
 
-function NoteEditor({ note, days, isSaving, onSave, onDelete }: { note: Note; days: Day[]; isSaving: boolean; onSave: AdminDataProps["onUpdateNote"]; onDelete: () => Promise<void> }) {
+export function NoteEditor({ note, days, isSaving, onSave, onDelete }: { note: Note; days: Day[]; isSaving: boolean; onSave: AdminDataProps["onUpdateNote"]; onDelete: () => Promise<void> }) {
   async function submit(formData: FormData) {
     await onSave(note.id, {
       day_id: String(formData.get("day_id") || "") || null,
@@ -361,7 +361,7 @@ function NoteEditor({ note, days, isSaving, onSave, onDelete }: { note: Note; da
   );
 }
 
-function PlaceEditor({ place, days, isSaving, onSave, onDelete }: { place: Place; days: Day[]; isSaving: boolean; onSave: AdminDataProps["onUpdatePlace"]; onDelete: () => Promise<void> }) {
+export function PlaceEditor({ place, days, isSaving, onSave, onDelete }: { place: Place; days: Day[]; isSaving: boolean; onSave: AdminDataProps["onUpdatePlace"]; onDelete: () => Promise<void> }) {
   async function submit(formData: FormData) {
     await onSave(place.id, {
       day_id: String(formData.get("day_id") || "") || null,
@@ -389,7 +389,7 @@ function PlaceEditor({ place, days, isSaving, onSave, onDelete }: { place: Place
   );
 }
 
-function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo: Photo; days: Day[]; isSaving: boolean; onSave: AdminDataProps["onUpdatePhoto"]; onDelete: () => Promise<void> }) {
+export function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo: Photo; days: Day[]; isSaving: boolean; onSave: AdminDataProps["onUpdatePhoto"]; onDelete: () => Promise<void> }) {
   async function submit(formData: FormData) {
     await onSave(photo.id, {
       day_id: String(formData.get("day_id") || "") || null,

@@ -1,7 +1,7 @@
 "use client";
 
 import mapboxgl from "mapbox-gl";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { noteFeatureCollection, photoFeatureCollection, placeFeatureCollection, routeFeatureCollection } from "@/lib/geo";
 import { formatDateTime } from "@/lib/utils";
 import type { Note, Photo, Place, RouteSegment } from "@/types/trip";
@@ -46,6 +46,8 @@ function setLayerVisibility(map: mapboxgl.Map, id: string, visible: boolean) {
   map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
 }
 
+export type MapItemKind = "photo" | "note" | "place" | "route";
+
 type Props = {
   map: mapboxgl.Map | null;
   routes: RouteSegment[];
@@ -53,9 +55,19 @@ type Props = {
   notes: Note[];
   places: Place[];
   visibility: { routes: boolean; photos: boolean; notes: boolean };
+  currentUserId: string | null;
+  isAdmin: boolean;
+  onEditItem: (kind: MapItemKind, id: string) => void;
+  onDeleteItem: (kind: MapItemKind, id: string) => void;
 };
 
-export function TripLayers({ map, routes, photos, notes, places, visibility }: Props) {
+export function TripLayers({ map, routes, photos, notes, places, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem }: Props) {
+  // Popup click handlers are attached once (keyed on [map]); this ref lets those
+  // long-lived closures read the latest permissions/callbacks without re-binding.
+  const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem });
+  useEffect(() => {
+    actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem };
+  }, [currentUserId, isAdmin, onEditItem, onDeleteItem]);
   const routeData = useMemo(() => routeFeatureCollection(routes), [routes]);
   const photoData = useMemo(() => photoFeatureCollection(photos), [photos]);
   const noteData = useMemo(() => noteFeatureCollection(notes), [notes]);
@@ -114,13 +126,43 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
   useEffect(() => {
     if (!map) return;
     const activeMap = map;
-    let cancelled = false;
     let handlersAttached = false;
     const pointPopupLayers = ["photos-circle", "notes-circle", "places-circle"];
     const routePopupLayer = "routes-line";
 
     function tag(kind: string) {
       return `<span class="lofoten-popup-tag lofoten-popup-tag-${kind}">${escapeHtml(kind)}</span>`;
+    }
+
+    // Owner-or-admin for photos/notes (they carry user_id); admin-only for
+    // places/routes, which have no per-user ownership in the schema.
+    function canManage(kind: MapItemKind, ownerId: string | null) {
+      const { isAdmin: admin, currentUserId: viewerId } = actionsRef.current;
+      if (admin) return true;
+      if ((kind === "photo" || kind === "note") && ownerId && ownerId === viewerId) return true;
+      return false;
+    }
+
+    // Inject Edit/Delete controls into a freshly-opened popup and route clicks to
+    // the latest callbacks. Done in DOM (not HTML string) so listeners bind cleanly.
+    function injectActions(popup: mapboxgl.Popup, kind: MapItemKind, id: string, ownerId: string | null) {
+      if (!id || !canManage(kind, ownerId)) return;
+      const body = popup.getElement()?.querySelector(".lofoten-popup-body");
+      if (!body) return;
+      const bar = document.createElement("div");
+      bar.className = "lofoten-popup-actions";
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "lofoten-popup-action";
+      editButton.textContent = "Edit";
+      editButton.addEventListener("click", () => { popup.remove(); actionsRef.current.onEditItem(kind, id); });
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "lofoten-popup-action lofoten-popup-action-danger";
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", () => { popup.remove(); actionsRef.current.onDeleteItem(kind, id); });
+      bar.append(editButton, deleteButton);
+      body.append(bar);
     }
 
     function showPointPopup(event: mapboxgl.MapLayerMouseEvent) {
@@ -141,7 +183,8 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
         const meta = [props.place_type, props.description].filter(Boolean).map((value) => escapeHtml(value)).join(" · ");
         content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("place")}<div class="lofoten-popup-title">${escapeHtml(props.name || props.title || "Place")}</div><div class="lofoten-popup-meta">${meta || "Shared trip marker"}</div></div></div>`;
       }
-      new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(coordinates).setHTML(content).addTo(activeMap);
+      const popup = new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(coordinates).setHTML(content).addTo(activeMap);
+      injectActions(popup, props.kind as MapItemKind, String(props.id ?? ""), (props.user_id as string | null) ?? null);
     }
 
     function showRoutePopup(event: mapboxgl.MapLayerMouseEvent) {
@@ -154,7 +197,8 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
         Number.isFinite(distanceKm) ? `${distanceKm.toFixed(distanceKm < 10 ? 1 : 0)} km` : null,
       ].filter(Boolean).join(" · ");
       const content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("route")}<div class="lofoten-popup-title">${escapeHtml(props.name || "Route segment")}</div><div class="lofoten-popup-meta">${escapeHtml(meta || "Saved route")}</div></div></div>`;
-      new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(event.lngLat).setHTML(content).addTo(activeMap);
+      const popup = new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(event.lngLat).setHTML(content).addTo(activeMap);
+      injectActions(popup, "route", String(props.id ?? ""), null);
     }
 
     function setPointerCursor() {
@@ -166,7 +210,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
     }
 
     function attachHandlers() {
-      if (cancelled || !pointPopupLayers.every((layer) => hasLayer(activeMap, layer)) || !hasLayer(activeMap, routePopupLayer)) return;
+      if (handlersAttached || !pointPopupLayers.every((layer) => hasLayer(activeMap, layer)) || !hasLayer(activeMap, routePopupLayer)) return;
       for (const layer of pointPopupLayers) {
         activeMap.on("click", layer, showPointPopup);
         activeMap.on("mouseenter", layer, setPointerCursor);
@@ -176,14 +220,19 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
       activeMap.on("mouseenter", routePopupLayer, setPointerCursor);
       activeMap.on("mouseleave", routePopupLayer, resetPointerCursor);
       handlersAttached = true;
+      activeMap.off("styledata", attachHandlers);
     }
 
-    if (activeMap.isStyleLoaded()) attachHandlers();
-    else activeMap.once("load", attachHandlers);
+    // Attach as soon as the layers exist. We deliberately do NOT gate on
+    // isStyleLoaded()/once("load"): the sibling effect adds GeoJSON sources,
+    // which flips isStyleLoaded() to false, and "load" has already fired — so a
+    // once("load") here would never run. Retry on "styledata" until the layers
+    // are present, then attachHandlers() unsubscribes itself.
+    attachHandlers();
+    if (!handlersAttached) activeMap.on("styledata", attachHandlers);
 
     return () => {
-      cancelled = true;
-      activeMap.off("load", attachHandlers);
+      activeMap.off("styledata", attachHandlers);
       if (!handlersAttached) return;
       for (const layer of pointPopupLayers) {
         activeMap.off("click", layer, showPointPopup);

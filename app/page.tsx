@@ -13,7 +13,8 @@ import { ManualRoutePanel } from "@/components/ManualRoutePanel";
 import { MapLegend } from "@/components/MapLegend";
 import { MobileSheet } from "@/components/MobileSheet";
 import { RouteDraftLayer } from "@/components/RouteDraftLayer";
-import { TripLayers } from "@/components/TripLayers";
+import { TripLayers, type MapItemKind } from "@/components/TripLayers";
+import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
 import { UploadPhotoPanel, type PhotoUploadItemInput, type PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
 import { preparePhotoFiles } from "@/lib/photo-processing";
 import { PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
@@ -31,7 +32,7 @@ const demoDays: Day[] = [
 ];
 const demoTrip: Trip = { id: demoTripId, title: "Lofoten 2026", slug: "lofoten-2026", description: "A shared Lofoten hiking logbook.", start_date: "2026-07-12", end_date: "2026-07-18", created_at: demoCreatedAt };
 const demoRoutes: RouteSegment[] = [{ id: "route-demo", trip_id: demoTripId, day_id: demoDays[1].id, name: "Reine to Kjerkfjorden scouting route", source: "seed", mode: "hike", geometry_geojson: { type: "LineString", coordinates: [[13.089, 67.932], [13.068, 67.941], [13.045, 67.954], [13.019, 67.967]] }, distance_meters: 6200, elevation_gain_meters: 420, created_at: demoCreatedAt }];
-const demoNotes: Note[] = [{ id: "note-demo-1", trip_id: demoTripId, day_id: demoDays[0].id, author_name: "Maja", lat: 67.9328, lng: 13.0888, body: "Sunset light on Reinebringen looked unreal from the harbor.", note_type: "note", created_at: demoCreatedAt }];
+const demoNotes: Note[] = [{ id: "note-demo-1", trip_id: demoTripId, day_id: demoDays[0].id, user_id: null, author_name: "Maja", lat: 67.9328, lng: 13.0888, body: "Sunset light on Reinebringen looked unreal from the harbor.", note_type: "note", created_at: demoCreatedAt }];
 const demoPlaces: Place[] = [{ id: "place-demo-1", trip_id: demoTripId, day_id: demoDays[2].id, name: "Coffee and cinnamon buns", lat: 67.9007, lng: 13.0461, place_type: "food", description: "Good meetup stop before the ferry.", created_at: demoCreatedAt }];
 const demoData: TripData = { trip: demoTrip, days: demoDays, routeSegments: demoRoutes, photos: [], notes: demoNotes, places: demoPlaces, members: [] };
 const emptyData: TripData = { trip: null, days: [], routeSegments: [], photos: [], notes: [], places: [], members: [] };
@@ -102,6 +103,7 @@ export default function Home() {
   const [routeDraftPoints, setRouteDraftPoints] = useState<LngLat[]>([]);
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
   const [panel, setPanel] = useState<"photo" | "note" | "route" | null>(null);
+  const [editTargetRef, setEditTargetRef] = useState<{ kind: MapItemKind; id: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(Boolean(supabase));
   const [error, setError] = useState<string | null>(null);
@@ -261,8 +263,20 @@ export default function Home() {
   }, [data, selectedDayId]);
 
   const currentMember = useMemo(() => data.members.find((member) => member.user_id === user?.id) ?? null, [data.members, user?.id]);
+  const currentUserId = user?.id ?? null;
   const canContribute = !supabase || Boolean(currentMember);
   const isAdmin = !supabase || currentMember?.role === "admin";
+
+  // Resolve the popup-selected item live from data, so the editor reflects updates
+  // and closes automatically if the item is deleted (here or by another member).
+  const editTarget = useMemo<EditTarget | null>(() => {
+    if (!editTargetRef) return null;
+    const { kind, id } = editTargetRef;
+    if (kind === "photo") { const item = data.photos.find((photo) => photo.id === id); return item ? { kind, item } : null; }
+    if (kind === "note") { const item = data.notes.find((note) => note.id === id); return item ? { kind, item } : null; }
+    if (kind === "place") { const item = data.places.find((place) => place.id === id); return item ? { kind, item } : null; }
+    const item = data.routeSegments.find((route) => route.id === id); return item ? { kind, item } : null;
+  }, [editTargetRef, data]);
   const memberAdmin = currentMember?.role === "admin"
     ? { members: data.members, message: memberMessage, messageTone: memberMessageTone, isSaving: memberSaving, onGrantMember: grantMember }
     : null;
@@ -317,6 +331,19 @@ export default function Home() {
     setRouteDraftPoints([]);
   }
 
+  // Opened from a map popup. RLS enforces who may write; the popup only shows the
+  // buttons to owners/admins, and these handlers reuse the existing data mutations.
+  function startEditFromMap(kind: MapItemKind, id: string) {
+    closePanel();
+    setEditTargetRef({ kind, id });
+  }
+
+  async function deleteFromMap(kind: MapItemKind, id: string) {
+    const table = ({ photo: "photos", note: "notes", place: "places", route: "route_segments" } as const)[kind];
+    if (!window.confirm("Delete this item? This can't be undone.")) return;
+    await deleteDataItem(table, id);
+  }
+
   async function saveNote(input: { body: string; authorName: string; dayId: string | null }) {
     if (!pendingCoordinate || !input.body || !data.trip) return;
     setSaving(true);
@@ -324,7 +351,7 @@ export default function Home() {
     setNotice(null);
     let didSave = false;
     try {
-      const row = { trip_id: data.trip.id, day_id: input.dayId, author_name: input.authorName || "Friend", lat: pendingCoordinate.lat, lng: pendingCoordinate.lng, body: input.body, note_type: "note" };
+      const row = { trip_id: data.trip.id, day_id: input.dayId, user_id: user?.id ?? null, author_name: input.authorName || "Friend", lat: pendingCoordinate.lat, lng: pendingCoordinate.lng, body: input.body, note_type: "note" };
       if (supabase) {
         if (!user) {
           setError("Sign in before saving notes to Supabase.");
@@ -364,6 +391,7 @@ export default function Home() {
             id: crypto.randomUUID(),
             trip_id: data.trip!.id,
             day_id: input.dayId,
+            user_id: user?.id ?? null,
             uploader_name: input.uploaderName || "Friend",
             image_url: URL.createObjectURL(prepared.imageFile),
             thumbnail_url: prepared.thumbnailFile ? URL.createObjectURL(prepared.thumbnailFile) : null,
@@ -534,6 +562,7 @@ export default function Home() {
     setAdminDataSaving(true);
     setAdminDataMessage(null);
     setAdminDataMessageTone("info");
+    setError(null);
     try {
       await operation();
     } catch (adminError) {
@@ -551,6 +580,9 @@ export default function Home() {
   function setAdminDataError(message: string) {
     setAdminDataMessageTone("error");
     setAdminDataMessage(message);
+    // Mirror to the always-visible top pill so non-admins (who have no admin
+    // panel) still see failures from editing/deleting their own map items.
+    setError(message);
   }
 
   async function updateTrip(input: { title: string; description: string | null; start_date: string | null; end_date: string | null }) {
@@ -731,7 +763,7 @@ export default function Home() {
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
         <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} /></div>
         <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={setMap} onCoordinatePick={handleCoordinatePick}>
-          <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} />
+          <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} />
           <RouteDraftLayer map={map} points={routeDraftPoints} />
           <MapLegend visibility={layerVisibility} />
         </MapView>
@@ -744,6 +776,7 @@ export default function Home() {
       {panel === "note" ? <AddNotePanel days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
+      {editTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminDataSaving} onClose={() => setEditTargetRef(null)} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
     </main>
   );
 }

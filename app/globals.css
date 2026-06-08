@@ -115,6 +115,37 @@ body {
 
 .lofoten-popup-by { font-weight: 600; color: #57534e; }
 
+.lofoten-popup-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(214, 204, 188, 0.7);
+}
+.lofoten-popup-action {
+  flex: 1;
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 204, 188, 0.9);
+  background: #fffdf6;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #1c1917;
+  transition: background 0.15s ease;
+}
+.lofoten-popup-action:hover { background: rgba(28, 25, 23, 0.05); }
+.lofoten-popup-action:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.4);
+  outline-offset: 1px;
+}
+.lofoten-popup-action-danger {
+  border-color: #f6c9cf;
+  background: #fef2f3;
+  color: #b4232f;
+}
+.lofoten-popup-action-danger:hover { background: #fde4e6; }
+
 .lofoten-popup-tag {
   display: inline-block;
   margin-bottom: 0.4rem;

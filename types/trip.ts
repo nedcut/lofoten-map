@@ -39,6 +39,7 @@ export type Photo = {
   id: string;
   trip_id: string;
   day_id: string | null;
+  user_id: string | null;
   uploader_name: string | null;
   image_url: string;
   thumbnail_url: string | null;
@@ -54,6 +55,7 @@ export type Note = {
   id: string;
   trip_id: string;
   day_id: string | null;
+  user_id: string | null;
   author_name: string | null;
   lat: number;
   lng: number;
