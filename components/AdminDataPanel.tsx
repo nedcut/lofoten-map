@@ -116,6 +116,58 @@ function dayOptions(days: Day[]) {
   );
 }
 
+function keyPart(value: string | number | null | undefined) {
+  return value ?? "";
+}
+
+function tripFormKey(trip: Trip) {
+  return ["trip", trip.id, trip.title, keyPart(trip.description), keyPart(trip.start_date), keyPart(trip.end_date)].join("|");
+}
+
+function newDayEditorKey(days: Day[]) {
+  return days.map((day) => `${day.id}:${day.day_number}`).join("|") || "empty";
+}
+
+function dayEditorKey(day: Day) {
+  return ["day", day.id, day.day_number, keyPart(day.date), keyPart(day.title), keyPart(day.summary)].join("|");
+}
+
+function routeEditorKey(route: RouteSegment) {
+  return ["route", route.id, keyPart(route.day_id), keyPart(route.name), route.mode, keyPart(route.source)].join("|");
+}
+
+function noteEditorKey(note: Note) {
+  return ["note", note.id, keyPart(note.day_id), keyPart(note.author_name), note.body].join("|");
+}
+
+function placeEditorKey(place: Place) {
+  return [
+    "place",
+    place.id,
+    keyPart(place.day_id),
+    place.name,
+    keyPart(place.place_type),
+    keyPart(place.description),
+    place.lat,
+    place.lng,
+  ].join("|");
+}
+
+function photoEditorKey(photo: Photo) {
+  return [
+    "photo",
+    photo.id,
+    keyPart(photo.day_id),
+    keyPart(photo.uploader_name),
+    keyPart(photo.caption),
+    keyPart(photo.lat),
+    keyPart(photo.lng),
+    keyPart(photo.taken_at),
+    keyPart(photo.thumbnail_url),
+    photo.image_url,
+  ].join("|");
+}
+
 function dayDeleteMessage(day: Day) {
   const label = `Day ${day.day_number}${day.title ? `: ${day.title}` : ""}`;
   return `Delete ${label}? Photos, notes, places, and routes assigned to this day will stay in the trip and move to All days.`;
@@ -166,7 +218,7 @@ export function AdminDataPanel(props: AdminDataProps) {
       {props.trip ? (
         <details className="group rounded-lg bg-[#f7f1e7] p-3">
           <summary className="cursor-pointer text-sm font-bold text-stone-900">Trip</summary>
-          <form action={submitTrip} className="mt-3 space-y-2">
+          <form key={tripFormKey(props.trip)} action={submitTrip} className="mt-3 space-y-2">
             <input name="title" defaultValue={props.trip.title} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
             <textarea name="description" defaultValue={props.trip.description ?? ""} placeholder="Description" className="min-h-20 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
             <div className="grid grid-cols-2 gap-2">
@@ -181,8 +233,8 @@ export function AdminDataPanel(props: AdminDataProps) {
       <details className="rounded-lg bg-[#f7f1e7] p-3">
         <summary className="cursor-pointer text-sm font-bold text-stone-900"><CalendarDays className="mr-2 inline h-4 w-4 text-teal-700" />Days</summary>
         <div className="mt-3 space-y-3">
-          <NewDayEditor days={props.days} isSaving={props.isSaving} onCreate={props.onCreateDay} />
-          {props.days.map((day) => <DayEditor key={day.id} day={day} isSaving={props.isSaving} onSave={props.onUpdateDay} onDelete={() => props.onDeleteItem("days", day.id)} />)}
+          <NewDayEditor key={newDayEditorKey(props.days)} days={props.days} isSaving={props.isSaving} onCreate={props.onCreateDay} />
+          {props.days.map((day) => <DayEditor key={dayEditorKey(day)} day={day} isSaving={props.isSaving} onSave={props.onUpdateDay} onDelete={() => props.onDeleteItem("days", day.id)} />)}
         </div>
       </details>
 
@@ -190,7 +242,7 @@ export function AdminDataPanel(props: AdminDataProps) {
         <summary className="cursor-pointer text-sm font-bold text-stone-900"><Route className="mr-2 inline h-4 w-4 text-teal-700" />Routes</summary>
         <div className="mt-3 space-y-3">
           {props.routes.length === 0 ? <EmptyRow label="No routes yet" /> : props.routes.map((route) => (
-            <RouteEditor key={route.id} route={route} days={props.days} isSaving={props.isSaving} onSave={props.onUpdateRoute} onDelete={() => props.onDeleteItem("route_segments", route.id)} />
+            <RouteEditor key={routeEditorKey(route)} route={route} days={props.days} isSaving={props.isSaving} onSave={props.onUpdateRoute} onDelete={() => props.onDeleteItem("route_segments", route.id)} />
           ))}
         </div>
       </details>
@@ -198,8 +250,8 @@ export function AdminDataPanel(props: AdminDataProps) {
       <details className="rounded-lg bg-[#f7f1e7] p-3">
         <summary className="cursor-pointer text-sm font-bold text-stone-900"><FileText className="mr-2 inline h-4 w-4 text-teal-700" />Notes & places</summary>
         <div className="mt-3 space-y-3">
-          {props.notes.map((note) => <NoteEditor key={note.id} note={note} days={props.days} isSaving={props.isSaving} onSave={props.onUpdateNote} onDelete={() => props.onDeleteItem("notes", note.id)} />)}
-          {props.places.map((place) => <PlaceEditor key={place.id} place={place} days={props.days} isSaving={props.isSaving} onSave={props.onUpdatePlace} onDelete={() => props.onDeleteItem("places", place.id)} />)}
+          {props.notes.map((note) => <NoteEditor key={noteEditorKey(note)} note={note} days={props.days} isSaving={props.isSaving} onSave={props.onUpdateNote} onDelete={() => props.onDeleteItem("notes", note.id)} />)}
+          {props.places.map((place) => <PlaceEditor key={placeEditorKey(place)} place={place} days={props.days} isSaving={props.isSaving} onSave={props.onUpdatePlace} onDelete={() => props.onDeleteItem("places", place.id)} />)}
           {props.notes.length === 0 && props.places.length === 0 ? <EmptyRow label="No notes or places yet" /> : null}
         </div>
       </details>
@@ -208,7 +260,7 @@ export function AdminDataPanel(props: AdminDataProps) {
         <summary className="cursor-pointer text-sm font-bold text-stone-900"><Camera className="mr-2 inline h-4 w-4 text-teal-700" />Photos</summary>
         <div className="mt-3 space-y-3">
           {props.photos.length === 0 ? <EmptyRow label="No photos yet" /> : props.photos.map((photo) => (
-            <PhotoEditor key={photo.id} photo={photo} days={props.days} isSaving={props.isSaving} onSave={props.onUpdatePhoto} onDelete={() => props.onDeleteItem("photos", photo.id)} />
+            <PhotoEditor key={photoEditorKey(photo)} photo={photo} days={props.days} isSaving={props.isSaving} onSave={props.onUpdatePhoto} onDelete={() => props.onDeleteItem("photos", photo.id)} />
           ))}
         </div>
       </details>
