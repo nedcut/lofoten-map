@@ -686,6 +686,7 @@ export default function Home() {
         const { error: deleteError } = await supabase.from(table).delete().eq("id", id).eq("trip_id", data.trip!.id);
         if (deleteError) setAdminDataError(deleteError.message);
         else {
+          if (table === "days") setSelectedDayId((current) => current === id ? null : current);
           if (photoStoragePaths.length > 0) {
             const { error: storageDeleteError } = await supabase.storage.from(PHOTO_BUCKET).remove(photoStoragePaths);
             if (storageDeleteError) setAdminDataError(`Item deleted, but photo file cleanup failed: ${storageDeleteError.message}`);
@@ -699,6 +700,7 @@ export default function Home() {
         const deletedPhoto = table === "photos" ? data.photos.find((item) => item.id === id) : null;
         if (deletedPhoto?.image_url.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.image_url);
         if (deletedPhoto?.thumbnail_url?.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.thumbnail_url);
+        if (table === "days") setSelectedDayId((current) => current === id ? null : current);
         setData((current) => ({
           ...current,
           days: table === "days" ? current.days.filter((item) => item.id !== id) : current.days,
