@@ -56,6 +56,18 @@ function routeDistanceMeters(points: LngLat[]) {
   return Math.round(length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" }) * 1000);
 }
 
+function storagePathFromPublicUrl(imageUrl: string) {
+  try {
+    const url = new URL(imageUrl);
+    const marker = `/object/public/${PHOTO_BUCKET}/`;
+    const markerIndex = url.pathname.indexOf(marker);
+    if (markerIndex === -1) return null;
+    return decodeURIComponent(url.pathname.slice(markerIndex + marker.length));
+  } catch {
+    return null;
+  }
+}
+
 export default function Home() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [data, setData] = useState<TripData>(() => (supabase ? emptyData : demoData));
@@ -331,6 +343,7 @@ export default function Home() {
           exif_found: boolean;
         }> = [];
         const failures: string[] = [];
+        const uploadedPaths: string[] = [];
 
         await mapWithConcurrency(inputs, UPLOAD_CONCURRENCY, async (input) => {
           const extension = input.file.name.split(".").pop() || "jpg";
@@ -340,6 +353,7 @@ export default function Home() {
             failures.push(`${input.file.name}: ${uploadError.message}`);
             return;
           }
+          uploadedPaths.push(path);
           const { data: publicData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
           rows.push({
             trip_id: data.trip!.id,
@@ -356,8 +370,10 @@ export default function Home() {
 
         if (rows.length > 0) {
           const { error: insertError } = await supabase.from("photos").insert(rows);
-          if (insertError) setError(insertError.message);
-          else {
+          if (insertError) {
+            if (uploadedPaths.length > 0) await supabase.storage.from(PHOTO_BUCKET).remove(uploadedPaths);
+            setError(insertError.message);
+          } else {
             await loadData();
             didSave = true;
           }
@@ -559,13 +575,23 @@ export default function Home() {
     setAdminDataSaving(true);
     setAdminDataMessage(null);
     if (supabase) {
+      const photoStoragePath = table === "photos"
+        ? storagePathFromPublicUrl(data.photos.find((photo) => photo.id === id)?.image_url ?? "")
+        : null;
       const { error: deleteError } = await supabase.from(table).delete().eq("id", id).eq("trip_id", data.trip.id);
       if (deleteError) setAdminDataMessage(deleteError.message);
       else {
-        setAdminDataMessage("Item deleted.");
+        if (photoStoragePath) {
+          const { error: storageDeleteError } = await supabase.storage.from(PHOTO_BUCKET).remove([photoStoragePath]);
+          setAdminDataMessage(storageDeleteError ? `Item deleted, but photo file cleanup failed: ${storageDeleteError.message}` : "Item deleted.");
+        } else {
+          setAdminDataMessage("Item deleted.");
+        }
         await loadData();
       }
     } else {
+      const deletedPhoto = table === "photos" ? data.photos.find((item) => item.id === id) : null;
+      if (deletedPhoto?.image_url.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.image_url);
       setData((current) => ({
         ...current,
         days: table === "days" ? current.days.filter((item) => item.id !== id) : current.days,
