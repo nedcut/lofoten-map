@@ -223,9 +223,14 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
   const [batchOverrideDayId, setBatchOverrideDayId] = useState(BATCH_OVERRIDE_IDLE);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
   const previewCoordinateKeyRef = useRef<string | null>(null);
-  const activeItem = items.find((item) => item.id === activeItemId) ?? items[0] ?? null;
-  const activeFile = activeItem?.file ?? null;
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
+  const visibleItems = useMemo(() => {
+    if (queueFilter === "all") return items;
+    if (queueFilter === "review") return items.filter((item) => item.status !== "invalid" && (item.status === "needs-location" || item.dayId === null));
+    return items.filter((item) => item.status === queueFilter);
+  }, [items, queueFilter]);
+  const activeItem = (activeItemId ? visibleItems.find((item) => item.id === activeItemId) : null) ?? visibleItems[0] ?? null;
+  const activeFile = activeItem?.file ?? null;
 
   useEffect(() => {
     if (!activeFile) {
@@ -283,14 +288,11 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     return Array.from(buckets.entries()).map(([key, count]) => ({ dayId: key || null, count }));
   }, [items]);
 
-  const visibleItems = useMemo(() => {
-    if (queueFilter === "all") return items;
-    if (queueFilter === "review") return items.filter((item) => item.status !== "invalid" && (item.status === "needs-location" || item.dayId === null));
-    return items.filter((item) => item.status === queueFilter);
-  }, [items, queueFilter]);
-
   useEffect(() => {
-    if (visibleItems.length === 0) return;
+    if (visibleItems.length === 0) {
+      if (activeItemId !== null) setActiveItemId(null);
+      return;
+    }
     if (activeItemId && visibleItems.some((item) => item.id === activeItemId)) return;
     setActiveItemId(visibleItems[0].id);
   }, [activeItemId, visibleItems]);
