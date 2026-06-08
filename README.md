@@ -88,11 +88,20 @@ tables, and RLS policies:
 
 ### Photo storage privacy
 
-For this build, `trip-photos` is a **public** bucket so image URLs render
-directly in Mapbox popups. Because the bucket is public, anyone with an object's
-URL can view it regardless of the table-level read policies. Treat uploaded
-photos as **shareable-by-URL** until the app moves to private buckets with
-signed URLs (see roadmap).
+`trip-photos` is a **private** bucket. The `photos` table stores storage *paths*
+(`image_path` / `thumbnail_path`), and the app mints short-lived **signed URLs**
+(8-hour expiry) at read time to render images. Signing is authorized by the
+member-scoped SELECT policy on `storage.objects`, so only authenticated trip
+members can load photos, and any leaked URL stops working when it expires.
+
+The signed-URL lifetime is a single constant — `PHOTO_SIGNED_URL_TTL_SECONDS` in
+[`lib/supabase.ts`](lib/supabase.ts). Nothing that expires is persisted, so it
+can be changed freely. URLs are regenerated on every load (mount, Realtime
+update, and after each mutation); a tab left idle past the TTL needs a refresh.
+
+If you are upgrading an existing project, re-run `supabase/schema.sql`: it flips
+the bucket to private and migrates the old `image_url` / `thumbnail_url` columns
+to `image_path` / `thumbnail_path`, converting any stored public URLs to paths.
 
 ## Deploying to Vercel
 
@@ -128,9 +137,8 @@ automatically. Your CI also validates a production build on every PR.
    - An admin can add a signed-in friend from the Members panel.
    - Realtime updates appear in a second browser session.
 
-Before sharing beyond a small test group: tighten photo privacy (private bucket
-+ signed URLs), add a proper member-invitation flow, and verify RLS with
-separate member and non-member accounts.
+Before sharing beyond a small test group: add a proper member-invitation flow,
+and verify RLS with separate member and non-member accounts.
 
 ## Project structure
 
@@ -181,12 +189,11 @@ and a demo-mode `build` on every push and pull request to `main`
   and manage membership (admin-only grant RPC)
 - Supabase Realtime for photos, notes, places, and route segments
 - Row-level security: member-scoped reads, owner/admin writes
+- Private photo storage served via short-lived (8h) signed URLs
 - Demo fallback data when Supabase is not configured
 
 ## Roadmap
 
-- Move photo Storage from public URLs to private signed URLs before wider
-  sharing
 - Expand member management with pending invites or email notifications
 - Extend test coverage to the EXIF File-reading and canvas/thumbnail paths
 - Add route import from GPX/KML

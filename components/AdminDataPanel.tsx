@@ -163,8 +163,10 @@ function photoEditorKey(photo: Photo) {
     keyPart(photo.lat),
     keyPart(photo.lng),
     keyPart(photo.taken_at),
-    keyPart(photo.thumbnail_url),
-    photo.image_url,
+    // Key off the stable storage paths, not the signed URLs, which are
+    // regenerated on every load and would otherwise remount the edit form.
+    keyPart(photo.thumbnail_path),
+    photo.image_path,
   ].join("|");
 }
 
@@ -405,7 +407,7 @@ export function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo
     <form action={submit} className="grid grid-cols-[4rem_minmax(0,1fr)] gap-2 rounded-lg border border-stone-200 bg-white p-2">
       <div className="h-16 overflow-hidden rounded-md bg-stone-100">
         {/* eslint-disable-next-line @next/next/no-img-element -- Existing remote URLs come from user uploads. */}
-        <img src={photo.thumbnail_url ?? photo.image_url} alt="" className="h-full w-full object-cover" />
+        <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" className="h-full w-full object-cover" />
       </div>
       <div className="min-w-0 space-y-2">
         <select name="day_id" defaultValue={photo.day_id ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">{dayOptions(days)}</select>

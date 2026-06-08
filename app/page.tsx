@@ -17,9 +17,9 @@ import { TripLayers, type MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
 import { UploadPhotoPanel, type PhotoUploadItemInput, type PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
 import { preparePhotoFiles } from "@/lib/photo-processing";
-import { PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
+import { PHOTO_BUCKET, getSupabaseBrowserClient, signPhotoUrls } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import type { Day, LngLat, MapClickMode, Note, Place, RouteMode, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
+import type { Day, LngLat, MapClickMode, Note, Photo, Place, RouteMode, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
 
@@ -59,27 +59,11 @@ function routeDistanceMeters(points: LngLat[]) {
   return Math.round(length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" }) * 1000);
 }
 
-function storagePathFromPublicUrl(imageUrl: string) {
-  try {
-    const url = new URL(imageUrl);
-    const marker = `/object/public/${PHOTO_BUCKET}/`;
-    const markerIndex = url.pathname.indexOf(marker);
-    if (markerIndex === -1) return null;
-    return decodeURIComponent(url.pathname.slice(markerIndex + marker.length));
-  } catch {
-    return null;
-  }
-}
-
 function fileExtension(file: File) {
   if (file.type === "image/jpeg") return "jpg";
   if (file.type === "image/png") return "png";
   if (file.type === "image/webp") return "webp";
   return file.name.split(".").pop()?.toLowerCase() || "jpg";
-}
-
-function storagePathsForPhoto(photo: { image_url: string; thumbnail_url: string | null }) {
-  return [storagePathFromPublicUrl(photo.image_url), photo.thumbnail_url ? storagePathFromPublicUrl(photo.thumbnail_url) : null].filter((path): path is string => Boolean(path));
 }
 
 export default function Home() {
@@ -157,7 +141,8 @@ export default function Home() {
       if (failure) {
         setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
       } else {
-        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: photos.data ?? [], notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[] });
+        const signedPhotos = await signPhotoUrls(supabase, (photos.data ?? []) as Photo[]);
+        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: signedPhotos, notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[] });
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? `We could not sync the trip right now. Try refreshing. ${loadError.message}` : "We could not sync the trip right now. Try refreshing.");
@@ -393,6 +378,10 @@ export default function Home() {
             day_id: input.dayId,
             user_id: user?.id ?? null,
             uploader_name: input.uploaderName || "Friend",
+            // Demo mode has no Storage: preview straight from local blob URLs and
+            // leave the storage paths empty (never read in this branch).
+            image_path: "",
+            thumbnail_path: null,
             image_url: URL.createObjectURL(prepared.imageFile),
             thumbnail_url: prepared.thumbnailFile ? URL.createObjectURL(prepared.thumbnailFile) : null,
             lat: input.coordinate.lat,
@@ -416,8 +405,8 @@ export default function Home() {
           trip_id: string;
           day_id: string | null;
           uploader_name: string;
-          image_url: string;
-          thumbnail_url: string | null;
+          image_path: string;
+          thumbnail_path: string | null;
           lat: number;
           lng: number;
           taken_at: string | null | undefined;
@@ -439,8 +428,7 @@ export default function Home() {
             return;
           }
           uploadedPaths.push(path);
-          const { data: publicData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
-          let thumbnailUrl: string | null = null;
+          let thumbnailStoragePath: string | null = null;
           if (prepared.thumbnailFile) {
             const thumbnailPath = `${data.trip!.slug}/thumbs/${crypto.randomUUID()}.jpg`;
             const { error: thumbnailError } = await supabase.storage.from(PHOTO_BUCKET).upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: "3600", upsert: false, contentType: prepared.thumbnailFile.type });
@@ -448,8 +436,7 @@ export default function Home() {
               warnings.push(`${input.file.name}: thumbnail skipped`);
             } else {
               uploadedPaths.push(thumbnailPath);
-              const { data: thumbnailData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(thumbnailPath);
-              thumbnailUrl = thumbnailData.publicUrl;
+              thumbnailStoragePath = thumbnailPath;
             }
           }
           rows.push({
@@ -457,8 +444,8 @@ export default function Home() {
             trip_id: data.trip!.id,
             day_id: input.dayId,
             uploader_name: input.uploaderName || "Friend",
-            image_url: publicData.publicUrl,
-            thumbnail_url: thumbnailUrl,
+            image_path: path,
+            thumbnail_path: thumbnailStoragePath,
             lat: input.coordinate.lat,
             lng: input.coordinate.lng,
             taken_at: input.exif?.takenAt,
@@ -472,8 +459,8 @@ export default function Home() {
             trip_id: row.trip_id,
             day_id: row.day_id,
             uploader_name: row.uploader_name,
-            image_url: row.image_url,
-            thumbnail_url: row.thumbnail_url,
+            image_path: row.image_path,
+            thumbnail_path: row.thumbnail_path,
             lat: row.lat,
             lng: row.lng,
             taken_at: row.taken_at,
@@ -712,8 +699,9 @@ export default function Home() {
     if (!data.trip) return;
     await runAdminOperation(async () => {
       if (supabase) {
-        const photoStoragePaths = table === "photos"
-          ? storagePathsForPhoto(data.photos.find((photo) => photo.id === id) ?? { image_url: "", thumbnail_url: null })
+        const photoToDelete = table === "photos" ? data.photos.find((photo) => photo.id === id) : null;
+        const photoStoragePaths = photoToDelete
+          ? [photoToDelete.image_path, photoToDelete.thumbnail_path].filter((path): path is string => Boolean(path))
           : [];
         const { error: deleteError } = await supabase.from(table).delete().eq("id", id).eq("trip_id", data.trip!.id);
         if (deleteError) setAdminDataError(deleteError.message);
@@ -730,7 +718,7 @@ export default function Home() {
         }
       } else {
         const deletedPhoto = table === "photos" ? data.photos.find((item) => item.id === id) : null;
-        if (deletedPhoto?.image_url.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.image_url);
+        if (deletedPhoto?.image_url?.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.image_url);
         if (deletedPhoto?.thumbnail_url?.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.thumbnail_url);
         if (table === "days") setSelectedDayId((current) => current === id ? null : current);
         setData((current) => ({

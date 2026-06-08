@@ -41,7 +41,11 @@ export type Photo = {
   day_id: string | null;
   user_id: string | null;
   uploader_name: string | null;
-  image_url: string;
+  image_path: string;
+  thumbnail_path: string | null;
+  // Signed URLs generated at read time from the paths above. Null until signed
+  // (or when signing fails); short-lived, so they are never persisted.
+  image_url: string | null;
   thumbnail_url: string | null;
   lat: number | null;
   lng: number | null;

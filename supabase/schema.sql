@@ -44,8 +44,8 @@ create table if not exists photos (
   day_id uuid references days(id) on delete set null,
   user_id uuid references auth.users(id) on delete set null default auth.uid(),
   uploader_name text,
-  image_url text not null,
-  thumbnail_url text,
+  image_path text not null,
+  thumbnail_path text,
   lat double precision,
   lng double precision,
   taken_at timestamptz,
@@ -53,6 +53,32 @@ create table if not exists photos (
   exif_found boolean default false,
   created_at timestamptz default now()
 );
+
+-- Migrate existing databases from public-URL columns to storage-path columns.
+-- Idempotent: only renames when the old columns still exist, then strips any
+-- legacy full-URL values down to the bare storage path.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_name = 'photos' and column_name = 'image_url'
+  ) then
+    alter table photos rename column image_url to image_path;
+  end if;
+  if exists (
+    select 1 from information_schema.columns
+    where table_name = 'photos' and column_name = 'thumbnail_url'
+  ) then
+    alter table photos rename column thumbnail_url to thumbnail_path;
+  end if;
+end $$;
+
+update photos
+  set image_path = regexp_replace(image_path, '^.*/object/public/trip-photos/', '')
+  where image_path like '%/object/public/trip-photos/%';
+update photos
+  set thumbnail_path = regexp_replace(thumbnail_path, '^.*/object/public/trip-photos/', '')
+  where thumbnail_path like '%/object/public/trip-photos/%';
 
 create table if not exists notes (
   id uuid primary key default gen_random_uuid(),
@@ -274,7 +300,7 @@ create policy "members read trip memberships" on trip_members for select to auth
 create policy "admins write trip memberships" on trip_members for all to authenticated using (public.is_trip_admin(trip_id)) with check (public.is_trip_admin(trip_id));
 
 insert into storage.buckets (id, name, public)
-values ('trip-photos', 'trip-photos', true)
+values ('trip-photos', 'trip-photos', false)
 on conflict (id) do update set public = excluded.public;
 
 drop policy if exists "trip members read photo objects" on storage.objects;
