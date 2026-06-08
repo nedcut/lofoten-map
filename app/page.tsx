@@ -118,7 +118,9 @@ export default function Home() {
     setError(null);
     const { data: trip, error: tripError } = await supabase.from("trips").select("*").eq("slug", tripSlug).maybeSingle();
     if (tripError || !trip) {
-      setError(tripError ? `Supabase could not load this trip: ${tripError.message}` : "Supabase could not find this trip. Run schema/seed SQL, then add your signed-in user to trip_members.");
+      setError(tripError
+        ? `We could not load the trip right now. Try refreshing, or ask an admin to check access. ${tripError.message}`
+        : "You are signed in, but this account is not on the trip yet. Ask an admin to add you, then refresh.");
       setLoading(false);
       return;
     }
@@ -131,7 +133,7 @@ export default function Home() {
       supabase.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", trip.id).order("created_at"),
     ]);
     const failure = [days.error, routes.error, photos.error, notes.error, places.error, members.error].find(Boolean);
-    if (failure) setError(failure.message);
+    if (failure) setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
     else setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: photos.data ?? [], notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[] });
     setLoading(false);
   }, [supabase, tripSlug, user]);
