@@ -2,6 +2,7 @@
 
 import { AlertTriangle, Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { along, length as turfLength, lineString, point, pointToLineDistance } from "@turf/turf";
+import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { extractPhotoExif, type ExtractedExif } from "@/lib/exif";
 import { cn } from "@/lib/utils";
@@ -358,6 +359,11 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     }));
   }
 
+  function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
+    void handleFiles(event.currentTarget.files);
+    event.currentTarget.value = "";
+  }
+
   async function submit(formData: FormData) {
     const readyItems = items.filter((item) => item.status === "ready" && item.coordinate);
     if (readyItems.length === 0) return;
@@ -451,11 +457,11 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
         <div className="grid grid-cols-[1fr_auto] gap-2">
           <label className="flex min-h-14 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-teal-700/35 bg-teal-50 px-4 py-3 text-sm font-bold text-teal-950 transition hover:bg-teal-100">
             <Images className="h-4 w-4" /> Choose from camera roll
-            <input name="photo" type="file" accept="image/*,.heic,.heif" multiple className="hidden" onChange={(event) => handleFiles(event.target.files)} />
+            <input name="photo" type="file" accept="image/*,.heic,.heif" multiple className="hidden" onChange={handleFileInputChange} />
           </label>
           <label className="flex min-h-14 cursor-pointer items-center justify-center rounded-lg border border-stone-300 bg-white px-4 text-stone-700 transition hover:bg-stone-50" title="Browse files from a digital camera or computer export">
             <FileImage className="h-4 w-4" />
-            <input type="file" accept="image/*,.heic,.heif" multiple className="hidden" onChange={(event) => handleFiles(event.target.files)} />
+            <input type="file" accept="image/*,.heic,.heif" multiple className="hidden" onChange={handleFileInputChange} />
           </label>
         </div>
 
