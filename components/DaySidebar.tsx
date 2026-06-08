@@ -2,7 +2,7 @@
 
 import { CalendarDays, Camera, FileText, Loader2, Map, Mountain, PenLine, Route, UserPlus, Users } from "lucide-react";
 import { AdminDataPanel, type AdminDataProps } from "@/components/AdminDataPanel";
-import { cn } from "@/lib/utils";
+import { cn, formatDateOnly } from "@/lib/utils";
 import type { Day, TripMember } from "@/types/trip";
 
 export type LayerVisibility = { photos: boolean; notes: boolean; routes: boolean };
@@ -98,7 +98,7 @@ export function DayList({ days, selectedDayId, onSelectDay }: Pick<SidebarProps,
           >
             <div className="flex items-center justify-between gap-3">
               <span className="font-bold text-stone-950">Day {day.day_number}: {day.title ?? "Open trail"}</span>
-              {day.date ? <span className="shrink-0 rounded-full bg-teal-700/10 px-2 py-0.5 text-xs font-bold text-teal-800">{new Date(day.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span> : null}
+              {day.date ? <span className="shrink-0 rounded-full bg-teal-700/10 px-2 py-0.5 text-xs font-bold text-teal-800">{formatDateOnly(day.date)}</span> : null}
             </div>
             <div className="mt-1 text-xs leading-5 text-stone-500">{day.summary ?? "Route planning and shared memories."}</div>
           </button>
