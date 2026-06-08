@@ -9,7 +9,7 @@ import type { Day } from "@/types/trip";
 
 // Counts for the current map filter, so the collapsed peek can tell you what's
 // pinned without expanding the sheet. Notes and places share a marker layer, so
-// they're summed together under "notes".
+// they're summed together as journal pins.
 export type PeekCounts = { photos: number; notes: number; places: number };
 
 type MobileSheetProps = SidebarProps & { counts: PeekCounts };
@@ -81,12 +81,14 @@ export function MobileSheet(props: MobileSheetProps) {
           {/* Expandable region animates via grid-template-rows 0fr -> 1fr. */}
           <div className={cn("grid transition-[grid-template-rows] duration-300 ease-out", expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
             <div className="overflow-hidden">
-              <div className="max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
-                <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} />
-                <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} />
-                {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
-                {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}
-              </div>
+              {expanded ? (
+                <div className="max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
+                  <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} />
+                  <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} />
+                  {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
+                  {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
