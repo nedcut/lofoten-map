@@ -4,6 +4,7 @@ export type ExtractedExif = {
   lat: number | null;
   lng: number | null;
   takenAt: string | null;
+  takenDate: string | null;
   exifFound: boolean;
   message: string;
 };
@@ -68,11 +69,12 @@ function applyGpsRef(coordinate: number, ref: unknown): number {
   return gpsRef === "S" || gpsRef === "W" ? -Math.abs(coordinate) : coordinate;
 }
 
-function parseExifDate(value: string | undefined): string | null {
-  if (!value) return null;
+function parseExifDate(value: string | undefined): { takenAt: string | null; takenDate: string | null } {
+  if (!value) return { takenAt: null, takenDate: null };
   const normalized = value.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
+  const takenDate = normalized.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
   const parsed = new Date(normalized);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  return { takenAt: Number.isNaN(parsed.getTime()) ? null : parsed.toISOString(), takenDate };
 }
 
 export async function extractPhotoExif(file: File): Promise<ExtractedExif> {
@@ -83,16 +85,17 @@ export async function extractPhotoExif(file: File): Promise<ExtractedExif> {
     const lat = coordinateFromExif(gps.Latitude ?? exif.GPSLatitude, exif.GPSLatitudeRef);
     const lng = coordinateFromExif(gps.Longitude ?? exif.GPSLongitude, exif.GPSLongitudeRef);
     const dateTag = exif.DateTimeOriginal ?? exif.CreateDate ?? exif.DateTimeDigitized;
-    const takenAt = parseExifDate(isTagValue(dateTag) && typeof dateTag.description === "string" ? dateTag.description : undefined);
+    const { takenAt, takenDate } = parseExifDate(isTagValue(dateTag) && typeof dateTag.description === "string" ? dateTag.description : undefined);
 
     if (lat !== null && lng !== null) {
-      return { lat, lng, takenAt, exifFound: true, message: "GPS metadata found. Marker location is ready." };
+      return { lat, lng, takenAt, takenDate, exifFound: true, message: "GPS metadata found. Marker location is ready." };
     }
 
     return {
       lat: null,
       lng: null,
       takenAt,
+      takenDate,
       exifFound: Boolean(takenAt),
       message: "No GPS metadata found. Tap the map to place this photo manually.",
     };
@@ -101,6 +104,7 @@ export async function extractPhotoExif(file: File): Promise<ExtractedExif> {
       lat: null,
       lng: null,
       takenAt: null,
+      takenDate: null,
       exifFound: false,
       message: "We could not read EXIF metadata. Tap the map to place this photo manually.",
     };

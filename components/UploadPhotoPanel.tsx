@@ -1,10 +1,12 @@
 "use client";
 
 import { Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Upload, X } from "lucide-react";
+import { point, pointToLineDistance } from "@turf/turf";
 import { useEffect, useMemo, useState } from "react";
 import { extractPhotoExif, type ExtractedExif } from "@/lib/exif";
 import { cn } from "@/lib/utils";
-import type { Day, LngLat } from "@/types/trip";
+import type { LineString } from "geojson";
+import type { Day, LngLat, RouteSegment } from "@/types/trip";
 
 export type PhotoUploadItemInput = {
   clientId: string;
@@ -18,6 +20,7 @@ export type PhotoUploadItemInput = {
 
 type Props = {
   days: Day[];
+  routes: RouteSegment[];
   defaultDayId: string | null;
   pendingCoordinate: LngLat | null;
   isSaving: boolean;
@@ -29,6 +32,8 @@ type Props = {
 const MAX_FILE_SIZE = 30 * 1024 * 1024;
 const EXIF_CONCURRENCY = 4;
 const IMAGE_EXTENSIONS = [".heic", ".heif", ".jpg", ".jpeg", ".png", ".webp", ".gif"];
+const BATCH_OVERRIDE_IDLE = "__idle";
+const ALL_DAYS_VALUE = "__all";
 
 type QueueStatus = "reading" | "ready" | "needs-location" | "invalid" | "uploaded";
 
@@ -36,6 +41,8 @@ type QueueItem = {
   id: string;
   file: File;
   caption: string;
+  dayId: string | null;
+  dayMatchSource: "date" | "route" | null;
   exif: ExtractedExif | null;
   coordinate: LngLat | null;
   status: QueueStatus;
@@ -52,6 +59,43 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function dateKey(value: string | null | undefined) {
+  if (!value) return null;
+  const directDate = value.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
+  if (directDate) return directDate;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function findDayIdForExifDate(days: Day[], exif: ExtractedExif) {
+  const takenDate = dateKey(exif.takenDate ?? exif.takenAt);
+  if (!takenDate) return null;
+  return days.find((day) => day.date === takenDate)?.id ?? null;
+}
+
+function routeGeometry(route: RouteSegment): LineString {
+  return (route.geometry_geojson.type === "Feature" ? route.geometry_geojson.geometry : route.geometry_geojson) as LineString;
+}
+
+function findDayIdForCoordinate(routes: RouteSegment[], coordinate: LngLat | null) {
+  if (!coordinate) return null;
+  let nearest: { dayId: string; meters: number } | null = null;
+  const photoPoint = point([coordinate.lng, coordinate.lat]);
+  for (const route of routes) {
+    if (!route.day_id) continue;
+    const meters = pointToLineDistance(photoPoint, routeGeometry(route), { units: "meters" });
+    if (!nearest || meters < nearest.meters) nearest = { dayId: route.day_id, meters };
+  }
+  return nearest && nearest.meters <= 500 ? nearest.dayId : null;
+}
+
+function dayLabel(days: Day[], dayId: string | null) {
+  const day = days.find((item) => item.id === dayId);
+  if (!day) return "All days";
+  return `Day ${day.day_number}${day.title ? `: ${day.title}` : ""}`;
+}
+
 async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
   let index = 0;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -63,11 +107,11 @@ async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T
   await Promise.all(runners);
 }
 
-export function UploadPhotoPanel({ days, defaultDayId, pendingCoordinate, isSaving, onCancel, onCoordinatePreview, onSave }: Props) {
+export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate, isSaving, onCancel, onCoordinatePreview, onSave }: Props) {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [uploaderName, setUploaderName] = useState("");
-  const [dayId, setDayId] = useState(defaultDayId ?? "");
+  const [batchOverrideDayId, setBatchOverrideDayId] = useState(BATCH_OVERRIDE_IDLE);
   const activeItem = items.find((item) => item.id === activeItemId) ?? items[0] ?? null;
   const activePreviewUrl = useMemo(() => activeItem ? URL.createObjectURL(activeItem.file) : null, [activeItem]);
 
@@ -93,7 +137,20 @@ export function UploadPhotoPanel({ days, defaultDayId, pendingCoordinate, isSavi
     needsLocation: items.filter((item) => item.status === "needs-location").length,
     reading: items.filter((item) => item.status === "reading").length,
     invalid: items.filter((item) => item.status === "invalid").length,
+    matchedByDate: items.filter((item) => item.dayMatchSource === "date").length,
+    matchedByRoute: items.filter((item) => item.dayMatchSource === "route").length,
+    unassigned: items.filter((item) => item.status !== "invalid" && item.dayId === null).length,
   }), [items]);
+
+  const dayBuckets = useMemo(() => {
+    const buckets = new Map<string, number>();
+    for (const item of items) {
+      if (item.status === "invalid") continue;
+      const key = item.dayId ?? "";
+      buckets.set(key, (buckets.get(key) ?? 0) + 1);
+    }
+    return Array.from(buckets.entries()).map(([key, count]) => ({ dayId: key || null, count }));
+  }, [items]);
 
   async function handleFiles(files: FileList | null) {
     const selected = Array.from(files ?? []);
@@ -102,12 +159,12 @@ export function UploadPhotoPanel({ days, defaultDayId, pendingCoordinate, isSavi
     const nextItems: QueueItem[] = selected.map((file) => {
       const id = crypto.randomUUID();
       if (!isSupportedImage(file)) {
-        return { id, file, caption: "", exif: null, coordinate: null, status: "invalid", message: "Unsupported file type." };
+        return { id, file, caption: "", dayId: null, dayMatchSource: null, exif: null, coordinate: null, status: "invalid", message: "Unsupported file type." };
       }
       if (file.size > MAX_FILE_SIZE) {
-        return { id, file, caption: "", exif: null, coordinate: null, status: "invalid", message: `Over ${formatBytes(MAX_FILE_SIZE)}. Export a smaller copy first.` };
+        return { id, file, caption: "", dayId: null, dayMatchSource: null, exif: null, coordinate: null, status: "invalid", message: `Over ${formatBytes(MAX_FILE_SIZE)}. Export a smaller copy first.` };
       }
-      return { id, file, caption: "", exif: null, coordinate: null, status: "reading", message: "Reading photo metadata..." };
+      return { id, file, caption: "", dayId: defaultDayId, dayMatchSource: null, exif: null, coordinate: null, status: "reading", message: "Reading photo metadata..." };
     });
 
     setItems((current) => [...current, ...nextItems]);
@@ -119,8 +176,12 @@ export function UploadPhotoPanel({ days, defaultDayId, pendingCoordinate, isSavi
       setItems((current) => current.map((currentItem) => {
         if (currentItem.id !== item.id) return currentItem;
         const coordinate = exif.lat !== null && exif.lng !== null ? { lat: exif.lat, lng: exif.lng } : null;
+        const matchedDayId = findDayIdForExifDate(days, exif);
+        const routeDayId = matchedDayId ? null : findDayIdForCoordinate(routes, coordinate);
         return {
           ...currentItem,
+          dayId: matchedDayId ?? routeDayId ?? currentItem.dayId,
+          dayMatchSource: matchedDayId ? "date" : routeDayId ? "route" : null,
           exif,
           coordinate,
           status: coordinate ? "ready" : "needs-location",
@@ -138,10 +199,22 @@ export function UploadPhotoPanel({ days, defaultDayId, pendingCoordinate, isSavi
       file: item.file,
       caption: item.caption,
       uploaderName: String(formData.get("uploaderName") ?? "").trim(),
-      dayId: String(formData.get("dayId") || "") || null,
+      dayId: item.dayId,
       coordinate: item.coordinate!,
       exif: item.exif,
     })));
+  }
+
+  function setActiveDay(nextDayId: string) {
+    if (!activeItem) return;
+    setItems((current) => current.map((item) => item.id === activeItem.id ? { ...item, dayId: nextDayId || null, dayMatchSource: null } : item));
+  }
+
+  function applyBatchDay(nextDayId: string) {
+    if (nextDayId === BATCH_OVERRIDE_IDLE) return;
+    setBatchOverrideDayId(nextDayId);
+    const dayId = nextDayId === ALL_DAYS_VALUE ? null : nextDayId;
+    setItems((current) => current.map((item) => item.status === "invalid" ? item : { ...item, dayId, dayMatchSource: null }));
   }
 
   return (
@@ -173,6 +246,13 @@ export function UploadPhotoPanel({ days, defaultDayId, pendingCoordinate, isSavi
             <div className="rounded-md bg-emerald-50 px-2 py-2 text-emerald-800"><span className="block text-sm">{counts.ready}</span>Ready</div>
             <div className="rounded-md bg-amber-50 px-2 py-2 text-amber-800"><span className="block text-sm">{counts.needsLocation}</span>Place</div>
             <div className="rounded-md bg-rose-50 px-2 py-2 text-rose-800"><span className="block text-sm">{counts.invalid}</span>Issues</div>
+          </div>
+        ) : null}
+
+        {items.length > 0 ? (
+          <div className="rounded-lg border border-teal-700/15 bg-teal-50 px-3 py-2 text-xs leading-5 text-teal-950">
+            <div className="font-bold">{counts.matchedByDate} date matched · {counts.matchedByRoute} route matched · {counts.unassigned} unassigned</div>
+            {dayBuckets.length > 0 ? <div className="mt-1 text-teal-900/80">{dayBuckets.map((bucket) => `${bucket.count} ${dayLabel(days, bucket.dayId)}`).join(" · ")}</div> : null}
           </div>
         ) : null}
 
@@ -209,6 +289,7 @@ export function UploadPhotoPanel({ days, defaultDayId, pendingCoordinate, isSavi
                   <span className="min-w-0">
                     <span className="block truncate text-xs font-bold text-stone-900">{item.file.name}</span>
                     <span className="block truncate text-[11px] text-stone-500">{item.status === "ready" ? "Ready to upload" : item.status === "needs-location" ? "Tap map to place" : item.status === "reading" ? "Reading metadata" : item.message}</span>
+                    <span className="block truncate text-[11px] font-semibold text-teal-800">{dayLabel(days, item.dayId)}{item.dayMatchSource ? ` · ${item.dayMatchSource} matched` : ""}</span>
                   </span>
                   <span className={cn("h-2.5 w-2.5 rounded-full", item.status === "ready" ? "bg-emerald-500" : item.status === "needs-location" ? "bg-amber-500" : item.status === "invalid" ? "bg-rose-500" : "bg-stone-300")} />
                 </button>
@@ -229,11 +310,22 @@ export function UploadPhotoPanel({ days, defaultDayId, pendingCoordinate, isSavi
         }} maxLength={280} placeholder="Caption for selected photo" className="min-h-16 w-full rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
         <div className="grid grid-cols-2 gap-2">
           <input name="uploaderName" value={uploaderName} onChange={(event) => setUploaderName(event.target.value)} placeholder="Your name" className="rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-          <select name="dayId" value={dayId} onChange={(event) => setDayId(event.target.value)} className="rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">
+          <select value={activeItem?.dayId ?? ""} onChange={(event) => setActiveDay(event.target.value)} disabled={!activeItem} className="rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Selected photo day">
             <option value="">All days</option>
             {days.map((day) => <option key={day.id} value={day.id}>Day {day.day_number}</option>)}
           </select>
         </div>
+
+        {items.length > 0 ? (
+          <label className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-lg border border-stone-200 bg-white/80 px-3 py-2 text-xs font-semibold text-stone-600">
+            <span>Override all</span>
+            <select value={batchOverrideDayId} onChange={(event) => applyBatchDay(event.target.value)} className="rounded-md border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">
+              <option value={BATCH_OVERRIDE_IDLE} disabled>Choose day...</option>
+              <option value={ALL_DAYS_VALUE}>All days</option>
+              {days.map((day) => <option key={day.id} value={day.id}>Day {day.day_number}</option>)}
+            </select>
+          </label>
+        ) : null}
 
         <div className="grid grid-cols-[auto_1fr] gap-2">
           <button type="button" onClick={() => { setItems([]); setActiveItemId(null); onCoordinatePreview(null); }} disabled={items.length === 0 || isSaving} className="rounded-lg border border-stone-300 bg-white px-3 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45" aria-label="Clear queue"><RotateCcw className="h-4 w-4" /></button>
