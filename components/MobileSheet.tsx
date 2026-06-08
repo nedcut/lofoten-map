@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils";
 import type { Day } from "@/types/trip";
 
 // Counts for the current map filter, so the collapsed peek can tell you what's
-// pinned without expanding the sheet. Notes and places share a marker layer, so
+// visible without expanding the sheet. Notes and places share a marker layer, so
 // they're summed together as journal pins.
-export type PeekCounts = { photos: number; notes: number; places: number };
+export type PeekCounts = { routes: number; photos: number; notes: number; places: number };
 
 type MobileSheetProps = SidebarProps & { counts: PeekCounts };
 
@@ -29,9 +29,10 @@ function dayLabel(selectedDay: Day | null): string {
 function countsLabel(counts: PeekCounts): string {
   const journalPins = counts.notes + counts.places;
   const parts = [];
+  if (counts.routes) parts.push(pluralize(counts.routes, "route"));
   if (counts.photos) parts.push(pluralize(counts.photos, "photo"));
   if (journalPins) parts.push(pluralize(journalPins, "journal pin"));
-  return parts.length > 0 ? parts.join(" · ") : "No pins on the map yet";
+  return parts.length > 0 ? parts.join(" · ") : "Nothing on the map yet";
 }
 
 export function MobileSheet(props: MobileSheetProps) {
