@@ -114,6 +114,29 @@ function dayOptions(days: Day[]) {
   );
 }
 
+function dayDeleteMessage(day: Day) {
+  const label = `Day ${day.day_number}${day.title ? `: ${day.title}` : ""}`;
+  return `Delete ${label}? Photos, notes, places, and routes assigned to this day will stay in the trip and move to All days.`;
+}
+
+function routeLabel(route: RouteSegment) {
+  return route.name || `${route.mode} route`;
+}
+
+function noteLabel(note: Note) {
+  return note.body.length > 42 ? `${note.body.slice(0, 42)}...` : note.body;
+}
+
+function placeLabel(place: Place) {
+  return place.name || "this place";
+}
+
+function photoLabel(photo: Photo) {
+  if (photo.caption) return photo.caption.length > 42 ? `${photo.caption.slice(0, 42)}...` : photo.caption;
+  if (photo.taken_at) return `photo from ${new Date(photo.taken_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  return "this photo";
+}
+
 export function AdminDataPanel(props: AdminDataProps) {
   async function submitTrip(formData: FormData) {
     await props.onUpdateTrip({
@@ -226,7 +249,7 @@ function DayEditor({ day, isSaving, onSave, onDelete }: { day: Day; isSaving: bo
       </div>
       <input name="title" defaultValue={day.title ?? ""} placeholder="Day title" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
       <textarea name="summary" defaultValue={day.summary ?? ""} placeholder="Summary" className="min-h-16 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-      <EditorActions isSaving={isSaving} saveLabel="Save day" onDelete={onDelete} />
+      <EditorActions isSaving={isSaving} saveLabel="Save day" deleteLabel="Delete day" deleteConfirmMessage={dayDeleteMessage(day)} onDelete={onDelete} />
     </form>
   );
 }
@@ -251,7 +274,7 @@ function RouteEditor({ route, days, isSaving, onSave, onDelete }: { route: Route
         </select>
       </div>
       <input name="source" defaultValue={route.source ?? ""} placeholder="Source" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-      <EditorActions isSaving={isSaving} saveLabel="Save route" onDelete={onDelete} />
+      <EditorActions isSaving={isSaving} saveLabel="Save route" deleteLabel="Delete route" deleteConfirmMessage={`Delete route "${routeLabel(route)}"?`} onDelete={onDelete} />
     </form>
   );
 }
@@ -270,7 +293,7 @@ function NoteEditor({ note, days, isSaving, onSave, onDelete }: { note: Note; da
       <select name="day_id" defaultValue={note.day_id ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">{dayOptions(days)}</select>
       <input name="author_name" defaultValue={note.author_name ?? ""} placeholder="Author" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
       <textarea name="body" defaultValue={note.body} className="min-h-16 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-      <EditorActions isSaving={isSaving} saveLabel="Save note" onDelete={onDelete} />
+      <EditorActions isSaving={isSaving} saveLabel="Save note" deleteLabel="Delete note" deleteConfirmMessage={`Delete note "${noteLabel(note)}"?`} onDelete={onDelete} />
     </form>
   );
 }
@@ -298,7 +321,7 @@ function PlaceEditor({ place, days, isSaving, onSave, onDelete }: { place: Place
       </div>
       <input name="place_type" defaultValue={place.place_type ?? ""} placeholder="Type" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
       <textarea name="description" defaultValue={place.description ?? ""} placeholder="Description" className="min-h-16 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-      <EditorActions isSaving={isSaving} saveLabel="Save place" onDelete={onDelete} />
+      <EditorActions isSaving={isSaving} saveLabel="Save place" deleteLabel="Delete place" deleteConfirmMessage={`Delete place "${placeLabel(place)}"?`} onDelete={onDelete} />
     </form>
   );
 }
@@ -339,21 +362,21 @@ function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo: Photo
           <input name="taken_at" type="datetime-local" defaultValue={datetimeLocalValue(photo.taken_at)} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-normal tracking-normal text-stone-950 outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
         </label>
         <textarea name="caption" defaultValue={photo.caption ?? ""} placeholder="Caption" className="min-h-14 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-        <EditorActions isSaving={isSaving} saveLabel="Save photo" onDelete={onDelete} />
+        <EditorActions isSaving={isSaving} saveLabel="Save photo" deleteLabel="Delete photo" deleteConfirmMessage={`Delete ${photoLabel(photo)}? The uploaded image file will also be removed when storage cleanup succeeds.`} onDelete={onDelete} />
       </div>
     </form>
   );
 }
 
-function EditorActions({ isSaving, saveLabel, onDelete }: { isSaving: boolean; saveLabel: string; onDelete: () => Promise<void> }) {
+function EditorActions({ isSaving, saveLabel, deleteLabel, deleteConfirmMessage, onDelete }: { isSaving: boolean; saveLabel: string; deleteLabel: string; deleteConfirmMessage: string; onDelete: () => Promise<void> }) {
   async function deleteItem() {
-    if (window.confirm("Delete this item?")) await onDelete();
+    if (window.confirm(deleteConfirmMessage)) await onDelete();
   }
 
   return (
     <div className="grid grid-cols-[1fr_auto] gap-2">
       <SaveButton isSaving={isSaving}>{saveLabel}</SaveButton>
-      <button type="button" onClick={deleteItem} disabled={isSaving} className="inline-flex items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 text-rose-700 transition hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-rose-200/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50" aria-label="Delete item">
+      <button type="button" onClick={deleteItem} disabled={isSaving} className="inline-flex items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 text-rose-700 transition hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-rose-200/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50" aria-label={deleteLabel} title={deleteLabel}>
         <Trash2 className="h-4 w-4" />
       </button>
     </div>
