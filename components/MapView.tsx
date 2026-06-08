@@ -93,7 +93,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
         </div>
       ) : null}
       {clickMode !== "idle" ? (
-        <div className="absolute left-1/2 top-4 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-teal-700/20 bg-[rgba(255,253,246,0.94)] px-4 py-2 text-center text-sm font-bold text-teal-950 shadow-xl backdrop-blur">
+        <div className="absolute left-1/2 top-16 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-teal-700/20 bg-[rgba(255,253,246,0.94)] px-4 py-2 text-center text-sm font-bold text-teal-950 shadow-xl backdrop-blur md:top-4">
           <span className="relative flex h-2.5 w-2.5">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-600/60" />
             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-teal-700" />
