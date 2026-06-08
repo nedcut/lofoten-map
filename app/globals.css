@@ -66,6 +66,21 @@ body {
 }
 .mapboxgl-ctrl button { color: #1c1917 !important; }
 
+@media (max-width: 767px) {
+  .mapboxgl-ctrl-bottom-left,
+  .mapboxgl-ctrl-bottom-right {
+    bottom: calc(11.75rem + env(safe-area-inset-bottom)) !important;
+  }
+
+  .mapboxgl-ctrl-bottom-left .mapboxgl-ctrl {
+    margin-left: 0.75rem !important;
+  }
+
+  .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl {
+    margin-right: 0.75rem !important;
+  }
+}
+
 .lofoten-popup-card {
   width: 16rem;
   background: rgba(255, 253, 246, 0.98);
