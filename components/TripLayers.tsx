@@ -116,15 +116,19 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
     const activeMap = map;
     let cancelled = false;
     let handlersAttached = false;
-    const popupLayers = ["photos-circle", "notes-circle", "places-circle"];
+    const pointPopupLayers = ["photos-circle", "notes-circle", "places-circle"];
+    const routePopupLayer = "routes-line";
 
-    function showPopup(event: mapboxgl.MapLayerMouseEvent) {
+    function tag(kind: string) {
+      return `<span class="lofoten-popup-tag lofoten-popup-tag-${kind}">${escapeHtml(kind)}</span>`;
+    }
+
+    function showPointPopup(event: mapboxgl.MapLayerMouseEvent) {
       const feature = event.features?.[0];
       if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
       const props = feature.properties ?? {};
       const coordinates = (feature.geometry.coordinates as [number, number]).slice() as [number, number];
       const byline = (person: unknown) => (person ? `<span class="lofoten-popup-by">by ${escapeHtml(person)}</span>` : "");
-      const tag = (kind: string) => `<span class="lofoten-popup-tag lofoten-popup-tag-${kind}">${escapeHtml(kind)}</span>`;
 
       let content: string;
       if (props.kind === "photo") {
@@ -140,6 +144,19 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
       new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(coordinates).setHTML(content).addTo(activeMap);
     }
 
+    function showRoutePopup(event: mapboxgl.MapLayerMouseEvent) {
+      const feature = event.features?.[0];
+      if (!feature) return;
+      const props = feature.properties ?? {};
+      const distanceKm = Number(props.distance_km);
+      const meta = [
+        props.mode ? String(props.mode) : null,
+        Number.isFinite(distanceKm) ? `${distanceKm.toFixed(distanceKm < 10 ? 1 : 0)} km` : null,
+      ].filter(Boolean).join(" · ");
+      const content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("route")}<div class="lofoten-popup-title">${escapeHtml(props.name || "Route segment")}</div><div class="lofoten-popup-meta">${escapeHtml(meta || "Saved route")}</div></div></div>`;
+      new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(event.lngLat).setHTML(content).addTo(activeMap);
+    }
+
     function setPointerCursor() {
       activeMap.getCanvas().style.setProperty("cursor", "pointer");
     }
@@ -149,12 +166,15 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
     }
 
     function attachHandlers() {
-      if (cancelled || !popupLayers.every((layer) => hasLayer(activeMap, layer))) return;
-      for (const layer of popupLayers) {
-        activeMap.on("click", layer, showPopup);
+      if (cancelled || !pointPopupLayers.every((layer) => hasLayer(activeMap, layer)) || !hasLayer(activeMap, routePopupLayer)) return;
+      for (const layer of pointPopupLayers) {
+        activeMap.on("click", layer, showPointPopup);
         activeMap.on("mouseenter", layer, setPointerCursor);
         activeMap.on("mouseleave", layer, resetPointerCursor);
       }
+      activeMap.on("click", routePopupLayer, showRoutePopup);
+      activeMap.on("mouseenter", routePopupLayer, setPointerCursor);
+      activeMap.on("mouseleave", routePopupLayer, resetPointerCursor);
       handlersAttached = true;
     }
 
@@ -165,11 +185,14 @@ export function TripLayers({ map, routes, photos, notes, places, visibility }: P
       cancelled = true;
       activeMap.off("load", attachHandlers);
       if (!handlersAttached) return;
-      for (const layer of popupLayers) {
-        activeMap.off("click", layer, showPopup);
+      for (const layer of pointPopupLayers) {
+        activeMap.off("click", layer, showPointPopup);
         activeMap.off("mouseenter", layer, setPointerCursor);
         activeMap.off("mouseleave", layer, resetPointerCursor);
       }
+      activeMap.off("click", routePopupLayer, showRoutePopup);
+      activeMap.off("mouseenter", routePopupLayer, setPointerCursor);
+      activeMap.off("mouseleave", routePopupLayer, resetPointerCursor);
     };
   }, [map]);
 
