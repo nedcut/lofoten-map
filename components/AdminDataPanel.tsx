@@ -1,6 +1,7 @@
 "use client";
 
 import { CalendarDays, Camera, FileText, Loader2, MapPin, Pencil, Route, Save, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { Day, Note, Photo, Place, RouteMode, RouteSegment, Trip } from "@/types/trip";
 
 type TripUpdate = {
@@ -56,6 +57,7 @@ export type AdminDataProps = {
   places: Place[];
   photos: Photo[];
   message: string | null;
+  messageTone: "info" | "error";
   isSaving: boolean;
   onUpdateTrip: (input: TripUpdate) => Promise<void>;
   onCreateDay: (input: DayUpdate) => Promise<void>;
@@ -150,7 +152,16 @@ export function AdminDataPanel(props: AdminDataProps) {
   return (
     <section className="space-y-3 rounded-xl border border-stone-200 bg-white/75 p-4">
       <div className="flex items-center gap-2 text-sm font-bold text-stone-900"><Pencil className="h-4 w-4 text-teal-700" /> Admin data</div>
-      {props.message ? <div className="rounded-lg border border-teal-700/15 bg-teal-50 px-3 py-2 text-xs leading-5 text-teal-950">{props.message}</div> : null}
+      {props.message ? (
+        <div
+          className={cn(
+            "rounded-lg border px-3 py-2 text-xs leading-5",
+            props.messageTone === "error" ? "border-rose-200 bg-rose-50 text-rose-950" : "border-teal-700/15 bg-teal-50 text-teal-950",
+          )}
+        >
+          {props.message}
+        </div>
+      ) : null}
 
       {props.trip ? (
         <details className="group rounded-lg bg-[#f7f1e7] p-3">

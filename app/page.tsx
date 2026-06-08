@@ -90,8 +90,10 @@ export default function Home() {
   const [authMessageTone, setAuthMessageTone] = useState<"info" | "error">("info");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [memberMessage, setMemberMessage] = useState<string | null>(null);
+  const [memberMessageTone, setMemberMessageTone] = useState<"info" | "error">("info");
   const [memberSaving, setMemberSaving] = useState(false);
   const [adminDataMessage, setAdminDataMessage] = useState<string | null>(null);
+  const [adminDataMessageTone, setAdminDataMessageTone] = useState<"info" | "error">("info");
   const [adminDataSaving, setAdminDataSaving] = useState(false);
   const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
   const [layerVisibility, setLayerVisibility] = useState({ photos: true, notes: true, routes: true });
@@ -225,6 +227,7 @@ export default function Home() {
     if (!supabase || !data.trip) return;
     setMemberSaving(true);
     setMemberMessage(null);
+    setMemberMessageTone("info");
     try {
       const { error: grantError } = await supabase.rpc("grant_trip_member_by_email", {
         target_trip_slug: data.trip.slug,
@@ -232,12 +235,15 @@ export default function Home() {
         target_role: input.role,
       });
       if (grantError) {
+        setMemberMessageTone("error");
         setMemberMessage(grantError.message);
       } else {
+        setMemberMessageTone("info");
         setMemberMessage(`${input.email} added as ${input.role}.`);
         await loadData();
       }
     } catch (grantError) {
+      setMemberMessageTone("error");
       setMemberMessage(grantError instanceof Error ? grantError.message : "Could not update members.");
     } finally {
       setMemberSaving(false);
@@ -258,7 +264,7 @@ export default function Home() {
   const canContribute = !supabase || Boolean(currentMember);
   const isAdmin = !supabase || currentMember?.role === "admin";
   const memberAdmin = currentMember?.role === "admin"
-    ? { members: data.members, message: memberMessage, isSaving: memberSaving, onGrantMember: grantMember }
+    ? { members: data.members, message: memberMessage, messageTone: memberMessageTone, isSaving: memberSaving, onGrantMember: grantMember }
     : null;
   const routeDraftDistance = useMemo(() => routeDistanceMeters(routeDraftPoints), [routeDraftPoints]);
   const adminData = isAdmin
@@ -270,6 +276,7 @@ export default function Home() {
       places: data.places,
       photos: data.photos,
       message: adminDataMessage,
+      messageTone: adminDataMessageTone,
       isSaving: adminDataSaving,
       onUpdateTrip: updateTrip,
       onCreateDay: createDay,
@@ -525,13 +532,24 @@ export default function Home() {
   async function runAdminOperation(operation: () => Promise<void>) {
     setAdminDataSaving(true);
     setAdminDataMessage(null);
+    setAdminDataMessageTone("info");
     try {
       await operation();
     } catch (adminError) {
-      setAdminDataMessage(adminError instanceof Error ? adminError.message : "Admin action failed.");
+      setAdminDataError(adminError instanceof Error ? adminError.message : "Admin action failed.");
     } finally {
       setAdminDataSaving(false);
     }
+  }
+
+  function setAdminDataInfo(message: string) {
+    setAdminDataMessageTone("info");
+    setAdminDataMessage(message);
+  }
+
+  function setAdminDataError(message: string) {
+    setAdminDataMessageTone("error");
+    setAdminDataMessage(message);
   }
 
   async function updateTrip(input: { title: string; description: string | null; start_date: string | null; end_date: string | null }) {
@@ -539,14 +557,14 @@ export default function Home() {
     await runAdminOperation(async () => {
       if (supabase) {
         const { error: updateError } = await supabase.from("trips").update(input).eq("id", data.trip!.id);
-        if (updateError) setAdminDataMessage(updateError.message);
+        if (updateError) setAdminDataError(updateError.message);
         else {
-          setAdminDataMessage("Trip updated.");
+          setAdminDataInfo("Trip updated.");
           await loadData();
         }
       } else {
         setData((current) => ({ ...current, trip: current.trip ? { ...current.trip, ...input } : current.trip }));
-        setAdminDataMessage("Trip updated.");
+        setAdminDataInfo("Trip updated.");
       }
     });
   }
@@ -556,14 +574,14 @@ export default function Home() {
     await runAdminOperation(async () => {
       if (supabase) {
         const { error: updateError } = await supabase.from("days").update(input).eq("id", dayId).eq("trip_id", data.trip!.id);
-        if (updateError) setAdminDataMessage(updateError.message);
+        if (updateError) setAdminDataError(updateError.message);
         else {
-          setAdminDataMessage("Day updated.");
+          setAdminDataInfo("Day updated.");
           await loadData();
         }
       } else {
         setData((current) => ({ ...current, days: current.days.map((day) => day.id === dayId ? { ...day, ...input } : day).sort((a, b) => a.day_number - b.day_number) }));
-        setAdminDataMessage("Day updated.");
+        setAdminDataInfo("Day updated.");
       }
     });
   }
@@ -574,9 +592,9 @@ export default function Home() {
       const row = { ...input, trip_id: data.trip!.id };
       if (supabase) {
         const { error: insertError } = await supabase.from("days").insert(row);
-        if (insertError) setAdminDataMessage(insertError.message);
+        if (insertError) setAdminDataError(insertError.message);
         else {
-          setAdminDataMessage("Day added.");
+          setAdminDataInfo("Day added.");
           await loadData();
         }
       } else {
@@ -584,7 +602,7 @@ export default function Home() {
           ...current,
           days: [...current.days, { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }].sort((a, b) => a.day_number - b.day_number),
         }));
-        setAdminDataMessage("Day added.");
+        setAdminDataInfo("Day added.");
       }
     });
   }
@@ -594,14 +612,14 @@ export default function Home() {
     await runAdminOperation(async () => {
       if (supabase) {
         const { error: updateError } = await supabase.from("route_segments").update(input).eq("id", routeId).eq("trip_id", data.trip!.id);
-        if (updateError) setAdminDataMessage(updateError.message);
+        if (updateError) setAdminDataError(updateError.message);
         else {
-          setAdminDataMessage("Route updated.");
+          setAdminDataInfo("Route updated.");
           await loadData();
         }
       } else {
         setData((current) => ({ ...current, routeSegments: current.routeSegments.map((route) => route.id === routeId ? { ...route, ...input } : route) }));
-        setAdminDataMessage("Route updated.");
+        setAdminDataInfo("Route updated.");
       }
     });
   }
@@ -611,14 +629,14 @@ export default function Home() {
     await runAdminOperation(async () => {
       if (supabase) {
         const { error: updateError } = await supabase.from("notes").update(input).eq("id", noteId).eq("trip_id", data.trip!.id);
-        if (updateError) setAdminDataMessage(updateError.message);
+        if (updateError) setAdminDataError(updateError.message);
         else {
-          setAdminDataMessage("Note updated.");
+          setAdminDataInfo("Note updated.");
           await loadData();
         }
       } else {
         setData((current) => ({ ...current, notes: current.notes.map((note) => note.id === noteId ? { ...note, ...input } : note) }));
-        setAdminDataMessage("Note updated.");
+        setAdminDataInfo("Note updated.");
       }
     });
   }
@@ -628,14 +646,14 @@ export default function Home() {
     await runAdminOperation(async () => {
       if (supabase) {
         const { error: updateError } = await supabase.from("places").update(input).eq("id", placeId).eq("trip_id", data.trip!.id);
-        if (updateError) setAdminDataMessage(updateError.message);
+        if (updateError) setAdminDataError(updateError.message);
         else {
-          setAdminDataMessage("Place updated.");
+          setAdminDataInfo("Place updated.");
           await loadData();
         }
       } else {
         setData((current) => ({ ...current, places: current.places.map((place) => place.id === placeId ? { ...place, ...input } : place) }));
-        setAdminDataMessage("Place updated.");
+        setAdminDataInfo("Place updated.");
       }
     });
   }
@@ -645,14 +663,14 @@ export default function Home() {
     await runAdminOperation(async () => {
       if (supabase) {
         const { error: updateError } = await supabase.from("photos").update(input).eq("id", photoId).eq("trip_id", data.trip!.id);
-        if (updateError) setAdminDataMessage(updateError.message);
+        if (updateError) setAdminDataError(updateError.message);
         else {
-          setAdminDataMessage("Photo updated.");
+          setAdminDataInfo("Photo updated.");
           await loadData();
         }
       } else {
         setData((current) => ({ ...current, photos: current.photos.map((photo) => photo.id === photoId ? { ...photo, ...input } : photo) }));
-        setAdminDataMessage("Photo updated.");
+        setAdminDataInfo("Photo updated.");
       }
     });
   }
@@ -665,13 +683,14 @@ export default function Home() {
           ? storagePathsForPhoto(data.photos.find((photo) => photo.id === id) ?? { image_url: "", thumbnail_url: null })
           : [];
         const { error: deleteError } = await supabase.from(table).delete().eq("id", id).eq("trip_id", data.trip!.id);
-        if (deleteError) setAdminDataMessage(deleteError.message);
+        if (deleteError) setAdminDataError(deleteError.message);
         else {
           if (photoStoragePaths.length > 0) {
             const { error: storageDeleteError } = await supabase.storage.from(PHOTO_BUCKET).remove(photoStoragePaths);
-            setAdminDataMessage(storageDeleteError ? `Item deleted, but photo file cleanup failed: ${storageDeleteError.message}` : "Item deleted.");
+            if (storageDeleteError) setAdminDataError(`Item deleted, but photo file cleanup failed: ${storageDeleteError.message}`);
+            else setAdminDataInfo("Item deleted.");
           } else {
-            setAdminDataMessage("Item deleted.");
+            setAdminDataInfo("Item deleted.");
           }
           await loadData();
         }
@@ -689,7 +708,7 @@ export default function Home() {
             ? current.routeSegments.filter((item) => item.id !== id)
             : current.routeSegments.map((item) => table === "days" && item.day_id === id ? { ...item, day_id: null } : item),
         }));
-        setAdminDataMessage("Item deleted.");
+        setAdminDataInfo("Item deleted.");
       }
     });
   }

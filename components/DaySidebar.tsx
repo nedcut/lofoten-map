@@ -23,6 +23,7 @@ export type SidebarProps = {
 export type MemberAdminProps = {
   members: TripMember[];
   message: string | null;
+  messageTone: "info" | "error";
   isSaving: boolean;
   onGrantMember: (input: { email: string; role: "admin" | "member" }) => Promise<void>;
 };
@@ -126,7 +127,7 @@ export function LayersPanel({ layerVisibility, onLayerVisibilityChange }: Pick<S
   );
 }
 
-export function MemberAdminPanel({ members, message, isSaving, onGrantMember }: MemberAdminProps) {
+export function MemberAdminPanel({ members, message, messageTone, isSaving, onGrantMember }: MemberAdminProps) {
   async function submit(formData: FormData) {
     const email = String(formData.get("email") ?? "").trim();
     const role = String(formData.get("role") || "member") as "admin" | "member";
@@ -148,7 +149,16 @@ export function MemberAdminPanel({ members, message, isSaving, onGrantMember }: 
           </button>
         </div>
       </form>
-      {message ? <div className="rounded-lg border border-teal-700/15 bg-teal-50 px-3 py-2 text-xs leading-5 text-teal-950">{message}</div> : null}
+      {message ? (
+        <div
+          className={cn(
+            "rounded-lg border px-3 py-2 text-xs leading-5",
+            messageTone === "error" ? "border-rose-200 bg-rose-50 text-rose-950" : "border-teal-700/15 bg-teal-50 text-teal-950",
+          )}
+        >
+          {message}
+        </div>
+      ) : null}
       <div className="space-y-1.5">
         {members.map((member) => (
           <div key={member.user_id} className="flex items-center justify-between gap-3 rounded-lg bg-[#f7f1e7] px-3 py-2 text-sm">
