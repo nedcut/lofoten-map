@@ -77,8 +77,17 @@ Create a Mapbox access token and set `NEXT_PUBLIC_MAPBOX_TOKEN` in `.env.local`.
 npm run dev
 npm run typecheck
 npm run lint
+npm run test          # run the unit suite once
+npm run test:watch    # re-run on change while developing
+npm run test:coverage # unit suite with a coverage report
 npm run build
+npm run ci            # lint + typecheck + test (what CI runs)
 ```
+
+Unit tests live next to the code they cover (`lib/*.test.ts`) and run under
+[Vitest](https://vitest.dev). GitHub Actions runs `lint`, `typecheck`, `test`,
+and `build` on every push and pull request to `main` (see
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ## Deploying to Vercel
 

@@ -58,7 +58,7 @@ function stringFromTag(value: unknown): string | undefined {
   return undefined;
 }
 
-function coordinateFromExif(value: unknown, ref: unknown): number | null {
+export function coordinateFromExif(value: unknown, ref: unknown): number | null {
   const direct = numberFromValue(value);
   if (direct !== null) return applyGpsRef(direct, ref);
 

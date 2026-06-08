@@ -12,11 +12,11 @@ export type PreparedPhotoFiles = {
   optimized: boolean;
 };
 
-function extensionlessName(fileName: string) {
+export function extensionlessName(fileName: string) {
   return fileName.replace(/\.[^.]+$/, "") || "photo";
 }
 
-function dimensionsFor(maxEdge: number, width: number, height: number) {
+export function dimensionsFor(maxEdge: number, width: number, height: number) {
   const scale = Math.min(1, maxEdge / Math.max(width, height));
   return {
     width: Math.max(1, Math.round(width * scale)),

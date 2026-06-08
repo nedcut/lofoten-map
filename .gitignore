@@ -8,3 +8,6 @@ out
 npm-debug.log*
 
 *.tsbuildinfo
+
+# test coverage
+/coverage
