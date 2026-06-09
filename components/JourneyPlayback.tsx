@@ -152,11 +152,14 @@ export function JourneyPlayback({
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      // Don't hijack keys while typing in a field (caption editor, filters) —
-      // otherwise Space toggles playback instead of inserting a space, and the
-      // arrows jump items instead of moving the cursor.
-      const target = event.target as HTMLElement | null;
-      if (target && (target.isContentEditable || target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.tagName === "SELECT")) return;
+      // Don't hijack keys while editing or typing in a field — otherwise Space
+      // toggles playback instead of inserting a space, and the arrows jump items
+      // instead of moving the cursor. Gate on the editor's own state (the
+      // keydown target is unreliable on mobile virtual keyboards) plus the
+      // focused element, which also covers the filter selects.
+      const isEditable = (el: Element | null) =>
+        el instanceof HTMLElement && (el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.tagName === "SELECT");
+      if (editingCaption || isEditable(event.target as Element | null) || isEditable(document.activeElement)) return;
       if (event.key === "ArrowRight") {
         event.preventDefault();
         noteInteraction();
@@ -175,7 +178,7 @@ export function JourneyPlayback({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose, onNext, onPrev]);
+  }, [editingCaption, onClose, onNext, onPrev]);
 
   // Warm the browser cache for the neighbouring photos so next/prev swaps in an
   // already-decoded image instead of stalling on a fresh full-size download.
