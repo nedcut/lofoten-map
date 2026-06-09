@@ -32,10 +32,8 @@ export type JourneyItem =
   };
 
 type JourneySortKey = {
-  dayBucket: number;
-  dayNumber: number | null;
-  group: number;
   time: number;
+  group: number;
   created: number;
   id: string;
 };
@@ -46,6 +44,7 @@ export type BuildJourneyOptions = {
 };
 
 const DEFAULT_ATTACHMENT_RADIUS_METERS = 100;
+const DAY_MS = 86_400_000;
 
 function timestamp(value: string | null | undefined) {
   if (!value) return Number.POSITIVE_INFINITY;
@@ -57,10 +56,23 @@ function dayMap(days: Day[]) {
   return new Map(days.map((day) => [day.id, day]));
 }
 
-function dayBucket(daysById: Map<string, Day>, dayId: string | null) {
-  if (!dayId) return { dayBucket: 1, dayNumber: null };
-  const day = daysById.get(dayId);
-  return { dayBucket: day ? 0 : 1, dayNumber: day?.day_number ?? null };
+// Midnight (UTC) of a day's calendar date, or null when the item has no day or
+// its day has no date set.
+function dayDateMs(daysById: Map<string, Day>, dayId: string | null) {
+  if (!dayId) return null;
+  const date = daysById.get(dayId)?.date;
+  if (!date) return null;
+  const ms = new Date(`${date}T00:00:00Z`).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+// Effective sort time for items that have no timestamp of their own. They land
+// at the end of their assigned day (untimed photos just ahead of journal items),
+// or at the very end of the journey when no day date is known.
+function fallbackTime(daysById: Map<string, Day>, dayId: string | null, slot: "photo" | "journal") {
+  const ms = dayDateMs(daysById, dayId);
+  if (ms === null) return Number.POSITIVE_INFINITY;
+  return ms + (slot === "photo" ? DAY_MS - 2 : DAY_MS - 1);
 }
 
 function coordOf(item: Pick<Photo, "lat" | "lng"> | Pick<Note, "lat" | "lng"> | Pick<Place, "lat" | "lng">) {
@@ -68,22 +80,14 @@ function coordOf(item: Pick<Photo, "lat" | "lng"> | Pick<Note, "lat" | "lng"> | 
   return { lat: item.lat, lng: item.lng };
 }
 
-function sortKey(daysById: Map<string, Day>, id: string, dayId: string | null, group: number, timeValue: string | null | undefined, createdAt: string) {
-  const bucket = dayBucket(daysById, dayId);
-  return {
-    ...bucket,
-    group,
-    time: timestamp(timeValue),
-    created: timestamp(createdAt),
-    id,
-  };
-}
-
 function compareSort(a: JourneySortKey, b: JourneySortKey) {
-  return a.dayBucket - b.dayBucket
-    || (a.dayNumber ?? Number.POSITIVE_INFINITY) - (b.dayNumber ?? Number.POSITIVE_INFINITY)
+  // Strictly chronological: a real timestamp always wins, regardless of which
+  // day a photo was tagged to. Items sharing an effective time (e.g. journal
+  // items on the same day) fall back to kind, then creation order. Equal
+  // Infinity times compare as 0 rather than NaN.
+  const timeDiff = a.time === b.time ? 0 : a.time - b.time;
+  return timeDiff
     || a.group - b.group
-    || a.time - b.time
     || a.created - b.created
     || a.id.localeCompare(b.id);
 }
@@ -137,35 +141,48 @@ export function buildJourneyItems(data: TripData, options: BuildJourneyOptions =
 
   const items: JourneyItem[] = [
     ...photos.map((photo) => {
-      const hasTakenAt = Number.isFinite(timestamp(photo.taken_at));
+      const id = `photo:${photo.id}`;
+      const takenAtMs = timestamp(photo.taken_at);
+      const timed = Number.isFinite(takenAtMs);
       return {
-        id: `photo:${photo.id}`,
+        id,
         kind: "photo" as const,
         dayId: photo.day_id,
         coord: coordOf(photo),
         primary: photo,
         attached: attachedByPhotoId.get(photo.id) ?? [],
-        sort: sortKey(daysById, `photo:${photo.id}`, photo.day_id, hasTakenAt ? 0 : 1, photo.taken_at, photo.created_at),
+        sort: {
+          time: timed ? takenAtMs : fallbackTime(daysById, photo.day_id, "photo"),
+          group: timed ? 0 : 1,
+          created: timestamp(photo.created_at),
+          id,
+        },
       };
     }),
-    ...data.notes.filter((note) => includeDay(note.day_id) && !attachedIds.has(`note:${note.id}`)).map((note) => ({
-      id: `note:${note.id}`,
-      kind: "note" as const,
-      dayId: note.day_id,
-      coord: coordOf(note),
-      primary: note,
-      attached: [],
-      sort: sortKey(daysById, `note:${note.id}`, note.day_id, 2, null, note.created_at),
-    })),
-    ...data.places.filter((place) => includeDay(place.day_id) && !attachedIds.has(`place:${place.id}`)).map((place) => ({
-      id: `place:${place.id}`,
-      kind: "place" as const,
-      dayId: place.day_id,
-      coord: coordOf(place),
-      primary: place,
-      attached: [],
-      sort: sortKey(daysById, `place:${place.id}`, place.day_id, 2, null, place.created_at),
-    })),
+    ...data.notes.filter((note) => includeDay(note.day_id) && !attachedIds.has(`note:${note.id}`)).map((note) => {
+      const id = `note:${note.id}`;
+      return {
+        id,
+        kind: "note" as const,
+        dayId: note.day_id,
+        coord: coordOf(note),
+        primary: note,
+        attached: [],
+        sort: { time: fallbackTime(daysById, note.day_id, "journal"), group: 2, created: timestamp(note.created_at), id },
+      };
+    }),
+    ...data.places.filter((place) => includeDay(place.day_id) && !attachedIds.has(`place:${place.id}`)).map((place) => {
+      const id = `place:${place.id}`;
+      return {
+        id,
+        kind: "place" as const,
+        dayId: place.day_id,
+        coord: coordOf(place),
+        primary: place,
+        attached: [],
+        sort: { time: fallbackTime(daysById, place.day_id, "journal"), group: 2, created: timestamp(place.created_at), id },
+      };
+    }),
   ];
 
   return items.sort((a, b) => compareSort(a.sort, b.sort));

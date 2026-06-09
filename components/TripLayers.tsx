@@ -59,15 +59,16 @@ type Props = {
   isAdmin: boolean;
   onEditItem: (kind: MapItemKind, id: string) => void;
   onDeleteItem: (kind: MapItemKind, id: string) => void;
+  onOpenJourney: (photoId: string) => void;
 };
 
-export function TripLayers({ map, routes, photos, notes, places, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem }: Props) {
+export function TripLayers({ map, routes, photos, notes, places, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney }: Props) {
   // Popup click handlers are attached once (keyed on [map]); this ref lets those
   // long-lived closures read the latest permissions/callbacks without re-binding.
-  const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem });
+  const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney });
   useEffect(() => {
-    actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem };
-  }, [currentUserId, isAdmin, onEditItem, onDeleteItem]);
+    actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney };
+  }, [currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney]);
   const routeData = useMemo(() => routeFeatureCollection(routes), [routes]);
   const photoData = useMemo(() => photoFeatureCollection(photos), [photos]);
   const noteData = useMemo(() => noteFeatureCollection(notes), [notes]);
@@ -165,6 +166,23 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       body.append(bar);
     }
 
+    // Photo popups get an "Open in Journey" button for everyone (no ownership
+    // gate): it just launches the cinematic viewer at this photo.
+    function injectJourneyButton(popup: mapboxgl.Popup, id: string) {
+      if (!id) return;
+      const body = popup.getElement()?.querySelector(".lofoten-popup-body");
+      if (!body) return;
+      const bar = document.createElement("div");
+      bar.className = "lofoten-popup-actions";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "lofoten-popup-action lofoten-popup-action-journey";
+      button.textContent = "Open in Journey";
+      button.addEventListener("click", () => { popup.remove(); actionsRef.current.onOpenJourney(id); });
+      bar.append(button);
+      body.append(bar);
+    }
+
     function showPointPopup(event: mapboxgl.MapLayerMouseEvent) {
       const feature = event.features?.[0];
       if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
@@ -185,6 +203,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
         content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("place")}<div class="lofoten-popup-title">${escapeHtml(props.name || props.title || "Place")}</div><div class="lofoten-popup-meta">${meta || "Shared trip marker"}</div></div></div>`;
       }
       const popup = new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(coordinates).setHTML(content).addTo(activeMap);
+      if (props.kind === "photo") injectJourneyButton(popup, String(props.id ?? ""));
       injectActions(popup, props.kind as MapItemKind, String(props.id ?? ""), (props.user_id as string | null) ?? null);
     }
 

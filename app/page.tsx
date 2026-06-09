@@ -421,6 +421,20 @@ export default function Home() {
     openJourneyAt(item.id, "replace");
   }, [journeyItems, openJourneyAt]);
 
+  // Tapping a dot in the journey mini-map jumps straight to that item.
+  const selectJourneyItem = useCallback((id: string) => {
+    openJourneyAt(id, "replace");
+  }, [openJourneyAt]);
+
+  // Opening Journey Mode from a main-map photo popup. Clear any active filters so
+  // the chosen photo is guaranteed to be in the sequence, and push history so the
+  // browser back button exits playback.
+  const openJourneyFromMap = useCallback((photoId: string) => {
+    setJourneyFilter("all");
+    setJourneyUploaderFilter("");
+    openJourneyAt(`photo:${photoId}`, "push");
+  }, [openJourneyAt]);
+
   const nextJourneyItem = useCallback(() => {
     if (journeyItems.length === 0) return;
     const currentIndex = activeJourneyIndex >= 0 ? activeJourneyIndex : 0;
@@ -454,12 +468,26 @@ export default function Home() {
   useEffect(() => {
     if (!activeJourneyId) return;
     if (journeyItems.some((item) => item.id === activeJourneyId)) return;
+    // The active item dropped out of the filtered list. If others still match,
+    // snap to the first of them. If the list is now empty but the item still
+    // exists overall, the user just narrowed a filter past everything — keep the
+    // viewer open so its filter controls stay reachable. Only close when the
+    // item is genuinely gone (e.g. deleted via realtime) with nothing left.
     if (journeyItems[0]) {
       openJourneyAt(journeyItems[0].id, "replace");
-    } else {
+    } else if (!allJourneyItems.some((item) => item.id === activeJourneyId)) {
       closeJourney();
     }
-  }, [activeJourneyId, closeJourney, journeyItems, openJourneyAt]);
+  }, [activeJourneyId, allJourneyItems, closeJourney, journeyItems, openJourneyAt]);
+
+  // While Journey Mode is open the main map is hidden (display:none) behind the
+  // full-screen viewer, so only the mini-map renders a live WebGL context. A
+  // display:none canvas loses its dimensions, so resize it once we return.
+  useEffect(() => {
+    if (journeyOpen || !map) return;
+    const id = window.setTimeout(() => map.resize(), 60);
+    return () => window.clearTimeout(id);
+  }, [journeyOpen, map]);
 
   const handleCoordinatePick = useCallback((coordinate: LngLat) => {
     if (clickMode === "draw-route") {
@@ -973,11 +1001,13 @@ export default function Home() {
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
         <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
-        <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
-          {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} /> : null}
-          {!mapUnavailable ? <RouteDraftLayer map={map} points={routeDraftPoints} /> : null}
-          {!mapUnavailable ? <MapLegend visibility={layerVisibility} /> : null}
-        </MapView>
+        <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
+          <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
+            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} /> : null}
+            {!mapUnavailable ? <RouteDraftLayer map={map} points={routeDraftPoints} /> : null}
+            {!mapUnavailable ? <MapLegend visibility={layerVisibility} /> : null}
+          </MapView>
+        </div>
       </div>
       {!panel ? <MobileSheet trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
@@ -1003,6 +1033,7 @@ export default function Home() {
           onFilterChange={setJourneyFilter}
           onUploaderFilterChange={setJourneyUploaderFilter}
           onSelectIndex={selectJourneyIndex}
+          onSelectItem={selectJourneyItem}
           onNext={nextJourneyItem}
           onPrev={prevJourneyItem}
           onClose={closeJourney}

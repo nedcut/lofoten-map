@@ -154,6 +154,12 @@ body {
   color: #b4232f;
 }
 .lofoten-popup-action-danger:hover { background: #fde4e6; }
+.lofoten-popup-action-journey {
+  border-color: rgba(231, 161, 61, 0.6);
+  background: #fdf1dc;
+  color: #8a5414;
+}
+.lofoten-popup-action-journey:hover { background: #fbe6c2; }
 
 .lofoten-popup-tag {
   display: inline-block;

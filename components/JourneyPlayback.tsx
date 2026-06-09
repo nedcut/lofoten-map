@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Link, Loader2, Pencil, Save, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Link, Loader2, Pencil, Save, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
 import { formatDateOnly, formatDateTime } from "@/lib/utils";
@@ -32,6 +32,7 @@ type Props = {
   onFilterChange: (filter: JourneyFilter) => void;
   onUploaderFilterChange: (uploader: string) => void;
   onSelectIndex: (index: number) => void;
+  onSelectItem: (id: string) => void;
   onNext: () => void;
   onPrev: () => void;
   onClose: () => void;
@@ -90,6 +91,7 @@ export function JourneyPlayback({
   onFilterChange,
   onUploaderFilterChange,
   onSelectIndex,
+  onSelectItem,
   onNext,
   onPrev,
   onClose,
@@ -97,6 +99,7 @@ export function JourneyPlayback({
 }: Props) {
   const activeItem = items[activeIndex] ?? items[0];
   const [isPlaying, setIsPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
   const [interactionHold, setInteractionHold] = useState(false);
   const [captionDraft, setCaptionDraft] = useState("");
   const [editingCaption, setEditingCaption] = useState(false);
@@ -133,12 +136,19 @@ export function JourneyPlayback({
 
   useEffect(() => {
     if (!isPlaying || interactionHold || !activeItem || items.length < 2) return;
-    const duration = activeItem.kind === "photo" && !activeItem.primary.caption ? 5000 : 7000;
-    autoplayTimerRef.current = window.setTimeout(onNext, duration);
+    const baseDuration = activeItem.kind === "photo" && !activeItem.primary.caption ? 5000 : 7000;
+    const duration = baseDuration / speed;
+    const isLast = activeIndex >= items.length - 1;
+    autoplayTimerRef.current = window.setTimeout(() => {
+      // Autoplay runs through the journey once and then pauses on the final
+      // item; manual prev/next still wraps for convenience.
+      if (isLast) setIsPlaying(false);
+      else onNext();
+    }, duration);
     return () => {
       if (autoplayTimerRef.current) window.clearTimeout(autoplayTimerRef.current);
     };
-  }, [activeItem, interactionHold, isPlaying, items.length, onNext]);
+  }, [activeIndex, activeItem, interactionHold, isPlaying, items.length, onNext, speed]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -162,12 +172,56 @@ export function JourneyPlayback({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose, onNext, onPrev]);
 
+  // Warm the browser cache for the neighbouring photos so next/prev swaps in an
+  // already-decoded image instead of stalling on a fresh full-size download.
+  useEffect(() => {
+    const urls = [1, -1, 2]
+      .map((offset) => items[activeIndex + offset])
+      .filter((item) => item?.kind === "photo")
+      .map((item) => (item as Extract<JourneyItem, { kind: "photo" }>).primary.image_url)
+      .filter((url): url is string => Boolean(url));
+    const preloaded = urls.map((url) => {
+      const img = new window.Image();
+      img.decoding = "async";
+      img.src = url;
+      return img;
+    });
+    return () => { preloaded.forEach((img) => { img.src = ""; }); };
+  }, [activeIndex, items]);
+
+  const filterControls = (
+    <>
+      <select value={filter} onChange={(event) => onFilterChange(event.target.value as JourneyFilter)} className="max-w-[8rem] rounded-full border border-white/15 bg-stone-950/45 px-3 py-2 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20">
+        <option value="all">All</option>
+        <option value="photos">Photos</option>
+        <option value="journal">Journal</option>
+      </select>
+      {uploaders.length > 0 ? (
+        <select value={uploaderFilter} onChange={(event) => onUploaderFilterChange(event.target.value)} className="hidden max-w-[10rem] rounded-full border border-white/15 bg-stone-950/45 px-3 py-2 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20 sm:block">
+          <option value="">Everyone</option>
+          {uploaders.map((uploader) => <option key={uploader} value={uploader}>{uploader}</option>)}
+        </select>
+      ) : null}
+    </>
+  );
+
+  // Filters can narrow the list to nothing. Keep the viewer open with its filter
+  // controls (and a reset) rather than trapping the user behind a bare Close.
   if (!activeItem) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950 p-6 text-white">
-        <div className="text-center">
-          <div className="font-serif text-3xl font-semibold">No journey items yet</div>
-          <button onClick={onClose} className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-black text-stone-950">Close</button>
+      <div className="fixed inset-0 z-50 flex flex-col bg-stone-950 text-white">
+        <div className="flex items-center justify-between gap-3 px-3 py-3 md:px-6 md:py-5">
+          <button onClick={onClose} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/12 text-white backdrop-blur transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25" aria-label="Close journey">
+            <X className="h-5 w-5" />
+          </button>
+          <div className="flex items-center gap-2">{filterControls}</div>
+        </div>
+        <div className="flex flex-1 items-center justify-center p-6 text-center">
+          <div>
+            <div className="font-serif text-3xl font-semibold">No items match this filter</div>
+            <p className="mt-2 text-sm text-white/70">Switch the filter back to see the rest of the journey.</p>
+            <button onClick={() => { onFilterChange("all"); onUploaderFilterChange(""); }} className="mt-4 rounded-full bg-white px-4 py-2 text-sm font-black text-stone-950 transition hover:bg-[#fff4d8]">Show all items</button>
+          </div>
         </div>
       </div>
     );
@@ -177,7 +231,9 @@ export function JourneyPlayback({
   const date = formatDateTime(itemDate(activeItem));
   const canEditCaption = activeItem.kind === "photo" && photoCanEdit(activeItem.primary, currentUserId, isAdmin);
   const progress = items.length <= 1 ? 1 : activeIndex / (items.length - 1);
-  const backgroundUrl = activeItem.kind === "photo" ? activeItem.primary.image_url : null;
+  // The backdrop is heavily blurred, so the small thumbnail is indistinguishable
+  // from the full image while costing a fraction of the bytes and decode/GPU work.
+  const backgroundUrl = activeItem.kind === "photo" ? (activeItem.primary.thumbnail_url ?? activeItem.primary.image_url) : null;
   const imageUrl = activeItem.kind === "photo" ? activeItem.primary.image_url : null;
 
   async function saveCaption() {
@@ -209,7 +265,7 @@ export function JourneyPlayback({
       {backgroundUrl ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element -- User-uploaded image URLs are rendered directly in the viewer. */}
-          <img src={backgroundUrl} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover opacity-35 blur-2xl" />
+          <img src={backgroundUrl} alt="" aria-hidden decoding="async" className="absolute inset-0 h-full w-full scale-110 object-cover opacity-35 blur-2xl" />
           <div className="absolute inset-0 bg-stone-950/46" />
         </>
       ) : (
@@ -227,17 +283,7 @@ export function JourneyPlayback({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <select value={filter} onChange={(event) => onFilterChange(event.target.value as JourneyFilter)} className="max-w-[8rem] rounded-full border border-white/15 bg-stone-950/45 px-3 py-2 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20">
-            <option value="all">All</option>
-            <option value="photos">Photos</option>
-            <option value="journal">Journal</option>
-          </select>
-          {uploaders.length > 0 ? (
-            <select value={uploaderFilter} onChange={(event) => onUploaderFilterChange(event.target.value)} className="hidden max-w-[10rem] rounded-full border border-white/15 bg-stone-950/45 px-3 py-2 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20 sm:block">
-              <option value="">Everyone</option>
-              {uploaders.map((uploader) => <option key={uploader} value={uploader}>{uploader}</option>)}
-            </select>
-          ) : null}
+          {filterControls}
           <button onClick={() => navigator.clipboard?.writeText(window.location.href)} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/12 text-white backdrop-blur transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25" aria-label="Copy share link">
             <Link className="h-4 w-4" />
           </button>
@@ -248,7 +294,7 @@ export function JourneyPlayback({
         {imageUrl ? (
           <div className="flex h-full w-full items-center justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element -- User-uploaded image URLs are rendered directly in the viewer. */}
-            <img src={imageUrl} alt={title} className="max-h-full max-w-full rounded-lg object-contain shadow-[0_36px_100px_rgba(0,0,0,0.45)]" />
+            <img src={imageUrl} alt={title} decoding="async" fetchPriority="high" className="max-h-full max-w-full rounded-lg object-contain shadow-[0_36px_100px_rgba(0,0,0,0.45)]" />
           </div>
         ) : (
           <article className="mx-auto max-w-2xl rounded-xl border border-white/15 bg-[rgba(255,253,246,0.94)] p-6 text-stone-950 shadow-[0_36px_100px_rgba(0,0,0,0.3)]">
@@ -276,7 +322,7 @@ export function JourneyPlayback({
               {!activeItem.coord ? <span>location unknown</span> : null}
             </div>
             {activeItem.kind === "photo" ? (
-              <div className="rounded-xl border border-white/15 bg-stone-950/45 p-3 backdrop-blur md:max-w-xl">
+              <div className="max-h-[40vh] overflow-y-auto rounded-xl border border-white/15 bg-stone-950/45 p-3 backdrop-blur md:max-w-xl">
                 {editingCaption ? (
                   <div className="space-y-2">
                     <textarea value={captionDraft} onChange={(event) => setCaptionDraft(event.target.value)} className="min-h-20 w-full rounded-lg border border-white/15 bg-white/95 px-3 py-2 text-sm text-stone-950 outline-none focus:ring-4 focus:ring-white/25" placeholder="Caption" />
@@ -315,9 +361,16 @@ export function JourneyPlayback({
           </div>
 
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
-            <button onClick={() => setIsPlaying((value) => !value)} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-stone-950 shadow-lg transition hover:bg-[#fff4d8] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30" aria-label={isPlaying ? "Pause autoplay" : "Start autoplay"}>
-              {isPlaying ? <CirclePause className="h-5 w-5" /> : <CirclePlay className="h-5 w-5" />}
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setIsPlaying((value) => !value)} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-stone-950 shadow-lg transition hover:bg-[#fff4d8] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30" aria-label={isPlaying ? "Pause autoplay" : "Start autoplay"}>
+                {isPlaying ? <CirclePause className="h-5 w-5" /> : <CirclePlay className="h-5 w-5" />}
+              </button>
+              <div className="flex items-center gap-1.5" title="Autoplay speed">
+                <Gauge className="hidden h-3.5 w-3.5 shrink-0 text-white/45 sm:block" />
+                <input type="range" min={0.5} max={2.5} step={0.5} value={speed} onChange={(event) => setSpeed(Number(event.target.value))} className="w-14 cursor-pointer accent-[#e7a13d] sm:w-20" aria-label="Autoplay speed" />
+                <span className="w-7 text-[11px] font-bold tabular-nums text-white/60">{speed}×</span>
+              </div>
+            </div>
             <div className="relative h-9">
               <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-white/16">
                 <div className="h-full rounded-full bg-[#e7a13d]" style={{ width: `${Math.max(2, progress * 100)}%` }} />
@@ -329,7 +382,7 @@ export function JourneyPlayback({
                   <button
                     key={`${item.dayId ?? "unsorted"}:${index}`}
                     onClick={() => onSelectIndex(index)}
-                    className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-stone-950 bg-white shadow"
+                    className="absolute top-1/2 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-stone-950 bg-white shadow"
                     style={{ left: `${items.length <= 1 ? 0 : (index / (items.length - 1)) * 100}%` }}
                     aria-label={`Jump to ${dayLabel(days, item.dayId)}`}
                     title={`${dayLabel(days, item.dayId)} ${formatDateOnly(days.find((day) => day.id === item.dayId)?.date)}`}
@@ -347,7 +400,7 @@ export function JourneyPlayback({
         </div>
       </div>
 
-      <JourneyMiniMap routes={routes} days={days} items={items} activeItem={activeItem} onInteraction={noteInteraction} />
+      <JourneyMiniMap routes={routes} days={days} items={items} activeItem={activeItem} onInteraction={noteInteraction} onSelectItem={onSelectItem} />
     </div>
   );
 }

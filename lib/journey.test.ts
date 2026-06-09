@@ -108,14 +108,28 @@ describe("buildJourneyItems", () => {
     expect(items[0].attached.map((attached) => `${attached.kind}:${attached.item.id}`)).toEqual(["note:near-note", "place:near-place"]);
   });
 
-  it("keeps unsorted items after known trip days", () => {
+  it("sorts a mis-assigned photo by its real timestamp, not its tagged day", () => {
     const items = buildJourneyItems(data({
       photos: [
-        photo({ id: "known", day_id: "day-2", taken_at: "2026-07-13T08:00:00Z" }),
-        photo({ id: "unsorted", day_id: null, taken_at: "2026-07-10T08:00:00Z" }),
+        photo({ id: "d1", day_id: "day-1", taken_at: "2026-07-12T18:00:00Z" }),
+        // Tagged to day-1 but actually taken on day-2's date: must not pin to day-1.
+        photo({ id: "stray", day_id: "day-1", taken_at: "2026-07-13T09:00:00Z" }),
+        photo({ id: "d2", day_id: "day-2", taken_at: "2026-07-13T08:00:00Z" }),
       ],
     }));
 
-    expect(items.map((item) => item.id)).toEqual(["photo:known", "photo:unsorted"]);
+    expect(items.map((item) => item.id)).toEqual(["photo:d1", "photo:d2", "photo:stray"]);
+  });
+
+  it("orders by timestamp even without a day, and puts fully undated items last", () => {
+    const items = buildJourneyItems(data({
+      photos: [
+        photo({ id: "dayed", day_id: "day-2", taken_at: "2026-07-13T08:00:00Z" }),
+        photo({ id: "floating", day_id: null, taken_at: "2026-07-10T08:00:00Z" }),
+        photo({ id: "undated", day_id: null, taken_at: null, created_at: "2026-07-20T00:00:00Z" }),
+      ],
+    }));
+
+    expect(items.map((item) => item.id)).toEqual(["photo:floating", "photo:dayed", "photo:undated"]);
   });
 });
