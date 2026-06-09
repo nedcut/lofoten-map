@@ -5,6 +5,8 @@ what changed, why it mattered, and any verification worth remembering.
 
 ## 2026-06-09
 
+- Pulled role/access derivation into a small tested helper so guest, member,
+  admin, and admin-request UI states stay consistent as the sharing model evolves.
 - Updated Supabase setup/deploy docs for the current access model: public reads,
   signed-in auto-join as member, and in-app admin requests.
 - Added this work log and a separate todo list so ongoing polish does not get

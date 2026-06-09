@@ -16,6 +16,7 @@ import { RouteDraftLayer } from "@/components/RouteDraftLayer";
 import { TripLayers, type MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
 import { UploadPhotoPanel, type PhotoUploadItemInput, type PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
+import { deriveTripAccess } from "@/lib/access";
 import { preparePhotoFiles } from "@/lib/photo-processing";
 import { PHOTO_BUCKET, getSupabaseBrowserClient, resolvePhotoUrls } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -303,10 +304,11 @@ export default function Home() {
     };
   }, [data, selectedDayId]);
 
-  const currentMember = useMemo(() => data.members.find((member) => member.user_id === user?.id) ?? null, [data.members, user?.id]);
-  const currentUserId = user?.id ?? null;
-  const canContribute = !supabase || Boolean(currentMember);
-  const isAdmin = !supabase || currentMember?.role === "admin";
+  const access = useMemo(
+    () => deriveTripAccess({ supabaseEnabled: Boolean(supabase), userId: user?.id ?? null, members: data.members, adminRequests: data.adminRequests }),
+    [data.adminRequests, data.members, supabase, user?.id],
+  );
+  const { currentMember, currentUserId, canContribute, isAdmin } = access;
 
   // Resolve the popup-selected item live from data, so the editor reflects updates
   // and closes automatically if the item is deleted (here or by another member).
@@ -318,12 +320,10 @@ export default function Home() {
     if (kind === "place") { const item = data.places.find((place) => place.id === id); return item ? { kind, item } : null; }
     const item = data.routeSegments.find((route) => route.id === id); return item ? { kind, item } : null;
   }, [editTargetRef, data]);
-  const pendingAdminRequests = useMemo(() => data.adminRequests.filter((request) => request.status === "pending"), [data.adminRequests]);
-  const currentUserRequest = useMemo(() => data.adminRequests.find((request) => request.user_id === user?.id) ?? null, [data.adminRequests, user?.id]);
-  const memberAdmin = currentMember?.role === "admin"
+  const memberAdmin = access.showMemberAdminControls
     ? {
       members: data.members,
-      requests: pendingAdminRequests,
+      requests: access.pendingAdminRequests,
       currentUserId,
       message: memberMessage,
       messageTone: memberMessageTone,
@@ -334,8 +334,8 @@ export default function Home() {
     }
     : null;
   // Shown to signed-in members who are not admins: a way to ask for an upgrade.
-  const adminRequest = supabase && currentMember && currentMember.role !== "admin"
-    ? { status: currentUserRequest?.status ?? null, isSaving: memberSaving, message: memberMessage, messageTone: memberMessageTone, onRequestAdmin: requestAdmin }
+  const adminRequest = access.showAdminRequestControls
+    ? { status: access.currentUserAdminRequest?.status ?? null, isSaving: memberSaving, message: memberMessage, messageTone: memberMessageTone, onRequestAdmin: requestAdmin }
     : null;
   const routeDraftDistance = useMemo(() => routeDistanceMeters(routeDraftPoints), [routeDraftPoints]);
   const tripTitle = data.trip?.title ?? "Trip Logbook";

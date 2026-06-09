@@ -2,12 +2,12 @@
 
 An interactive, collaborative trip map and journal. Anyone can view the trip —
 filter days, browse route segments, and see notes and photos on the map — with
-no account. Invited members sign in to drop notes and photos and see each other's
-updates live. Photos extract their GPS/timestamp from EXIF in the browser, fall
-back to manual placement (or auto-placement along the day's route) when no
-geotag exists, and are downscaled with thumbnails before upload. Admins get
-in-app editors for the itinerary, routes, places, photo metadata, and
-membership.
+no account. Signed-in friends auto-join as members so they can drop notes and
+photos, request admin access, and see each other's updates live. Photos extract
+their GPS/timestamp from EXIF in the browser, fall back to manual placement (or
+auto-placement along the day's route) when no geotag exists, and are downscaled
+with thumbnails before upload. Admins get in-app editors for the itinerary,
+routes, places, photo metadata, and membership.
 
 It runs in two modes:
 
@@ -154,8 +154,9 @@ member, and admin accounts.
 app/            Next.js App Router entry (single-page map UI in page.tsx)
 components/     Map view, layers, sidebar/mobile sheet, upload/note/route panels,
                 admin data panel, legend
-lib/            exif (EXIF parsing), photo-processing (downscale + thumbnails),
-                geo (GeoJSON helpers), supabase (browser client), utils
+lib/            access (role/UI access derivation), exif (EXIF parsing),
+                photo-processing (downscale + thumbnails), geo (GeoJSON
+                helpers), supabase (browser client), utils
                 — with co-located *.test.ts suites
 supabase/       schema.sql, seed.sql, grant-member.sql
 types/          shared trip data types

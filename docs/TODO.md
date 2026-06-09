@@ -10,11 +10,12 @@ passes over broad rewrites.
   change.
 - Re-check mobile flows on a real phone: public viewing, sign-in panel, photo
   import, map placement, and expanded bottom sheet scrolling.
-- Add focused tests for the admin request helpers/RPC assumptions where practical.
 - Extend EXIF/canvas test coverage around large batches, corrupt files, HEIC
   passthrough, and thumbnail fallback behavior.
 - Verify the auto-join + admin-request flow against a real Supabase project as:
   guest, newly signed-in member, existing admin, and demoted member.
+- Add a thin integration smoke test around the admin-request RPCs once a test
+  Supabase project or local Supabase test harness is in place.
 
 ## Product Gaps
 
