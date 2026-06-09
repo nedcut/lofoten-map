@@ -88,6 +88,7 @@ export default function Home() {
   const [pendingCoordinate, setPendingCoordinate] = useState<LngLat | null>(null);
   const [routeDraftPoints, setRouteDraftPoints] = useState<LngLat[]>([]);
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
+  const [mapUnavailable, setMapUnavailable] = useState(false);
   const [panel, setPanel] = useState<"photo" | "note" | "route" | null>(null);
   const [editTargetRef, setEditTargetRef] = useState<{ kind: MapItemKind; id: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -339,6 +340,7 @@ export default function Home() {
     : null;
   const routeDraftDistance = useMemo(() => routeDistanceMeters(routeDraftPoints), [routeDraftPoints]);
   const tripTitle = data.trip?.title ?? "Trip Logbook";
+  const mapActionsEnabled = !mapUnavailable;
   const adminData = isAdmin
     ? {
       trip: data.trip,
@@ -369,7 +371,22 @@ export default function Home() {
     setPendingCoordinate(coordinate);
   }, [clickMode]);
 
+  const handleMapReady = useCallback((nextMap: mapboxgl.Map) => {
+    setMapUnavailable(false);
+    setMap(nextMap);
+  }, []);
+
+  const handleMapUnavailable = useCallback(() => {
+    setMap(null);
+    setMapUnavailable(true);
+    setClickMode("idle");
+    setPendingCoordinate(null);
+    setRouteDraftPoints([]);
+    setPanel(null);
+  }, []);
+
   function startPanel(next: "photo" | "note" | "route") {
+    if (!mapActionsEnabled) return;
     setPanel(next);
     setPendingCoordinate(null);
     if (next === "route") {
@@ -824,14 +841,14 @@ export default function Home() {
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
-        <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={setMap} onCoordinatePick={handleCoordinatePick}>
-          <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} />
-          <RouteDraftLayer map={map} points={routeDraftPoints} />
-          <MapLegend visibility={layerVisibility} />
+        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
+        <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
+          {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} /> : null}
+          {!mapUnavailable ? <RouteDraftLayer map={map} points={routeDraftPoints} /> : null}
+          {!mapUnavailable ? <MapLegend visibility={layerVisibility} /> : null}
         </MapView>
       </div>
-      {!panel ? <MobileSheet trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
+      {!panel ? <MobileSheet trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}

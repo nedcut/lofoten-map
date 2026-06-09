@@ -65,6 +65,15 @@ body {
   box-shadow: 0 12px 30px rgba(46, 61, 54, 0.18) !important;
 }
 .mapboxgl-ctrl button { color: #1c1917 !important; }
+.map-unavailable .mapboxgl-ctrl,
+.map-unavailable .mapboxgl-ctrl-bottom-left,
+.map-unavailable .mapboxgl-ctrl-bottom-right,
+.map-unavailable-active .mapboxgl-control-container,
+.map-unavailable-active .mapboxgl-ctrl,
+.map-unavailable-active .mapboxgl-ctrl-bottom-left,
+.map-unavailable-active .mapboxgl-ctrl-bottom-right {
+  display: none !important;
+}
 
 @media (max-width: 767px) {
   .mapboxgl-ctrl-bottom-left,

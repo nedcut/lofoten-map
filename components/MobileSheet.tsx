@@ -12,7 +12,7 @@ import type { Day } from "@/types/trip";
 // they're summed together as journal pins.
 export type PeekCounts = { routes: number; photos: number; notes: number; places: number };
 
-type MobileSheetProps = SidebarProps & { counts: PeekCounts };
+type MobileSheetProps = SidebarProps & { counts: PeekCounts; mapAvailable?: boolean };
 
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -69,7 +69,7 @@ export function MobileSheet(props: MobileSheetProps) {
             <span className="absolute left-1/2 top-2 h-1 w-9 -translate-x-1/2 rounded-full bg-stone-300" aria-hidden />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-teal-800/80">{dayLabel(selectedDay)}</span>
-              <span className="block truncate font-bold text-stone-950">{countsLabel(props.counts)}</span>
+              <span className="block truncate font-bold text-stone-950">{props.mapAvailable === false ? "Map unavailable" : countsLabel(props.counts)}</span>
             </span>
             <ChevronUp className={cn("h-5 w-5 shrink-0 text-stone-500 transition-transform duration-300", expanded && "rotate-180")} />
           </button>
@@ -86,7 +86,7 @@ export function MobileSheet(props: MobileSheetProps) {
                 <div className="max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
                   <SidebarHeader trip={props.trip} />
                   <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} />
-                  <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} />
+                  {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
                   {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
                   {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}
                   {props.adminRequest ? <AdminRequestPanel {...props.adminRequest} /> : null}

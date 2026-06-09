@@ -10,11 +10,12 @@ type Props = {
   clickMode: MapClickMode;
   pendingCoordinate: LngLat | null;
   onMapReady: (map: mapboxgl.Map) => void;
+  onMapUnavailable: () => void;
   onCoordinatePick: (coordinate: LngLat) => void;
   children?: ReactNode;
 };
 
-export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinatePick, children }: Props) {
+export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavailable, onCoordinatePick, children }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -23,14 +24,30 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
   const clickPrompt = clickMode === "draw-route" ? "Tap the map to add route points" : "Tap the map to set the location";
 
   useEffect(() => {
+    return () => {
+      document.body.classList.remove("map-unavailable-active");
+    };
+  }, []);
+
+  useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    const markUnavailable = (message?: string) => {
+      if (message) setMapUnavailable(message);
+      containerRef.current?.replaceChildren();
+      document.body.classList.add("map-unavailable-active");
+      document
+        .querySelectorAll(".mapboxgl-control-container, .mapboxgl-ctrl-bottom-left, .mapboxgl-ctrl-bottom-right")
+        .forEach((element) => element.remove());
+      onMapUnavailable();
+    };
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) {
       setTokenMissing(true);
+      markUnavailable();
       return;
     }
     if (!mapboxgl.supported()) {
-      setMapUnavailable("Your browser or device does not support WebGL, so the interactive map cannot load here.");
+      markUnavailable("Your browser or device does not support WebGL, so the interactive map cannot load here.");
       return;
     }
     mapboxgl.accessToken = token;
@@ -46,22 +63,23 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
         attributionControl: false,
       });
     } catch {
-      setMapUnavailable("The interactive map could not start in this browser. The trip details are still available.");
-      containerRef.current.replaceChildren();
+      markUnavailable("The interactive map could not start in this browser. The trip details are still available.");
       return;
     }
     instance.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "bottom-right");
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }));
     instance.on("load", () => {
+      document.body.classList.remove("map-unavailable-active");
       onMapReady(instance);
     });
     mapRef.current = instance;
     return () => {
       markerRef.current?.remove();
       instance.remove();
+      document.body.classList.remove("map-unavailable-active");
       mapRef.current = null;
     };
-  }, [onMapReady]);
+  }, [onMapReady, onMapUnavailable]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -94,7 +112,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
   }, [pendingCoordinate]);
 
   return (
-    <div className="relative h-full min-h-[520px] overflow-hidden rounded-none bg-[#dbe7df] md:rounded-[1.35rem] md:ring-1 md:ring-stone-200/80">
+    <div className={`relative h-full min-h-[520px] overflow-hidden rounded-none bg-[#dbe7df] md:rounded-[1.35rem] md:ring-1 md:ring-stone-200/80 ${tokenMissing || mapUnavailable ? "map-unavailable" : ""}`}>
       <div ref={containerRef} className="h-full w-full" />
       {tokenMissing || mapUnavailable ? (
         <div className="absolute inset-0 flex items-center justify-center bg-[#e7efe8] p-6 text-center">

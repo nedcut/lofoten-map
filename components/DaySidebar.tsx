@@ -14,6 +14,7 @@ export type SidebarProps = {
   onSelectDay: (dayId: string | null) => void;
   layerVisibility: LayerVisibility;
   onLayerVisibilityChange: (next: LayerVisibility) => void;
+  showLayerControls?: boolean;
   onStartPhotoUpload?: () => void;
   onStartAddNote?: () => void;
   onStartRouteDraw?: () => void;
@@ -240,7 +241,7 @@ export function DaySidebar(props: SidebarProps) {
       <SidebarHeader trip={props.trip} />
       <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} onStartRouteDraw={props.onStartRouteDraw} />
       <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} />
-      <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} />
+      {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
       {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
       {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}
       {props.adminRequest ? <AdminRequestPanel {...props.adminRequest} /> : null}
