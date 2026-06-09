@@ -69,27 +69,31 @@ Keep the Supabase variables empty to stay in demo mode. To enable shared mode:
 3. In the **SQL Editor**, run `supabase/schema.sql`, then `supabase/seed.sql`.
 4. Put the project URL and anon key in `.env.local`, start the app, and sign in
    once with your email.
-5. Edit `supabase/grant-member.sql` with your email and run it to add yourself
-   to `trip_members` as an admin.
-6. Reload — you should see the seeded trip as a signed-in member.
-7. Admins can add friends from the Members panel after each friend has signed in
-   once.
+5. Edit `supabase/grant-member.sql` with your email and run it to make your
+   first account an admin.
+6. Reload — you should see the seeded trip and admin controls.
+7. Friends can view the trip without signing in. When they sign in, the app
+   auto-joins them as members so they can contribute notes/photos and request
+   admin access in-app.
 
 ### What the schema sets up
 
 `schema.sql` creates the trip data model (`trips`, `days`, `route_segments`,
-`photos`, `notes`, `places`, `trip_members`), the `trip-photos` Storage bucket,
-an admin-only member-grant RPC, Realtime publication for the collaborative
-tables, and RLS policies:
+`photos`, `notes`, `places`, `trip_members`, `admin_requests`), the
+`trip-photos` Storage bucket, member/admin RPCs, Realtime publication for the
+collaborative tables, and RLS policies:
 
 - **Reads are public** — `select` is granted to `anon` with `using (true)`, so
   anyone can view the trip without an account.
-- **Notes and photos** can be created by any invited member; each row is
+- **Notes and photos** can be created by any signed-in member; each row is
   updatable and deletable by its owner or a trip admin.
 - **Trips, days, routes, places, and membership** are admin-scoped.
+- **Admin requests** are visible to the requester and existing admins; admins
+  can approve or deny them from the Members panel.
 
-Editing is still account-gated: every insert/update/delete policy requires an
-authenticated user who is in `trip_members` (admins for itinerary/routes/places).
+Editing is still account-gated: visitors can view without signing in, signed-in
+users auto-join as members, and every insert/update/delete policy requires the
+appropriate member/admin role.
 
 ### Photo storage
 
@@ -127,18 +131,22 @@ automatically. Your CI also validates a production build on every PR.
 5. **Run the SQL** if you haven't: `supabase/schema.sql`, then
    `supabase/seed.sql`.
 6. **Sign in once** from the deployed app, then run `supabase/grant-member.sql`
-   for your email and reload.
+   for your email to make that first account an admin. Reload.
 7. **Smoke test:**
    - Signed-out visitors see the seeded trip (reads are public); the "Sign in"
      button opens the optional sign-in panel.
-   - Your member account shows the contribute/admin controls; a guest does not.
+   - Your admin account shows contribute/admin controls; a guest does not.
+   - A newly signed-in friend can contribute notes/photos as a member and can
+     request admin access.
    - A note saves and survives reload.
    - A small photo uploads, renders on the map, and survives reload.
-   - An admin can add a signed-in friend from the Members panel.
+   - An admin can approve or deny admin requests and adjust member roles from
+     the Members panel.
    - Realtime updates appear in a second browser session.
 
-Before sharing beyond a small test group: add a proper member-invitation flow,
-and verify RLS with separate member and non-member accounts.
+Before sharing beyond a small test group: add a friend-invitation/notification
+flow for people who have not signed in yet, and verify RLS with separate guest,
+member, and admin accounts.
 
 ## Project structure
 

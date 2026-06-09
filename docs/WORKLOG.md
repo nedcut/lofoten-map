@@ -5,6 +5,8 @@ what changed, why it mattered, and any verification worth remembering.
 
 ## 2026-06-09
 
+- Updated Supabase setup/deploy docs for the current access model: public reads,
+  signed-in auto-join as member, and in-app admin requests.
 - Added this work log and a separate todo list so ongoing polish does not get
   buried in chat history.
 - Refreshed README feature/roadmap wording to match the current app: public

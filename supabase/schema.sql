@@ -461,7 +461,7 @@ begin
 end $$;
 
 -- Reads are public (anon + authenticated): anyone can view the trip without an
--- account. Writes stay locked to invited members/admins via the helpers above.
+-- account. Writes stay locked to signed-in members/admins via the helpers above.
 drop policy if exists "members read trips" on trips;
 drop policy if exists "public read trips" on trips;
 drop policy if exists "admins write trips" on trips;

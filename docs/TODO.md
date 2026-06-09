@@ -13,11 +13,13 @@ passes over broad rewrites.
 - Add focused tests for the admin request helpers/RPC assumptions where practical.
 - Extend EXIF/canvas test coverage around large batches, corrupt files, HEIC
   passthrough, and thumbnail fallback behavior.
+- Verify the auto-join + admin-request flow against a real Supabase project as:
+  guest, newly signed-in member, existing admin, and demoted member.
 
 ## Product Gaps
 
-- Add a friend invite flow for people who have not signed in yet, or at least
-  clearer copy around the current "sign in once, then admin adds you" model.
+- Add a friend invite/notification flow for people who have not signed in yet,
+  building on the current auto-join + admin-request model.
 - Add GPX/KML route import when the real route file arrives.
 - Add offline-friendly drafts for notes/photos so weak connectivity does not
   lose work mid-trip.
