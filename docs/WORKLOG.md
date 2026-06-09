@@ -5,6 +5,23 @@ what changed, why it mattered, and any verification worth remembering.
 
 ## 2026-06-09
 
+- Performance pass after the app started feeling sluggish: the admin panel now
+  defers each collapsed section until first opened and paginates the photo
+  editor list (collapsed `<details>` still mounted ~1,400 photo forms and
+  fetched every thumbnail across the desktop + mobile mounts); photo and
+  avatar uploads send image + thumbnail in parallel and set a 1-year
+  immutable cache header instead of 1 hour on uuid-named storage files.
+- Found 442 byte-identical duplicate photos (60% of the 732-row library,
+  ~493 MB) by downloading and hashing every stored image — each duplicate
+  group has exactly 4-5 copies, so whole batches were re-uploaded before the
+  content-hash guard existed. `scripts/dedupe-photos.mjs` reports in read-only
+  mode and, with the service role key, deletes duplicates (keeping the copy
+  with a caption, then day assignment, then the oldest) and backfills
+  `content_hash` on survivors.
+- Hardened upload dedup in a tested `lib/photo-dedup.ts` helper: content-hash
+  matching plus a capture-time + GPS fingerprint that survives re-encoding,
+  and a fresh database hash re-check before insert so a mid-batch race skips
+  the duplicate instead of failing the whole batch on the unique index.
 - Added GPX route import (parse, simplify, bucket points by trip day) and member
   avatar profiles: a public `avatars` bucket, an `avatar_path` column on
   `trip_members`, and a self-service `update_my_trip_profile` RPC, all in the

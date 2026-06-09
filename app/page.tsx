@@ -22,6 +22,7 @@ import { deriveTripAccess } from "@/lib/access";
 import { gpxTimeToTripDate, groupPointsByDay, parseGpx, simplifyToLineString } from "@/lib/gpx";
 import { buildJourneyItems } from "@/lib/journey";
 import { prepareAvatarFile } from "@/lib/avatar-processing";
+import { partitionDuplicatePhotos } from "@/lib/photo-dedup";
 import { preparePhotoFiles } from "@/lib/photo-processing";
 import { isMissingSchemaObjectError } from "@/lib/schema-errors";
 import { AVATAR_BUCKET, PHOTO_BUCKET, getSupabaseBrowserClient, resolveMemberAvatars, resolvePhotoUrls } from "@/lib/supabase";
@@ -44,6 +45,9 @@ const demoPlaces: Place[] = [{ id: "place-demo-1", trip_id: demoTripId, day_id: 
 const demoData: TripData = { trip: demoTrip, days: demoDays, routeSegments: demoRoutes, photos: [], notes: demoNotes, places: demoPlaces, members: [], adminRequests: [] };
 const emptyData: TripData = { trip: null, days: [], routeSegments: [], photos: [], notes: [], places: [], members: [], adminRequests: [] };
 const UPLOAD_CONCURRENCY = 4;
+// Storage files are uuid-named and never rewritten, so browsers and the CDN
+// can cache them for a year instead of re-downloading every hour.
+const IMMUTABLE_CACHE_SECONDS = "31536000";
 
 
 async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
@@ -282,7 +286,7 @@ export default function Home() {
         // Path is keyed on the user id so it satisfies the storage RLS policy,
         // and carries a fresh uuid so the public URL busts any CDN cache.
         const path = `${user.id}/${crypto.randomUUID()}.jpg`;
-        const { error: uploadError } = await supabase.storage.from(AVATAR_BUCKET).upload(path, prepared, { cacheControl: "3600", upsert: false, contentType: prepared.type || "image/jpeg" });
+        const { error: uploadError } = await supabase.storage.from(AVATAR_BUCKET).upload(path, prepared, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: false, contentType: prepared.type || "image/jpeg" });
         if (uploadError) {
           setError(`Could not upload your photo. ${uploadError.message}`);
           return;
@@ -713,38 +717,43 @@ export default function Home() {
         const failures: string[] = [];
         const warnings: string[] = [];
         const uploadedPaths: string[] = [];
-        const existingHashes = new Set(data.photos.map((photo) => photo.content_hash).filter((hash): hash is string => Boolean(hash)));
-        const pendingHashes = new Set<string>();
-        const uploadInputs = inputs.filter((input) => {
-          if (existingHashes.has(input.contentHash) || pendingHashes.has(input.contentHash)) {
-            failures.push(`${input.file.name}: duplicate photo skipped`);
-            failedClientIds.push(input.clientId);
-            markUploadComplete();
-            return false;
-          }
-          pendingHashes.add(input.contentHash);
-          return true;
-        });
+        const { uploads: uploadCandidates, duplicates } = partitionDuplicatePhotos(
+          inputs.map((input) => ({ input, contentHash: input.contentHash, takenAt: input.exif?.takenAt ?? null, coordinate: input.coordinate })),
+          data.photos,
+        );
+        for (const duplicate of duplicates) {
+          failures.push(`${duplicate.input.file.name}: duplicate photo skipped`);
+          failedClientIds.push(duplicate.input.clientId);
+          markUploadComplete();
+        }
+        const uploadInputs = uploadCandidates.map((candidate) => candidate.input);
 
         await mapWithConcurrency(uploadInputs, UPLOAD_CONCURRENCY, async (input) => {
           const prepared = await preparePhotoFiles(input.file);
           const extension = fileExtension(prepared.imageFile);
           const path = `${data.trip!.slug}/${crypto.randomUUID()}.${extension}`;
-          const { error: uploadError } = await supabase.storage.from(PHOTO_BUCKET).upload(path, prepared.imageFile, { cacheControl: "3600", upsert: false, contentType: prepared.imageFile.type || undefined });
-          if (uploadError) {
-            failures.push(`${input.file.name}: ${uploadError.message}`);
+          const thumbnailPath = prepared.thumbnailFile ? `${data.trip!.slug}/thumbs/${crypto.randomUUID()}.jpg` : null;
+          // The thumbnail never depends on the image upload, so both go up
+          // together instead of back to back.
+          const [imageUpload, thumbnailUpload] = await Promise.all([
+            supabase.storage.from(PHOTO_BUCKET).upload(path, prepared.imageFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: false, contentType: prepared.imageFile.type || undefined }),
+            prepared.thumbnailFile && thumbnailPath
+              ? supabase.storage.from(PHOTO_BUCKET).upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: false, contentType: prepared.thumbnailFile.type })
+              : Promise.resolve(null),
+          ]);
+          if (imageUpload.error) {
+            if (thumbnailPath && thumbnailUpload && !thumbnailUpload.error) await supabase.storage.from(PHOTO_BUCKET).remove([thumbnailPath]);
+            failures.push(`${input.file.name}: ${imageUpload.error.message}`);
             failedClientIds.push(input.clientId);
             markUploadComplete();
             return;
           }
           uploadedPaths.push(path);
           let thumbnailStoragePath: string | null = null;
-          if (prepared.thumbnailFile) {
-            const thumbnailPath = `${data.trip!.slug}/thumbs/${crypto.randomUUID()}.jpg`;
-            const { error: thumbnailError } = await supabase.storage.from(PHOTO_BUCKET).upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: "3600", upsert: false, contentType: prepared.thumbnailFile.type });
-            if (thumbnailError) {
+          if (thumbnailUpload) {
+            if (thumbnailUpload.error) {
               warnings.push(`${input.file.name}: thumbnail skipped`);
-            } else {
+            } else if (thumbnailPath) {
               uploadedPaths.push(thumbnailPath);
               thumbnailStoragePath = thumbnailPath;
             }
@@ -767,7 +776,19 @@ export default function Home() {
         });
 
         if (rows.length > 0) {
-          const insertRows = rows.map((row) => ({
+          // Re-check hashes against the database rather than local state, so a
+          // photo someone else uploaded mid-batch is skipped instead of failing
+          // the whole insert on the unique index.
+          const { data: clashData } = await supabase.from("photos").select("content_hash").eq("trip_id", data.trip.id).in("content_hash", rows.map((row) => row.content_hash));
+          const clashes = new Set(((clashData ?? []) as Array<{ content_hash: string }>).map((row) => row.content_hash));
+          const clashedRows = rows.filter((row) => clashes.has(row.content_hash));
+          const freshRows = rows.filter((row) => !clashes.has(row.content_hash));
+          if (clashedRows.length > 0) {
+            await supabase.storage.from(PHOTO_BUCKET).remove(clashedRows.flatMap((row) => [row.image_path, row.thumbnail_path].filter((rowPath): rowPath is string => Boolean(rowPath))));
+            failures.push(`${clashedRows.length} photo${clashedRows.length === 1 ? "" : "s"} already uploaded by someone else, skipped`);
+            failedClientIds.push(...clashedRows.map((row) => row.client_id));
+          }
+          const insertRows = freshRows.map((row) => ({
             trip_id: row.trip_id,
             day_id: row.day_id,
             uploader_name: row.uploader_name,
@@ -780,15 +801,17 @@ export default function Home() {
             caption: row.caption,
             exif_found: row.exif_found,
           }));
-          const { error: insertError } = await supabase.from("photos").insert(insertRows);
-          if (insertError) {
-            if (uploadedPaths.length > 0) await supabase.storage.from(PHOTO_BUCKET).remove(uploadedPaths);
-            setError(insertError.message);
-            failedClientIds.push(...rows.map((row) => row.client_id));
-          } else {
-            savedClientIds.push(...rows.map((row) => row.client_id));
-            await loadData();
-            didSave = true;
+          if (insertRows.length > 0) {
+            const { error: insertError } = await supabase.from("photos").insert(insertRows);
+            if (insertError) {
+              if (uploadedPaths.length > 0) await supabase.storage.from(PHOTO_BUCKET).remove(uploadedPaths);
+              setError(insertError.message);
+              failedClientIds.push(...freshRows.map((row) => row.client_id));
+            } else {
+              savedClientIds.push(...freshRows.map((row) => row.client_id));
+              await loadData();
+              didSave = true;
+            }
           }
         }
         if (failures.length > 0) {

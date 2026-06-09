@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, type ReactNode } from "react";
 import { CalendarDays, Camera, FileText, Loader2, MapPin, Pencil, Route, Save, Trash2, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Day, Note, Photo, Place, RouteMode, RouteSegment, Trip } from "@/types/trip";
@@ -194,6 +195,38 @@ function photoLabel(photo: Photo) {
   return "this photo";
 }
 
+const PHOTO_PAGE_SIZE = 24;
+
+// A closed <details> still mounts its children and fetches their images, so
+// with hundreds of photo editors the collapsed panel was nearly as expensive
+// as an open one. Defer rendering the body until the section is first opened.
+function LazyDetails({ summary, className, children }: { summary: ReactNode; className?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details className={cn("rounded-lg bg-[#f7f1e7] p-3", className)} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="cursor-pointer text-sm font-bold text-stone-900">{summary}</summary>
+      {open ? children : null}
+    </details>
+  );
+}
+
+function PhotoList({ photos, days, isSaving, onSave, onDeleteItem }: Pick<AdminDataProps, "photos" | "days" | "isSaving"> & { onSave: AdminDataProps["onUpdatePhoto"]; onDeleteItem: AdminDataProps["onDeleteItem"] }) {
+  const [visibleCount, setVisibleCount] = useState(PHOTO_PAGE_SIZE);
+  if (photos.length === 0) return <EmptyRow label="No photos yet" />;
+  return (
+    <>
+      {photos.slice(0, visibleCount).map((photo) => (
+        <PhotoEditor key={photoEditorKey(photo)} photo={photo} days={days} isSaving={isSaving} onSave={onSave} onDelete={() => onDeleteItem("photos", photo.id)} />
+      ))}
+      {photos.length > visibleCount ? (
+        <button type="button" onClick={() => setVisibleCount((current) => current + PHOTO_PAGE_SIZE)} className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-bold text-stone-700 transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50">
+          Show {Math.min(PHOTO_PAGE_SIZE, photos.length - visibleCount)} more of {photos.length - visibleCount} remaining
+        </button>
+      ) : null}
+    </>
+  );
+}
+
 export function AdminDataPanel(props: AdminDataProps) {
   async function submitTrip(formData: FormData) {
     await props.onUpdateTrip({
@@ -224,8 +257,7 @@ export function AdminDataPanel(props: AdminDataProps) {
       ) : null}
 
       {props.trip ? (
-        <details className="group rounded-lg bg-[#f7f1e7] p-3">
-          <summary className="cursor-pointer text-sm font-bold text-stone-900">Trip</summary>
+        <LazyDetails className="group" summary="Trip">
           <form key={tripFormKey(props.trip)} action={submitTrip} className="mt-3 space-y-2">
             <input name="title" defaultValue={props.trip.title} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
             <textarea name="description" defaultValue={props.trip.description ?? ""} placeholder="Description" className="min-h-20 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
@@ -235,19 +267,17 @@ export function AdminDataPanel(props: AdminDataProps) {
             </div>
             <SaveButton isSaving={props.isSaving}>Save trip</SaveButton>
           </form>
-        </details>
+        </LazyDetails>
       ) : null}
 
-      <details className="rounded-lg bg-[#f7f1e7] p-3">
-        <summary className="cursor-pointer text-sm font-bold text-stone-900"><CalendarDays className="mr-2 inline h-4 w-4 text-teal-700" />Days</summary>
+      <LazyDetails summary={<><CalendarDays className="mr-2 inline h-4 w-4 text-teal-700" />Days</>}>
         <div className="mt-3 space-y-3">
           <NewDayEditor key={newDayEditorKey(props.days)} days={props.days} isSaving={props.isSaving} onCreate={props.onCreateDay} />
           {props.days.map((day) => <DayEditor key={dayEditorKey(day)} day={day} isSaving={props.isSaving} onSave={props.onUpdateDay} onDelete={() => props.onDeleteItem("days", day.id)} />)}
         </div>
-      </details>
+      </LazyDetails>
 
-      <details className="rounded-lg bg-[#f7f1e7] p-3">
-        <summary className="cursor-pointer text-sm font-bold text-stone-900"><Route className="mr-2 inline h-4 w-4 text-teal-700" />Routes</summary>
+      <LazyDetails summary={<><Route className="mr-2 inline h-4 w-4 text-teal-700" />Routes</>}>
         <div className="mt-3 space-y-3">
           <form action={submitGpxImport} className="space-y-2 rounded-lg border border-teal-700/20 bg-teal-50 p-2">
             <label className="block space-y-1 text-[11px] font-bold uppercase tracking-[0.08em] text-teal-900">
@@ -262,25 +292,21 @@ export function AdminDataPanel(props: AdminDataProps) {
             <RouteEditor key={routeEditorKey(route)} route={route} days={props.days} isSaving={props.isSaving} onSave={props.onUpdateRoute} onDelete={() => props.onDeleteItem("route_segments", route.id)} />
           ))}
         </div>
-      </details>
+      </LazyDetails>
 
-      <details className="rounded-lg bg-[#f7f1e7] p-3">
-        <summary className="cursor-pointer text-sm font-bold text-stone-900"><FileText className="mr-2 inline h-4 w-4 text-teal-700" />Notes & places</summary>
+      <LazyDetails summary={<><FileText className="mr-2 inline h-4 w-4 text-teal-700" />Notes & places</>}>
         <div className="mt-3 space-y-3">
           {props.notes.map((note) => <NoteEditor key={noteEditorKey(note)} note={note} days={props.days} isSaving={props.isSaving} onSave={props.onUpdateNote} onDelete={() => props.onDeleteItem("notes", note.id)} />)}
           {props.places.map((place) => <PlaceEditor key={placeEditorKey(place)} place={place} days={props.days} isSaving={props.isSaving} onSave={props.onUpdatePlace} onDelete={() => props.onDeleteItem("places", place.id)} />)}
           {props.notes.length === 0 && props.places.length === 0 ? <EmptyRow label="No notes or places yet" /> : null}
         </div>
-      </details>
+      </LazyDetails>
 
-      <details className="rounded-lg bg-[#f7f1e7] p-3">
-        <summary className="cursor-pointer text-sm font-bold text-stone-900"><Camera className="mr-2 inline h-4 w-4 text-teal-700" />Photos</summary>
+      <LazyDetails summary={<><Camera className="mr-2 inline h-4 w-4 text-teal-700" />Photos ({props.photos.length})</>}>
         <div className="mt-3 space-y-3">
-          {props.photos.length === 0 ? <EmptyRow label="No photos yet" /> : props.photos.map((photo) => (
-            <PhotoEditor key={photoEditorKey(photo)} photo={photo} days={props.days} isSaving={props.isSaving} onSave={props.onUpdatePhoto} onDelete={() => props.onDeleteItem("photos", photo.id)} />
-          ))}
+          <PhotoList photos={props.photos} days={props.days} isSaving={props.isSaving} onSave={props.onUpdatePhoto} onDeleteItem={props.onDeleteItem} />
         </div>
-      </details>
+      </LazyDetails>
     </section>
   );
 }
@@ -422,7 +448,7 @@ export function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo
     <form action={submit} className="grid grid-cols-[4rem_minmax(0,1fr)] gap-2 rounded-lg border border-stone-200 bg-white p-2">
       <div className="h-16 overflow-hidden rounded-md bg-stone-100">
         {/* eslint-disable-next-line @next/next/no-img-element -- Existing remote URLs come from user uploads. */}
-        <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" className="h-full w-full object-cover" />
+        <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
       </div>
       <div className="min-w-0 space-y-2">
         <select name="day_id" defaultValue={photo.day_id ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">{dayOptions(days)}</select>
