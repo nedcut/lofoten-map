@@ -11,6 +11,9 @@ what changed, why it mattered, and any verification worth remembering.
   fetched every thumbnail across the desktop + mobile mounts); photo and
   avatar uploads send image + thumbnail in parallel and set a 1-year
   immutable cache header instead of 1 hour on uuid-named storage files.
+- Ran the dedupe cleanup against production and verified the end state over
+  the REST API: 290 photos remain, every row has a content_hash, and no two
+  rows share one — the unique index now covers the entire library.
 - Found 442 byte-identical duplicate photos (60% of the 732-row library,
   ~493 MB) by downloading and hashing every stored image — each duplicate
   group has exactly 4-5 copies, so whole batches were re-uploaded before the
