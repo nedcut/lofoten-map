@@ -5,6 +5,21 @@ what changed, why it mattered, and any verification worth remembering.
 
 ## 2026-06-09
 
+- Added GPX route import (parse, simplify, bucket points by trip day) and member
+  avatar profiles: a public `avatars` bucket, an `avatar_path` column on
+  `trip_members`, and a self-service `update_my_trip_profile` RPC, all in the
+  `add_member_profiles` migration.
+- Fixed the Journey Mode caption editor swallowing spaces on mobile: the
+  play/pause Space shortcut now also checks `editingCaption` state and
+  `document.activeElement`, since `event.target` is unreliable with virtual
+  keyboards.
+- Generalized the missing-`admin_requests` tolerance into a tested
+  `isMissingSchemaObjectError` helper and applied it to the avatar migration:
+  if `trip_members.avatar_path` does not exist yet, the roster is refetched
+  without it so roles keep working, and profile editing hides until the
+  migration is pushed.
+- Gitignored `.playwright-mcp/` after rendered-QA debug artifacts slipped into
+  a commit.
 - Initialized Supabase CLI project config, added a baseline migration copied
   from the current idempotent schema, and documented linked-project dry-run/push
   commands.

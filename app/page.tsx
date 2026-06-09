@@ -23,6 +23,7 @@ import { gpxTimeToTripDate, groupPointsByDay, parseGpx, simplifyToLineString } f
 import { buildJourneyItems } from "@/lib/journey";
 import { prepareAvatarFile } from "@/lib/avatar-processing";
 import { preparePhotoFiles } from "@/lib/photo-processing";
+import { isMissingSchemaObjectError } from "@/lib/schema-errors";
 import { AVATAR_BUCKET, PHOTO_BUCKET, getSupabaseBrowserClient, resolveMemberAvatars, resolvePhotoUrls } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { AdminRequest, Day, LngLat, MapClickMode, Note, Photo, Place, RouteMode, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
@@ -44,13 +45,6 @@ const demoData: TripData = { trip: demoTrip, days: demoDays, routeSegments: demo
 const emptyData: TripData = { trip: null, days: [], routeSegments: [], photos: [], notes: [], places: [], members: [], adminRequests: [] };
 const UPLOAD_CONCURRENCY = 4;
 
-type SectionError = { code?: string; message: string } | null | undefined;
-
-function isMissingAdminRequestsTable(error: SectionError) {
-  if (!error) return false;
-  const message = error.message.toLowerCase();
-  return message.includes("admin_requests") && (message.includes("schema cache") || message.includes("could not find the table"));
-}
 
 async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
   let index = 0;
@@ -128,6 +122,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [adminRequestsAvailable, setAdminRequestsAvailable] = useState(true);
+  const [profilesAvailable, setProfilesAvailable] = useState(true);
 
   const tripSlug = process.env.NEXT_PUBLIC_TRIP_SLUG ?? "lofoten-2026";
 
@@ -182,17 +177,27 @@ export default function Home() {
         supabase.from("trip_members").select("trip_id,user_id,role,display_name,avatar_path,created_at").eq("trip_id", trip.id).order("created_at"),
         adminRequestsQuery,
       ]);
-      const adminRequestsMissing = isMissingAdminRequestsTable(adminRequests.error);
+      const adminRequestsMissing = isMissingSchemaObjectError(adminRequests.error, "admin_requests");
       setAdminRequestsAvailable(!adminRequestsMissing);
-      if (adminRequestsMissing) {
-        setNotice("Admin access requests are temporarily unavailable. Re-run supabase/schema.sql in Supabase, then refresh.");
+      // Tolerate a deployed schema that predates the avatar migration: refetch
+      // the roster without avatar_path so membership and roles keep working,
+      // and hide profile editing until the migration lands.
+      const profilesMissing = isMissingSchemaObjectError(members.error, "avatar_path");
+      setProfilesAvailable(!profilesMissing);
+      const membersResult = profilesMissing
+        ? await supabase.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", trip.id).order("created_at")
+        : members;
+      if (adminRequestsMissing || profilesMissing) {
+        const stale = [adminRequestsMissing ? "Admin access requests" : null, profilesMissing ? "Member profiles" : null].filter(Boolean).join(" and ");
+        setNotice(`${stale} are temporarily unavailable. Push the latest Supabase migrations, then refresh.`);
       }
-      const failure = [days.error, routes.error, photos.error, notes.error, places.error, members.error, adminRequestsMissing ? null : adminRequests.error].find(Boolean);
+      const failure = [days.error, routes.error, photos.error, notes.error, places.error, membersResult.error, adminRequestsMissing ? null : adminRequests.error].find(Boolean);
       if (failure) {
         setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
       } else {
         const resolvedPhotos = resolvePhotoUrls(supabase, (photos.data ?? []) as Photo[]);
-        const resolvedMembers = resolveMemberAvatars(supabase, (members.data ?? []) as TripMember[]);
+        const memberRows = ((membersResult.data ?? []) as Partial<TripMember>[]).map((member) => ({ avatar_path: null, ...member })) as TripMember[];
+        const resolvedMembers = resolveMemberAvatars(supabase, memberRows);
         setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: resolvedPhotos, notes: notes.data ?? [], places: places.data ?? [], members: resolvedMembers, adminRequests: adminRequestsMissing ? [] : (adminRequests.data ?? []) as AdminRequest[] });
       }
     } catch (loadError) {
@@ -1170,7 +1175,7 @@ export default function Home() {
           >
             <Play className="h-3.5 w-3.5 fill-current" /> <span className="hidden sm:inline">Journey</span>
           </button>
-          {supabase && user && currentMember ? (
+          {supabase && user && currentMember && profilesAvailable ? (
             <button onClick={() => setProfilePanelOpen(true)} aria-label="Edit your profile" className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] py-1 pl-1 pr-3 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">
               <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-stone-200">
                 {currentMember.avatar_url ? (
@@ -1202,7 +1207,7 @@ export default function Home() {
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
       {supabase && !authLoading && !user && authPanelOpen ? <AuthPanel message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
-      {supabase && user && currentMember && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
+      {supabase && user && currentMember && profilesAvailable && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
       {panel === "note" ? <AddNotePanel days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}

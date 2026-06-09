@@ -11,3 +11,6 @@ npm-debug.log*
 
 # test coverage
 /coverage
+
+# Playwright MCP debug artifacts
+.playwright-mcp/

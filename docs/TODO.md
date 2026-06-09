@@ -29,7 +29,8 @@ passes over broad rewrites.
 
 - Add a friend invite/notification flow for people who have not signed in yet,
   building on the current auto-join + admin-request model.
-- Add GPX/KML route import when the real route file arrives.
+- Add KML route import only if a real route file shows up in that format; GPX
+  import is done.
 - Add offline-friendly drafts for notes/photos so weak connectivity does not
   lose work mid-trip.
 - Add richer day journal entries only if the core map/photo/note workflow stays
