@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Camera, FileText, Loader2, MapPin, Pencil, Route, Save, Trash2 } from "lucide-react";
+import { CalendarDays, Camera, FileText, Loader2, MapPin, Pencil, Route, Save, Trash2, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Day, Note, Photo, Place, RouteMode, RouteSegment, Trip } from "@/types/trip";
 
@@ -67,6 +67,7 @@ export type AdminDataProps = {
   onUpdatePlace: (placeId: string, input: PlaceUpdate) => Promise<void>;
   onUpdatePhoto: (photoId: string, input: PhotoUpdate) => Promise<void>;
   onDeleteItem: (table: "days" | "route_segments" | "notes" | "places" | "photos", id: string) => Promise<void>;
+  onImportGpx: (file: File) => Promise<void>;
 };
 
 const routeModes: Array<{ value: RouteMode; label: string }> = [
@@ -203,6 +204,11 @@ export function AdminDataPanel(props: AdminDataProps) {
     });
   }
 
+  async function submitGpxImport(formData: FormData) {
+    const file = formData.get("gpx");
+    if (file instanceof File && file.size > 0) await props.onImportGpx(file);
+  }
+
   return (
     <section className="space-y-3 rounded-xl border border-stone-200 bg-white/75 p-4">
       <div className="flex items-center gap-2 text-sm font-bold text-stone-900"><Pencil className="h-4 w-4 text-teal-700" /> Admin data</div>
@@ -243,6 +249,15 @@ export function AdminDataPanel(props: AdminDataProps) {
       <details className="rounded-lg bg-[#f7f1e7] p-3">
         <summary className="cursor-pointer text-sm font-bold text-stone-900"><Route className="mr-2 inline h-4 w-4 text-teal-700" />Routes</summary>
         <div className="mt-3 space-y-3">
+          <form action={submitGpxImport} className="space-y-2 rounded-lg border border-teal-700/20 bg-teal-50 p-2">
+            <label className="block space-y-1 text-[11px] font-bold uppercase tracking-[0.08em] text-teal-900">
+              GPX file
+              <input name="gpx" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" disabled={props.isSaving} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-normal tracking-normal text-stone-950 file:mr-3 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-stone-700 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15 disabled:cursor-not-allowed disabled:opacity-60" />
+            </label>
+            <button disabled={props.isSaving} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-3 py-2.5 text-sm font-black text-white transition hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">
+              {props.isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Import GPX
+            </button>
+          </form>
           {props.routes.length === 0 ? <EmptyRow label="No routes yet" /> : props.routes.map((route) => (
             <RouteEditor key={routeEditorKey(route)} route={route} days={props.days} isSaving={props.isSaving} onSave={props.onUpdateRoute} onDelete={() => props.onDeleteItem("route_segments", route.id)} />
           ))}

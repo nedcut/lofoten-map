@@ -8,6 +8,8 @@ function member(overrides: Partial<TripMember>): TripMember {
     user_id: "user-1",
     role: "member",
     display_name: "Friend",
+    avatar_path: null,
+    avatar_url: null,
     created_at: "2026-06-01T00:00:00.000Z",
     ...overrides,
   };

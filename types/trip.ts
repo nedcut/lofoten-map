@@ -86,6 +86,10 @@ export type TripMember = {
   user_id: string;
   role: "admin" | "member";
   display_name: string | null;
+  avatar_path: string | null;
+  // Public URL generated at read time from avatar_path, never persisted; null
+  // when the member has no avatar or the path cannot be resolved.
+  avatar_url: string | null;
   created_at: string;
 };
 

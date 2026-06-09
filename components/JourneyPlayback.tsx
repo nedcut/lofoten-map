@@ -152,6 +152,11 @@ export function JourneyPlayback({
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      // Don't hijack keys while typing in a field (caption editor, filters) —
+      // otherwise Space toggles playback instead of inserting a space, and the
+      // arrows jump items instead of moving the cursor.
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.tagName === "SELECT")) return;
       if (event.key === "ArrowRight") {
         event.preventDefault();
         noteInteraction();

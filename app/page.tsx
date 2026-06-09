@@ -6,7 +6,7 @@ import { length } from "@turf/turf";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { LineString } from "geojson";
 import type { User } from "@supabase/supabase-js";
-import { AlertCircle, Loader2, LogIn, Mail, Play, ShieldCheck, Sparkles, X } from "lucide-react";
+import { AlertCircle, Loader2, LogIn, Mail, Play, ShieldCheck, Sparkles, UserRound, X } from "lucide-react";
 import { AddNotePanel } from "@/components/AddNotePanel";
 import { DaySidebar } from "@/components/DaySidebar";
 import { JourneyPlayback, type JourneyFilter } from "@/components/JourneyPlayback";
@@ -16,11 +16,14 @@ import { MobileSheet } from "@/components/MobileSheet";
 import { RouteDraftLayer } from "@/components/RouteDraftLayer";
 import { TripLayers, type MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
+import { ProfilePanel } from "@/components/ProfilePanel";
 import { UploadPhotoPanel, type PhotoUploadItemInput, type PhotoUploadProgress, type PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
 import { deriveTripAccess } from "@/lib/access";
+import { gpxTimeToTripDate, groupPointsByDay, parseGpx, simplifyToLineString } from "@/lib/gpx";
 import { buildJourneyItems } from "@/lib/journey";
+import { prepareAvatarFile } from "@/lib/avatar-processing";
 import { preparePhotoFiles } from "@/lib/photo-processing";
-import { PHOTO_BUCKET, getSupabaseBrowserClient, resolvePhotoUrls } from "@/lib/supabase";
+import { AVATAR_BUCKET, PHOTO_BUCKET, getSupabaseBrowserClient, resolveMemberAvatars, resolvePhotoUrls } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { AdminRequest, Day, LngLat, MapClickMode, Note, Photo, Place, RouteMode, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
 
@@ -70,6 +73,19 @@ function routeDistanceMeters(points: LngLat[]) {
   return Math.round(length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" }) * 1000);
 }
 
+function lineDistanceMeters(geometry: LineString) {
+  if (geometry.coordinates.length < 2) return 0;
+  return Math.round(length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" }) * 1000);
+}
+
+function firstBucketDate(points: { time: string | null }[]) {
+  for (const point of points) {
+    const date = gpxTimeToTripDate(point.time);
+    if (date) return date;
+  }
+  return null;
+}
+
 function fileExtension(file: File) {
   if (file.type === "image/jpeg") return "jpg";
   if (file.type === "image/png") return "png";
@@ -86,6 +102,8 @@ export default function Home() {
   const [authMessageTone, setAuthMessageTone] = useState<"info" | "error">("info");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authPanelOpen, setAuthPanelOpen] = useState(false);
+  const [profilePanelOpen, setProfilePanelOpen] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [memberMessage, setMemberMessage] = useState<string | null>(null);
   const [memberMessageTone, setMemberMessageTone] = useState<"info" | "error">("info");
   const [memberSaving, setMemberSaving] = useState(false);
@@ -161,7 +179,7 @@ export default function Home() {
         supabase.from("photos").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
         supabase.from("notes").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
         supabase.from("places").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
-        supabase.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", trip.id).order("created_at"),
+        supabase.from("trip_members").select("trip_id,user_id,role,display_name,avatar_path,created_at").eq("trip_id", trip.id).order("created_at"),
         adminRequestsQuery,
       ]);
       const adminRequestsMissing = isMissingAdminRequestsTable(adminRequests.error);
@@ -174,7 +192,8 @@ export default function Home() {
         setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
       } else {
         const resolvedPhotos = resolvePhotoUrls(supabase, (photos.data ?? []) as Photo[]);
-        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: resolvedPhotos, notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[], adminRequests: adminRequestsMissing ? [] : (adminRequests.data ?? []) as AdminRequest[] });
+        const resolvedMembers = resolveMemberAvatars(supabase, (members.data ?? []) as TripMember[]);
+        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: resolvedPhotos, notes: notes.data ?? [], places: places.data ?? [], members: resolvedMembers, adminRequests: adminRequestsMissing ? [] : (adminRequests.data ?? []) as AdminRequest[] });
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? `We could not sync the trip right now. Try refreshing. ${loadError.message}` : "We could not sync the trip right now. Try refreshing.");
@@ -242,6 +261,52 @@ export default function Home() {
     await supabase.auth.signOut();
     setUser(null);
     // Keep the data — reads are public, so signing out just drops edit access.
+  }
+
+  async function saveProfile(input: { displayName: string; avatarFile: File | null; removeAvatar: boolean }) {
+    if (!supabase || !data.trip || !user) return;
+    setProfileSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      // Default to whatever avatar the member already has; only the two write
+      // paths below (new upload / explicit removal) change it.
+      let avatarPath: string | null = currentMember?.avatar_path ?? null;
+      if (input.avatarFile) {
+        const prepared = await prepareAvatarFile(input.avatarFile);
+        // Path is keyed on the user id so it satisfies the storage RLS policy,
+        // and carries a fresh uuid so the public URL busts any CDN cache.
+        const path = `${user.id}/${crypto.randomUUID()}.jpg`;
+        const { error: uploadError } = await supabase.storage.from(AVATAR_BUCKET).upload(path, prepared, { cacheControl: "3600", upsert: false, contentType: prepared.type || "image/jpeg" });
+        if (uploadError) {
+          setError(`Could not upload your photo. ${uploadError.message}`);
+          return;
+        }
+        // Best-effort cleanup of the previous avatar so the bucket stays tidy.
+        if (currentMember?.avatar_path) await supabase.storage.from(AVATAR_BUCKET).remove([currentMember.avatar_path]);
+        avatarPath = path;
+      } else if (input.removeAvatar) {
+        if (currentMember?.avatar_path) await supabase.storage.from(AVATAR_BUCKET).remove([currentMember.avatar_path]);
+        avatarPath = null;
+      }
+
+      const { error: rpcError } = await supabase.rpc("update_my_trip_profile", {
+        target_trip_slug: data.trip.slug,
+        new_display_name: input.displayName,
+        new_avatar_path: avatarPath,
+      });
+      if (rpcError) {
+        setError(`Could not save your profile. ${rpcError.message}`);
+        return;
+      }
+      await loadData();
+      setNotice("Profile updated.");
+      setProfilePanelOpen(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save your profile.");
+    } finally {
+      setProfileSaving(false);
+    }
   }
 
   async function grantMember(input: { email: string; role: "admin" | "member" }) {
@@ -394,6 +459,7 @@ export default function Home() {
       onUpdatePlace: updatePlace,
       onUpdatePhoto: updatePhoto,
       onDeleteItem: deleteDataItem,
+      onImportGpx: importGpx,
     }
     : null;
 
@@ -869,6 +935,115 @@ export default function Home() {
     });
   }
 
+  async function importGpx(file: File) {
+    if (!data.trip) return;
+    const tripId = data.trip.id;
+    if (supabase && !isAdmin) {
+      setAdminDataError("Only trip admins can import GPX files.");
+      return;
+    }
+    if (supabase && !user) {
+      setAdminDataError("Sign in before importing GPX files to Supabase.");
+      return;
+    }
+
+    await runAdminOperation(async () => {
+      const parsed = parseGpx(await file.text());
+      const pointBuckets = groupPointsByDay(parsed.trackPoints).filter((bucket) => bucket.length >= 2);
+      if (pointBuckets.length === 0 && parsed.waypoints.length === 0) {
+        throw new Error("No usable tracks or waypoints were found in that GPX file.");
+      }
+
+      let availableDays = [...data.days].sort((a, b) => a.day_number - b.day_number);
+      let nextDayNumber = Math.max(0, ...availableDays.map((day) => day.day_number)) + 1;
+      const createdLocalDays: Day[] = [];
+
+      const ensureDay = async (date: string | null) => {
+        if (!date) return null;
+        const existing = availableDays.find((day) => day.date === date);
+        if (existing) return existing;
+
+        const row = {
+          trip_id: tripId,
+          day_number: nextDayNumber++,
+          date,
+          title: `GPX import ${date}`,
+          summary: null,
+        };
+
+        if (supabase) {
+          const { data: insertedDay, error: insertError } = await supabase.from("days").insert(row).select("*").single();
+          if (insertError) throw new Error(insertError.message);
+          availableDays = [...availableDays, insertedDay as Day].sort((a, b) => a.day_number - b.day_number);
+          return insertedDay as Day;
+        }
+
+        const day: Day = { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() };
+        createdLocalDays.push(day);
+        availableDays = [...availableDays, day].sort((a, b) => a.day_number - b.day_number);
+        return day;
+      };
+
+      const routeRows: Array<Omit<RouteSegment, "id" | "created_at">> = [];
+      for (const bucket of pointBuckets) {
+        const date = firstBucketDate(bucket);
+        const day = await ensureDay(date);
+        const geometry = simplifyToLineString(bucket);
+        routeRows.push({
+          trip_id: tripId,
+          day_id: day?.id ?? null,
+          name: parsed.name ? `${parsed.name}${date ? ` (${date})` : ""}` : `GPX route${date ? ` ${date}` : ""}`,
+          source: "gpx",
+          mode: "hike" as const,
+          geometry_geojson: geometry,
+          distance_meters: lineDistanceMeters(geometry),
+          elevation_gain_meters: null,
+        });
+      }
+
+      const waypointDayId = pointBuckets.length === 1 ? (await ensureDay(firstBucketDate(pointBuckets[0])))?.id ?? null : null;
+      const noteRows: Array<Omit<Note, "id" | "created_at">> = parsed.waypoints.map((waypoint) => ({
+        trip_id: tripId,
+        day_id: waypointDayId,
+        user_id: user?.id ?? null,
+        author_name: "GPX import",
+        lat: waypoint.lat,
+        lng: waypoint.lng,
+        body: waypoint.desc ? `${waypoint.name}: ${waypoint.desc}` : waypoint.name,
+        note_type: "waypoint",
+      }));
+
+      if (supabase) {
+        if (routeRows.length > 0) {
+          const { error: routeError } = await supabase.from("route_segments").insert(routeRows);
+          if (routeError) throw new Error(routeError.message);
+        }
+        if (noteRows.length > 0) {
+          const { error: noteError } = await supabase.from("notes").insert(noteRows);
+          if (noteError) throw new Error(noteError.message);
+        }
+        setAdminDataInfo(`Imported ${routeRows.length} route${routeRows.length === 1 ? "" : "s"} and ${noteRows.length} waypoint${noteRows.length === 1 ? "" : "s"}.`);
+        await loadData();
+        return;
+      }
+
+      const now = new Date().toISOString();
+      setData((current) => ({
+        ...current,
+        days: [...current.days, ...createdLocalDays].sort((a, b) => a.day_number - b.day_number),
+        routeSegments: [
+          ...current.routeSegments,
+          ...routeRows.map((row) => ({ ...row, id: crypto.randomUUID(), created_at: now })),
+        ],
+        notes: [
+          ...noteRows.map((row) => ({ ...row, id: crypto.randomUUID(), created_at: now })),
+          ...current.notes,
+        ],
+      }));
+      setAdminDataInfo(`Imported ${routeRows.length} route${routeRows.length === 1 ? "" : "s"} and ${noteRows.length} waypoint${noteRows.length === 1 ? "" : "s"}.`);
+    });
+  }
+
   async function updateRoute(routeId: string, input: { day_id: string | null; name: string | null; mode: RouteMode; source: string | null }) {
     if (!data.trip) return;
     await runAdminOperation(async () => {
@@ -995,6 +1170,19 @@ export default function Home() {
           >
             <Play className="h-3.5 w-3.5 fill-current" /> <span className="hidden sm:inline">Journey</span>
           </button>
+          {supabase && user && currentMember ? (
+            <button onClick={() => setProfilePanelOpen(true)} aria-label="Edit your profile" className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] py-1 pl-1 pr-3 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">
+              <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-stone-200">
+                {currentMember.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={currentMember.avatar_url} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <UserRound className="h-3.5 w-3.5 text-stone-500" />
+                )}
+              </span>
+              <span className="hidden sm:inline">Profile</span>
+            </button>
+          ) : null}
           {supabase && user ? <button onClick={signOut} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign out</button> : null}
           {supabase && !authLoading && !user ? <button onClick={() => setAuthPanelOpen(true)} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign in</button> : null}
         </div>
@@ -1014,6 +1202,7 @@ export default function Home() {
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
       {supabase && !authLoading && !user && authPanelOpen ? <AuthPanel message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
+      {supabase && user && currentMember && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
       {panel === "note" ? <AddNotePanel days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}

@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Photo } from "@/types/trip";
+import type { Photo, TripMember } from "@/types/trip";
 
 type BrowserSupabaseClient = SupabaseClient | null;
 
@@ -36,6 +36,7 @@ export function getSupabaseBrowserClient() {
 }
 
 export const PHOTO_BUCKET = "trip-photos";
+export const AVATAR_BUCKET = "avatars";
 
 /**
  * Pure mapper: resolve each photo's `image_url` / `thumbnail_url` from a
@@ -68,4 +69,17 @@ export function resolvePhotoUrls(client: SupabaseClient, photos: Photo[]): Photo
     if (data?.publicUrl) urlByPath.set(path, data.publicUrl);
   }
   return applyPublicPhotoUrls(photos, urlByPath);
+}
+
+/**
+ * Resolve each member's `avatar_path` into a public `avatar_url` from the public
+ * `avatars` bucket. Same read-time, no-network pattern as `resolvePhotoUrls`;
+ * members with no avatar come back with a null URL.
+ */
+export function resolveMemberAvatars(client: SupabaseClient, members: TripMember[]): TripMember[] {
+  return members.map((member) => {
+    if (!member.avatar_path) return { ...member, avatar_url: null };
+    const { data } = client.storage.from(AVATAR_BUCKET).getPublicUrl(member.avatar_path);
+    return { ...member, avatar_url: data?.publicUrl ?? null };
+  });
 }
