@@ -202,7 +202,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
         const meta = [props.place_type, props.description].filter(Boolean).map((value) => escapeHtml(value)).join(" · ");
         content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("place")}<div class="lofoten-popup-title">${escapeHtml(props.name || props.title || "Place")}</div><div class="lofoten-popup-meta">${meta || "Shared trip marker"}</div></div></div>`;
       }
-      const popup = new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(coordinates).setHTML(content).addTo(activeMap);
+      const popup = new mapboxgl.Popup({ offset: 18, className: "lofoten-popup", maxWidth: "17rem" }).setLngLat(coordinates).setHTML(content).addTo(activeMap);
       if (props.kind === "photo") injectJourneyButton(popup, String(props.id ?? ""));
       injectActions(popup, props.kind as MapItemKind, String(props.id ?? ""), (props.user_id as string | null) ?? null);
     }
@@ -217,7 +217,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
         Number.isFinite(distanceKm) ? `${distanceKm.toFixed(distanceKm < 10 ? 1 : 0)} km` : null,
       ].filter(Boolean).join(" · ");
       const content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("route")}<div class="lofoten-popup-title">${escapeHtml(props.name || "Route segment")}</div><div class="lofoten-popup-meta">${escapeHtml(meta || "Saved route")}</div></div></div>`;
-      const popup = new mapboxgl.Popup({ offset: 18, className: "lofoten-popup" }).setLngLat(event.lngLat).setHTML(content).addTo(activeMap);
+      const popup = new mapboxgl.Popup({ offset: 18, className: "lofoten-popup", maxWidth: "17rem" }).setLngLat(event.lngLat).setHTML(content).addTo(activeMap);
       injectActions(popup, "route", String(props.id ?? ""), null);
     }
 
