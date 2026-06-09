@@ -10,8 +10,10 @@ passes over broad rewrites.
   change.
 - Re-check mobile flows on a real phone: public viewing, sign-in panel, photo
   import, map placement, and expanded bottom sheet scrolling.
-- Extend EXIF/canvas test coverage around large batches, corrupt files, HEIC
-  passthrough, and thumbnail fallback behavior.
+- Extend EXIF coverage around large batches and edge-case camera metadata.
+- Add real-browser or integration coverage for photo upload placement once a
+  browser test harness is in place; unit coverage now exercises canvas resize,
+  corrupt-file fallback, HEIC passthrough, and thumbnail generation.
 - Verify the auto-join + admin-request flow against a real Supabase project as:
   guest, newly signed-in member, existing admin, and demoted member.
 - Add a thin integration smoke test around the admin-request RPCs once a test

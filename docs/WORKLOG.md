@@ -5,6 +5,9 @@ what changed, why it mattered, and any verification worth remembering.
 
 ## 2026-06-09
 
+- Expanded photo-processing tests across the mocked browser canvas path:
+  large-image optimization, thumbnail generation, corrupt decode fallback,
+  HEIC passthrough, and oversized optimized-output rejection.
 - Pulled role/access derivation into a small tested helper so guest, member,
   admin, and admin-request UI states stay consistent as the sharing model evolves.
 - Updated Supabase setup/deploy docs for the current access model: public reads,
