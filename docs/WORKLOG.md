@@ -5,6 +5,8 @@ what changed, why it mattered, and any verification worth remembering.
 
 ## 2026-06-09
 
+- Added a graceful Mapbox/WebGL fallback after rendered QA found headless
+  Chromium could crash the whole page when WebGL initialization failed.
 - Expanded photo-processing tests across the mocked browser canvas path:
   large-image optimization, thumbnail generation, corrupt decode fallback,
   HEIC passthrough, and oversized optimized-output rejection.

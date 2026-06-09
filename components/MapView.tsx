@@ -19,6 +19,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [tokenMissing, setTokenMissing] = useState(false);
+  const [mapUnavailable, setMapUnavailable] = useState<string | null>(null);
   const clickPrompt = clickMode === "draw-route" ? "Tap the map to add route points" : "Tap the map to set the location";
 
   useEffect(() => {
@@ -28,16 +29,27 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
       setTokenMissing(true);
       return;
     }
+    if (!mapboxgl.supported()) {
+      setMapUnavailable("Your browser or device does not support WebGL, so the interactive map cannot load here.");
+      return;
+    }
     mapboxgl.accessToken = token;
-    const instance = new mapboxgl.Map({
-      container: containerRef.current,
-      style: "mapbox://styles/mapbox/outdoors-v12",
-      center: LOFOTEN_CENTER,
-      zoom: 10.2,
-      pitch: 45,
-      bearing: -20,
-      attributionControl: false,
-    });
+    let instance: mapboxgl.Map;
+    try {
+      instance = new mapboxgl.Map({
+        container: containerRef.current,
+        style: "mapbox://styles/mapbox/outdoors-v12",
+        center: LOFOTEN_CENTER,
+        zoom: 10.2,
+        pitch: 45,
+        bearing: -20,
+        attributionControl: false,
+      });
+    } catch {
+      setMapUnavailable("The interactive map could not start in this browser. The trip details are still available.");
+      containerRef.current.replaceChildren();
+      return;
+    }
     instance.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "bottom-right");
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }));
     instance.on("load", () => {
@@ -84,15 +96,17 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onCoordinate
   return (
     <div className="relative h-full min-h-[520px] overflow-hidden rounded-none bg-[#dbe7df] md:rounded-[1.35rem] md:ring-1 md:ring-stone-200/80">
       <div ref={containerRef} className="h-full w-full" />
-      {tokenMissing ? (
+      {tokenMissing || mapUnavailable ? (
         <div className="absolute inset-0 flex items-center justify-center bg-[#e7efe8] p-6 text-center">
           <div className="max-w-md rounded-[1.25rem] border border-stone-200 bg-[rgba(255,253,246,0.94)] p-6 shadow-2xl">
-            <h2 className="font-serif text-3xl font-semibold text-stone-950">Mapbox token needed</h2>
-            <p className="mt-2 text-sm leading-6 text-stone-600">Add NEXT_PUBLIC_MAPBOX_TOKEN to your environment to load the interactive trip map.</p>
+            <h2 className="font-serif text-3xl font-semibold text-stone-950">{tokenMissing ? "Mapbox token needed" : "Map unavailable"}</h2>
+            <p className="mt-2 text-sm leading-6 text-stone-600">
+              {tokenMissing ? "Add NEXT_PUBLIC_MAPBOX_TOKEN to your environment to load the interactive trip map." : mapUnavailable}
+            </p>
           </div>
         </div>
       ) : null}
-      {clickMode !== "idle" ? (
+      {clickMode !== "idle" && !tokenMissing && !mapUnavailable ? (
         <div className="absolute left-1/2 top-16 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-teal-700/20 bg-[rgba(255,253,246,0.94)] px-4 py-2 text-center text-sm font-bold text-teal-950 shadow-xl backdrop-blur md:top-4">
           <span className="relative flex h-2.5 w-2.5">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-600/60" />

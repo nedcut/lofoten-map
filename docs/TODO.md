@@ -10,6 +10,9 @@ passes over broad rewrites.
   change.
 - Re-check mobile flows on a real phone: public viewing, sign-in panel, photo
   import, map placement, and expanded bottom sheet scrolling.
+- Continue rendered QA passes with Playwright screenshots; desktop/mobile now
+  cover the WebGL-unavailable fallback path, but a real Mapbox-token map render
+  still needs visual verification.
 - Extend EXIF coverage around large batches and edge-case camera metadata.
 - Add real-browser or integration coverage for photo upload placement once a
   browser test harness is in place; unit coverage now exercises canvas resize,
