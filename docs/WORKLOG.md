@@ -5,6 +5,9 @@ what changed, why it mattered, and any verification worth remembering.
 
 ## 2026-06-09
 
+- Made a missing `admin_requests` table/schema-cache error non-fatal during
+  deployed Supabase migrations, with admin-request controls hidden until the
+  schema is caught up.
 - Added a graceful Mapbox/WebGL fallback after rendered QA found headless
   Chromium could crash the whole page when WebGL initialization failed, then
   hid map-dependent quick actions, layer toggles, and map controls when the

@@ -39,6 +39,14 @@ const demoData: TripData = { trip: demoTrip, days: demoDays, routeSegments: demo
 const emptyData: TripData = { trip: null, days: [], routeSegments: [], photos: [], notes: [], places: [], members: [], adminRequests: [] };
 const UPLOAD_CONCURRENCY = 4;
 
+type SectionError = { code?: string; message: string } | null | undefined;
+
+function isMissingAdminRequestsTable(error: SectionError) {
+  if (!error) return false;
+  const message = error.message.toLowerCase();
+  return message.includes("admin_requests") && (message.includes("schema cache") || message.includes("could not find the table"));
+}
+
 async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
   let index = 0;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -95,6 +103,7 @@ export default function Home() {
   const [loading, setLoading] = useState(Boolean(supabase));
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [adminRequestsAvailable, setAdminRequestsAvailable] = useState(true);
 
   const tripSlug = process.env.NEXT_PUBLIC_TRIP_SLUG ?? "lofoten-2026";
 
@@ -149,12 +158,17 @@ export default function Home() {
         supabase.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", trip.id).order("created_at"),
         adminRequestsQuery,
       ]);
-      const failure = [days.error, routes.error, photos.error, notes.error, places.error, members.error, adminRequests.error].find(Boolean);
+      const adminRequestsMissing = isMissingAdminRequestsTable(adminRequests.error);
+      setAdminRequestsAvailable(!adminRequestsMissing);
+      if (adminRequestsMissing) {
+        setNotice("Admin access requests are temporarily unavailable. Re-run supabase/schema.sql in Supabase, then refresh.");
+      }
+      const failure = [days.error, routes.error, photos.error, notes.error, places.error, members.error, adminRequestsMissing ? null : adminRequests.error].find(Boolean);
       if (failure) {
         setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
       } else {
         const resolvedPhotos = resolvePhotoUrls(supabase, (photos.data ?? []) as Photo[]);
-        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: resolvedPhotos, notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[], adminRequests: (adminRequests.data ?? []) as AdminRequest[] });
+        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: resolvedPhotos, notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[], adminRequests: adminRequestsMissing ? [] : (adminRequests.data ?? []) as AdminRequest[] });
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? `We could not sync the trip right now. Try refreshing. ${loadError.message}` : "We could not sync the trip right now. Try refreshing.");
@@ -179,11 +193,13 @@ export default function Home() {
       .on("postgres_changes", { event: "*", schema: "public", table: "notes", filter: `trip_id=eq.${data.trip.id}` }, loadData)
       .on("postgres_changes", { event: "*", schema: "public", table: "route_segments", filter: `trip_id=eq.${data.trip.id}` }, loadData)
       .on("postgres_changes", { event: "*", schema: "public", table: "places", filter: `trip_id=eq.${data.trip.id}` }, loadData)
-      .on("postgres_changes", { event: "*", schema: "public", table: "trip_members", filter: `trip_id=eq.${data.trip.id}` }, loadData)
-      .on("postgres_changes", { event: "*", schema: "public", table: "admin_requests", filter: `trip_id=eq.${data.trip.id}` }, loadData)
-      .subscribe();
+      .on("postgres_changes", { event: "*", schema: "public", table: "trip_members", filter: `trip_id=eq.${data.trip.id}` }, loadData);
+    if (adminRequestsAvailable) {
+      channel.on("postgres_changes", { event: "*", schema: "public", table: "admin_requests", filter: `trip_id=eq.${data.trip.id}` }, loadData);
+    }
+    channel.subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [data.trip, loadData, supabase]);
+  }, [adminRequestsAvailable, data.trip, loadData, supabase]);
 
   async function signIn(email: string) {
     if (!supabase) return;
@@ -324,7 +340,7 @@ export default function Home() {
   const memberAdmin = access.showMemberAdminControls
     ? {
       members: data.members,
-      requests: access.pendingAdminRequests,
+      requests: adminRequestsAvailable ? access.pendingAdminRequests : [],
       currentUserId,
       message: memberMessage,
       messageTone: memberMessageTone,
@@ -335,7 +351,7 @@ export default function Home() {
     }
     : null;
   // Shown to signed-in members who are not admins: a way to ask for an upgrade.
-  const adminRequest = access.showAdminRequestControls
+  const adminRequest = adminRequestsAvailable && access.showAdminRequestControls
     ? { status: access.currentUserAdminRequest?.status ?? null, isSaving: memberSaving, message: memberMessage, messageTone: memberMessageTone, onRequestAdmin: requestAdmin }
     : null;
   const routeDraftDistance = useMemo(() => routeDistanceMeters(routeDraftPoints), [routeDraftPoints]);

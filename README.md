@@ -106,6 +106,12 @@ If you are upgrading an existing project, re-run `supabase/schema.sql`: it flips
 the bucket to public and (for older databases) migrates the old `image_url` /
 `thumbnail_url` columns to `image_path` / `thumbnail_path`.
 
+If the deployed app says Supabase could not find `public.admin_requests` in the
+schema cache, your database is behind the app code. Re-run
+`supabase/schema.sql` in the Supabase SQL Editor, then refresh the app after
+Supabase has reloaded its API schema cache. The trip can still load while that
+admin-request feature is unavailable.
+
 ## Deploying to Vercel
 
 The app deploys as a standard Next.js project — Vercel runs `next build`
