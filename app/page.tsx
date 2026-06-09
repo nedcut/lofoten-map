@@ -17,7 +17,7 @@ import { TripLayers, type MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
 import { UploadPhotoPanel, type PhotoUploadItemInput, type PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
 import { preparePhotoFiles } from "@/lib/photo-processing";
-import { PHOTO_BUCKET, getSupabaseBrowserClient, signPhotoUrls } from "@/lib/supabase";
+import { PHOTO_BUCKET, getSupabaseBrowserClient, resolvePhotoUrls } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Day, LngLat, MapClickMode, Note, Photo, Place, RouteMode, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
 
@@ -74,6 +74,7 @@ export default function Home() {
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authMessageTone, setAuthMessageTone] = useState<"info" | "error">("info");
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [authPanelOpen, setAuthPanelOpen] = useState(false);
   const [memberMessage, setMemberMessage] = useState<string | null>(null);
   const [memberMessageTone, setMemberMessageTone] = useState<"info" | "error">("info");
   const [memberSaving, setMemberSaving] = useState(false);
@@ -108,7 +109,9 @@ export default function Home() {
       setAuthLoading(false);
       setAuthMessage(null);
       setAuthMessageTone("info");
-      if (!session?.user) setData(emptyData);
+      // Close the sign-in modal once a session lands. Data reloads via the
+      // auth-driven effect below; signing out drops to the public view, not blank.
+      if (session?.user) setAuthPanelOpen(false);
     });
     return () => {
       mounted = false;
@@ -117,7 +120,7 @@ export default function Home() {
   }, [supabase]);
 
   const loadData = useCallback(async () => {
-    if (!supabase || !user) return;
+    if (!supabase) return;
     setLoading(true);
     setError(null);
     setNotice(null);
@@ -141,28 +144,26 @@ export default function Home() {
       if (failure) {
         setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
       } else {
-        const signedPhotos = await signPhotoUrls(supabase, (photos.data ?? []) as Photo[]);
-        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: signedPhotos, notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[] });
+        const resolvedPhotos = resolvePhotoUrls(supabase, (photos.data ?? []) as Photo[]);
+        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: resolvedPhotos, notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[] });
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? `We could not sync the trip right now. Try refreshing. ${loadError.message}` : "We could not sync the trip right now. Try refreshing.");
     } finally {
       setLoading(false);
     }
-  }, [supabase, tripSlug, user]);
+  }, [supabase, tripSlug]);
 
   useEffect(() => {
     if (!supabase) return;
     if (authLoading) return;
-    if (!user) {
-      setLoading(false);
-      return;
-    }
+    // Load for everyone — reads are public. Re-runs on sign in/out so member-only
+    // controls and any write-gated data refresh with the new session.
     loadData();
   }, [authLoading, loadData, supabase, user]);
 
   useEffect(() => {
-    if (!supabase || !data.trip || !user) return;
+    if (!supabase || !data.trip) return;
     const channel = supabase
       .channel("lofoten-logbook-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "photos", filter: `trip_id=eq.${data.trip.id}` }, loadData)
@@ -171,7 +172,7 @@ export default function Home() {
       .on("postgres_changes", { event: "*", schema: "public", table: "places", filter: `trip_id=eq.${data.trip.id}` }, loadData)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [data.trip, loadData, supabase, user]);
+  }, [data.trip, loadData, supabase]);
 
   async function signIn(email: string) {
     if (!supabase) return;
@@ -207,7 +208,7 @@ export default function Home() {
     if (!supabase) return;
     await supabase.auth.signOut();
     setUser(null);
-    setData(emptyData);
+    // Keep the data — reads are public, so signing out just drops edit access.
   }
 
   async function grantMember(input: { email: string; role: "admin" | "member" }) {
@@ -746,8 +747,9 @@ export default function Home() {
           <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#d0872f]" /> <span className="truncate">{tripTitle}</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{supabase ? (user ? `Signed in ${user.email ?? ""}` : "Supabase sign-in") : "Local demo mode"}</div>
+          <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{supabase ? (user ? `Signed in ${user.email ?? ""}` : "Viewing as guest") : "Local demo mode"}</div>
           {supabase && user ? <button onClick={signOut} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign out</button> : null}
+          {supabase && !authLoading && !user ? <button onClick={() => setAuthPanelOpen(true)} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign in</button> : null}
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
@@ -762,7 +764,7 @@ export default function Home() {
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
-      {supabase && !authLoading && !user ? <AuthPanel message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} /> : null}
+      {supabase && !authLoading && !user && authPanelOpen ? <AuthPanel message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
       {panel === "note" ? <AddNotePanel days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
@@ -786,20 +788,21 @@ function StatusPill({ children, tone = "info", onDismiss }: { children: ReactNod
   );
 }
 
-function AuthPanel({ message, messageTone, isSubmitting, onSignIn, onSignInWithGoogle }: { message: string | null; messageTone: "info" | "error"; isSubmitting: boolean; onSignIn: (email: string) => Promise<void>; onSignInWithGoogle: () => Promise<void> }) {
+function AuthPanel({ message, messageTone, isSubmitting, onSignIn, onSignInWithGoogle, onClose }: { message: string | null; messageTone: "info" | "error"; isSubmitting: boolean; onSignIn: (email: string) => Promise<void>; onSignInWithGoogle: () => Promise<void>; onClose: () => void }) {
   async function submit(formData: FormData) {
     const email = String(formData.get("email") ?? "").trim();
     if (email) await onSignIn(email);
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm">
-      <form action={submit} className="w-full max-w-md rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.97)] p-5 text-stone-950 shadow-2xl">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm" onClick={onClose}>
+      <form action={submit} onClick={(event) => event.stopPropagation()} className="relative w-full max-w-md rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.97)] p-5 text-stone-950 shadow-2xl">
+        <button type="button" onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-full p-1.5 text-stone-500 transition hover:bg-stone-900/10 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50"><X className="h-4 w-4" /></button>
         <div className="mb-4 flex items-center gap-3">
           <div className="rounded-lg bg-teal-50 p-3 text-teal-800"><ShieldCheck className="h-5 w-5" /></div>
           <div>
             <h2 className="font-serif text-2xl font-semibold">Sign in to Lofoten</h2>
-            <p className="text-sm leading-6 text-stone-600">Use an invited Google or email account.</p>
+            <p className="text-sm leading-6 text-stone-600">Viewing is open to everyone — sign in with an invited account to add or edit.</p>
           </div>
         </div>
         <button type="button" disabled={isSubmitting} onClick={onSignInWithGoogle} className="mb-4 flex w-full items-center justify-center gap-3 rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm font-black text-stone-900 shadow-sm transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">

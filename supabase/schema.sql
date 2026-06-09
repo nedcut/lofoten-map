@@ -1,6 +1,7 @@
 -- Lofoten Logbook MVP schema
--- Authenticated Supabase mode is private to trip members. Run seed.sql after
--- this schema, then add at least one auth user to trip_members from SQL.
+-- Reads are public (anyone can view the trip without an account); editing is
+-- restricted to invited trip members. Run seed.sql after this schema, then add
+-- at least one auth user to trip_members from SQL.
 
 create extension if not exists pgcrypto;
 
@@ -234,6 +235,9 @@ grant execute on function public.grant_trip_member_by_email(text, text, text) to
 
 grant usage on schema public to anon, authenticated;
 grant all on table trips, days, route_segments, photos, notes, places, trip_members to authenticated;
+-- Public reads: anon needs the table-level SELECT privilege; RLS ("public read"
+-- policies above) still governs which rows it sees.
+grant select on table trips, days, route_segments, photos, notes, places, trip_members to anon;
 grant usage on all sequences in schema public to authenticated;
 
 alter table trips enable row level security;
@@ -256,59 +260,70 @@ begin
   end loop;
 end $$;
 
+-- Reads are public (anon + authenticated): anyone can view the trip without an
+-- account. Writes stay locked to invited members/admins via the helpers above.
 drop policy if exists "members read trips" on trips;
+drop policy if exists "public read trips" on trips;
 drop policy if exists "admins write trips" on trips;
-create policy "members read trips" on trips for select to authenticated using (public.is_trip_member(id));
+create policy "public read trips" on trips for select to anon, authenticated using (true);
 create policy "admins write trips" on trips for all to authenticated using (public.is_trip_admin(id)) with check (public.is_trip_admin(id));
 
 drop policy if exists "members read days" on days;
+drop policy if exists "public read days" on days;
 drop policy if exists "admins write days" on days;
-create policy "members read days" on days for select to authenticated using (public.is_trip_member(trip_id));
+create policy "public read days" on days for select to anon, authenticated using (true);
 create policy "admins write days" on days for all to authenticated using (public.is_trip_admin(trip_id)) with check (public.is_trip_admin(trip_id));
 
 drop policy if exists "members read route segments" on route_segments;
+drop policy if exists "public read route segments" on route_segments;
 drop policy if exists "admins write route segments" on route_segments;
-create policy "members read route segments" on route_segments for select to authenticated using (public.is_trip_member(trip_id));
+create policy "public read route segments" on route_segments for select to anon, authenticated using (true);
 create policy "admins write route segments" on route_segments for all to authenticated using (public.is_trip_admin(trip_id)) with check (public.is_trip_admin(trip_id));
 
 drop policy if exists "members read places" on places;
+drop policy if exists "public read places" on places;
 drop policy if exists "admins write places" on places;
-create policy "members read places" on places for select to authenticated using (public.is_trip_member(trip_id));
+create policy "public read places" on places for select to anon, authenticated using (true);
 create policy "admins write places" on places for all to authenticated using (public.is_trip_admin(trip_id)) with check (public.is_trip_admin(trip_id));
 
 drop policy if exists "members read photos" on photos;
+drop policy if exists "public read photos" on photos;
 drop policy if exists "members insert own photos" on photos;
 drop policy if exists "owners or admins update photos" on photos;
 drop policy if exists "owners or admins delete photos" on photos;
-create policy "members read photos" on photos for select to authenticated using (public.is_trip_member(trip_id));
+create policy "public read photos" on photos for select to anon, authenticated using (true);
 create policy "members insert own photos" on photos for insert to authenticated with check (public.is_trip_member(trip_id) and user_id = auth.uid());
 create policy "owners or admins update photos" on photos for update to authenticated using (user_id = auth.uid() or public.is_trip_admin(trip_id)) with check (user_id = auth.uid() or public.is_trip_admin(trip_id));
 create policy "owners or admins delete photos" on photos for delete to authenticated using (user_id = auth.uid() or public.is_trip_admin(trip_id));
 
 drop policy if exists "members read notes" on notes;
+drop policy if exists "public read notes" on notes;
 drop policy if exists "members insert own notes" on notes;
 drop policy if exists "owners or admins update notes" on notes;
 drop policy if exists "owners or admins delete notes" on notes;
-create policy "members read notes" on notes for select to authenticated using (public.is_trip_member(trip_id));
+create policy "public read notes" on notes for select to anon, authenticated using (true);
 create policy "members insert own notes" on notes for insert to authenticated with check (public.is_trip_member(trip_id) and user_id = auth.uid());
 create policy "owners or admins update notes" on notes for update to authenticated using (user_id = auth.uid() or public.is_trip_admin(trip_id)) with check (user_id = auth.uid() or public.is_trip_admin(trip_id));
 create policy "owners or admins delete notes" on notes for delete to authenticated using (user_id = auth.uid() or public.is_trip_admin(trip_id));
 
 drop policy if exists "members read trip memberships" on trip_members;
+drop policy if exists "public read trip memberships" on trip_members;
 drop policy if exists "admins write trip memberships" on trip_members;
-create policy "members read trip memberships" on trip_members for select to authenticated using (public.is_trip_member(trip_id));
+create policy "public read trip memberships" on trip_members for select to anon, authenticated using (true);
 create policy "admins write trip memberships" on trip_members for all to authenticated using (public.is_trip_admin(trip_id)) with check (public.is_trip_admin(trip_id));
 
+-- Public bucket: photos render via plain public URLs for everyone, no signing.
 insert into storage.buckets (id, name, public)
-values ('trip-photos', 'trip-photos', false)
+values ('trip-photos', 'trip-photos', true)
 on conflict (id) do update set public = excluded.public;
 
 drop policy if exists "trip members read photo objects" on storage.objects;
+drop policy if exists "public read photo objects" on storage.objects;
 drop policy if exists "trip members upload photo objects" on storage.objects;
 drop policy if exists "trip members update photo objects" on storage.objects;
 drop policy if exists "trip members delete photo objects" on storage.objects;
-create policy "trip members read photo objects" on storage.objects for select to authenticated
-  using (bucket_id = 'trip-photos' and public.is_trip_member_by_slug(split_part(name, '/', 1)));
+create policy "public read photo objects" on storage.objects for select to anon, authenticated
+  using (bucket_id = 'trip-photos');
 create policy "trip members upload photo objects" on storage.objects for insert to authenticated
   with check (bucket_id = 'trip-photos' and public.is_trip_member_by_slug(split_part(name, '/', 1)));
 create policy "trip members update photo objects" on storage.objects for update to authenticated

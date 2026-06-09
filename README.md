@@ -1,7 +1,8 @@
 # Lofoten Logbook
 
-An interactive, collaborative trip map and journal. Trip members filter days,
-browse route segments, drop notes and photos on the map, and see each other's
+An interactive, collaborative trip map and journal. Anyone can view the trip —
+filter days, browse route segments, and see notes and photos on the map — with
+no account. Invited members sign in to drop notes and photos and see each other's
 updates live. Photos extract their GPS/timestamp from EXIF in the browser, fall
 back to manual placement (or auto-placement along the day's route) when no
 geotag exists, and are downscaled with thumbnails before upload. Admins get
@@ -81,27 +82,25 @@ Keep the Supabase variables empty to stay in demo mode. To enable shared mode:
 an admin-only member-grant RPC, Realtime publication for the collaborative
 tables, and RLS policies:
 
-- **Reads** are restricted to authenticated users who are in `trip_members`.
-- **Notes and photos** can be created by any member; each row is updatable and
-  deletable by its owner or a trip admin.
+- **Reads are public** — `select` is granted to `anon` with `using (true)`, so
+  anyone can view the trip without an account.
+- **Notes and photos** can be created by any invited member; each row is
+  updatable and deletable by its owner or a trip admin.
 - **Trips, days, routes, places, and membership** are admin-scoped.
 
-### Photo storage privacy
+Editing is still account-gated: every insert/update/delete policy requires an
+authenticated user who is in `trip_members` (admins for itinerary/routes/places).
 
-`trip-photos` is a **private** bucket. The `photos` table stores storage *paths*
-(`image_path` / `thumbnail_path`), and the app mints short-lived **signed URLs**
-(8-hour expiry) at read time to render images. Signing is authorized by the
-member-scoped SELECT policy on `storage.objects`, so only authenticated trip
-members can load photos, and any leaked URL stops working when it expires.
+### Photo storage
 
-The signed-URL lifetime is a single constant — `PHOTO_SIGNED_URL_TTL_SECONDS` in
-[`lib/supabase.ts`](lib/supabase.ts). Nothing that expires is persisted, so it
-can be changed freely. URLs are regenerated on every load (mount, Realtime
-update, and after each mutation); a tab left idle past the TTL needs a refresh.
+`trip-photos` is a **public** bucket. The `photos` table stores storage *paths*
+(`image_path` / `thumbnail_path`), and the app resolves them to plain public URLs
+with `getPublicUrl` (`resolvePhotoUrls` in [`lib/supabase.ts`](lib/supabase.ts)) —
+a synchronous string build, no signing or expiry, so images load for everyone.
 
 If you are upgrading an existing project, re-run `supabase/schema.sql`: it flips
-the bucket to private and migrates the old `image_url` / `thumbnail_url` columns
-to `image_path` / `thumbnail_path`, converting any stored public URLs to paths.
+the bucket to public and (for older databases) migrates the old `image_url` /
+`thumbnail_url` columns to `image_path` / `thumbnail_path`.
 
 ## Deploying to Vercel
 
@@ -130,8 +129,9 @@ automatically. Your CI also validates a production build on every PR.
 6. **Sign in once** from the deployed app, then run `supabase/grant-member.sql`
    for your email and reload.
 7. **Smoke test:**
-   - Signed-out visitors see the sign-in panel (Supabase mode).
-   - Your member account loads the seeded trip; a non-member cannot.
+   - Signed-out visitors see the seeded trip (reads are public); the "Sign in"
+     button opens the optional sign-in panel.
+   - Your member account shows the contribute/admin controls; a guest does not.
    - A note saves and survives reload.
    - A small photo uploads, renders on the map, and survives reload.
    - An admin can add a signed-in friend from the Members panel.
