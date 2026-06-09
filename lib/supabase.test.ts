@@ -9,6 +9,7 @@ function photo(overrides: Partial<Photo>): Photo {
     day_id: null,
     user_id: null,
     uploader_name: "Friend",
+    content_hash: null,
     image_path: "lofoten-2026/a.jpg",
     thumbnail_path: "lofoten-2026/thumbs/a.jpg",
     image_url: null,

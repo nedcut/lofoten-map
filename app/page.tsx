@@ -15,7 +15,7 @@ import { MobileSheet } from "@/components/MobileSheet";
 import { RouteDraftLayer } from "@/components/RouteDraftLayer";
 import { TripLayers, type MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
-import { UploadPhotoPanel, type PhotoUploadItemInput, type PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
+import { UploadPhotoPanel, type PhotoUploadItemInput, type PhotoUploadProgress, type PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
 import { deriveTripAccess } from "@/lib/access";
 import { preparePhotoFiles } from "@/lib/photo-processing";
 import { PHOTO_BUCKET, getSupabaseBrowserClient, resolvePhotoUrls } from "@/lib/supabase";
@@ -465,7 +465,7 @@ export default function Home() {
     }
   }
 
-  async function savePhotos(inputs: PhotoUploadItemInput[]): Promise<PhotoUploadSaveResult | void> {
+  async function savePhotos(inputs: PhotoUploadItemInput[], onProgress: (progress: PhotoUploadProgress) => void): Promise<PhotoUploadSaveResult | void> {
     if (inputs.length === 0 || !data.trip) return;
     setSaving(true);
     setError(null);
@@ -475,16 +475,22 @@ export default function Home() {
     let didSave = false;
     const savedClientIds: string[] = [];
     const failedClientIds: string[] = [];
+    let completedUploads = 0;
+    const markUploadComplete = () => {
+      completedUploads += 1;
+      onProgress({ completed: completedUploads, total: inputs.length });
+    };
     try {
       if (!supabase) {
         const rows = await Promise.all(inputs.map(async (input) => {
           const prepared = await preparePhotoFiles(input.file);
-          return {
+          const row = {
             id: crypto.randomUUID(),
             trip_id: data.trip!.id,
             day_id: input.dayId,
             user_id: user?.id ?? null,
             uploader_name: uploaderName,
+            content_hash: input.contentHash,
             // Demo mode has no Storage: preview straight from local blob URLs and
             // leave the storage paths empty (never read in this branch).
             image_path: "",
@@ -498,6 +504,8 @@ export default function Home() {
             exif_found: input.exif?.exifFound ?? false,
             created_at: new Date().toISOString(),
           };
+          markUploadComplete();
+          return row;
         }));
         setData((current) => ({ ...current, photos: [...rows, ...current.photos] }));
         savedClientIds.push(...inputs.map((input) => input.clientId));
@@ -512,6 +520,7 @@ export default function Home() {
           trip_id: string;
           day_id: string | null;
           uploader_name: string;
+          content_hash: string;
           image_path: string;
           thumbnail_path: string | null;
           lat: number;
@@ -523,8 +532,20 @@ export default function Home() {
         const failures: string[] = [];
         const warnings: string[] = [];
         const uploadedPaths: string[] = [];
+        const existingHashes = new Set(data.photos.map((photo) => photo.content_hash).filter((hash): hash is string => Boolean(hash)));
+        const pendingHashes = new Set<string>();
+        const uploadInputs = inputs.filter((input) => {
+          if (existingHashes.has(input.contentHash) || pendingHashes.has(input.contentHash)) {
+            failures.push(`${input.file.name}: duplicate photo skipped`);
+            failedClientIds.push(input.clientId);
+            markUploadComplete();
+            return false;
+          }
+          pendingHashes.add(input.contentHash);
+          return true;
+        });
 
-        await mapWithConcurrency(inputs, UPLOAD_CONCURRENCY, async (input) => {
+        await mapWithConcurrency(uploadInputs, UPLOAD_CONCURRENCY, async (input) => {
           const prepared = await preparePhotoFiles(input.file);
           const extension = fileExtension(prepared.imageFile);
           const path = `${data.trip!.slug}/${crypto.randomUUID()}.${extension}`;
@@ -532,6 +553,7 @@ export default function Home() {
           if (uploadError) {
             failures.push(`${input.file.name}: ${uploadError.message}`);
             failedClientIds.push(input.clientId);
+            markUploadComplete();
             return;
           }
           uploadedPaths.push(path);
@@ -551,6 +573,7 @@ export default function Home() {
             trip_id: data.trip!.id,
             day_id: input.dayId,
             uploader_name: uploaderName,
+            content_hash: input.contentHash,
             image_path: path,
             thumbnail_path: thumbnailStoragePath,
             lat: input.coordinate.lat,
@@ -559,6 +582,7 @@ export default function Home() {
             caption: input.caption,
             exif_found: input.exif?.exifFound ?? false,
           });
+          markUploadComplete();
         });
 
         if (rows.length > 0) {
@@ -566,6 +590,7 @@ export default function Home() {
             trip_id: row.trip_id,
             day_id: row.day_id,
             uploader_name: row.uploader_name,
+            content_hash: row.content_hash,
             image_path: row.image_path,
             thumbnail_path: row.thumbnail_path,
             lat: row.lat,

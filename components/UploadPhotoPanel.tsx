@@ -12,6 +12,7 @@ import type { Day, LngLat, RouteSegment } from "@/types/trip";
 export type PhotoUploadItemInput = {
   clientId: string;
   file: File;
+  contentHash: string;
   caption: string;
   dayId: string | null;
   coordinate: LngLat;
@@ -23,6 +24,11 @@ export type PhotoUploadSaveResult = {
   failedClientIds: string[];
 };
 
+export type PhotoUploadProgress = {
+  completed: number;
+  total: number;
+};
+
 type Props = {
   days: Day[];
   routes: RouteSegment[];
@@ -31,11 +37,14 @@ type Props = {
   isSaving: boolean;
   onCancel: () => void;
   onCoordinatePreview: (coordinate: LngLat | null) => void;
-  onSave: (items: PhotoUploadItemInput[]) => Promise<PhotoUploadSaveResult | void>;
+  onSave: (items: PhotoUploadItemInput[], onProgress: (progress: PhotoUploadProgress) => void) => Promise<PhotoUploadSaveResult | void>;
 };
 
 const MAX_FILE_SIZE = 30 * 1024 * 1024;
 const EXIF_CONCURRENCY = 4;
+const FINGERPRINT_CONCURRENCY = 2;
+const LARGE_BATCH_THRESHOLD = 50;
+const QUEUE_PREVIEW_LIMIT = 40;
 const IMAGE_EXTENSIONS = [".heic", ".heif", ".jpg", ".jpeg", ".png", ".webp", ".gif"];
 const BATCH_OVERRIDE_IDLE = "__idle";
 const ALL_DAYS_VALUE = "__all";
@@ -51,6 +60,7 @@ type QueueFilter = "all" | "review" | "needs-location" | "invalid";
 type QueueItem = {
   id: string;
   file: File;
+  contentHash: string | null;
   caption: string;
   dayId: string | null;
   dayMatchSource: "date" | "route" | null;
@@ -68,6 +78,11 @@ type AnalyzedItem = Pick<QueueItem, "id" | "dayId" | "dayMatchSource" | "locatio
 function isSupportedImage(file: File) {
   const lowerName = file.name.toLowerCase();
   return file.type.startsWith("image/") || IMAGE_EXTENSIONS.some((extension) => lowerName.endsWith(extension));
+}
+
+async function fileContentHash(file: File) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function formatBytes(bytes: number) {
@@ -240,6 +255,8 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
   const [batchOverrideDayId, setBatchOverrideDayId] = useState(BATCH_OVERRIDE_IDLE);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
   const [step, setStep] = useState<Step>("select");
+  const [uploadProgress, setUploadProgress] = useState<PhotoUploadProgress | null>(null);
+  const [showAllQueueItems, setShowAllQueueItems] = useState(false);
   // When placing, the overlay collapses to a slim bar so the live map underneath
   // is tappable; the existing pendingCoordinate feedback loop assigns the pin.
   // "bulk" walks through every unplaced photo in turn; "single" stays on one
@@ -269,6 +286,11 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     unassigned: items.filter((item) => item.status !== "invalid" && item.dayId === null).length,
     review: items.filter((item) => item.status !== "invalid" && (item.status === "needs-location" || item.dayId === null)).length,
   }), [items]);
+  const isLargeBatch = counts.total >= LARGE_BATCH_THRESHOLD;
+  const displayedItems = isLargeBatch && !showAllQueueItems ? visibleItems.slice(0, QUEUE_PREVIEW_LIMIT) : visibleItems;
+  const hiddenVisibleCount = Math.max(0, visibleItems.length - displayedItems.length);
+  const preparedCount = counts.total - counts.reading;
+  const prepareProgressPercent = counts.total > 0 ? Math.round((preparedCount / counts.total) * 100) : 0;
 
   const placementItems = useMemo(() => items.filter((item) => item.status === "needs-location"), [items]);
   const placedCount = counts.ready;
@@ -369,16 +391,19 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     const selected = Array.from(files ?? []);
     if (selected.length === 0) return;
     setBatchOverrideDayId(BATCH_OVERRIDE_IDLE);
+    if (selected.length >= LARGE_BATCH_THRESHOLD) setShowAllQueueItems(false);
+    const existingHashes = new Set(items.map((item) => item.contentHash).filter((hash): hash is string => Boolean(hash)));
+    const selectedHashes = new Set<string>();
 
     const nextItems: QueueItem[] = selected.map((file) => {
       const id = crypto.randomUUID();
       if (!isSupportedImage(file)) {
-        return { id, file, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: "Unsupported file type." };
+        return { id, file, contentHash: null, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: "Unsupported file type." };
       }
       if (file.size > MAX_FILE_SIZE) {
-        return { id, file, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: `Over ${formatBytes(MAX_FILE_SIZE)}. Export a smaller copy first.` };
+        return { id, file, contentHash: null, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: `Over ${formatBytes(MAX_FILE_SIZE)}. Export a smaller copy first.` };
       }
-      return { id, file, caption: "", dayId: defaultDayId, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "reading", message: "Reading photo metadata..." };
+      return { id, file, contentHash: null, caption: "", dayId: defaultDayId, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "reading", message: "Preparing photo..." };
     });
 
     setItems((current) => [...current, ...nextItems]);
@@ -387,13 +412,35 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     setStep((current) => (current === "select" ? "review" : current));
 
     const readable = nextItems.filter((item) => item.status === "reading");
+    const fingerprinted: QueueItem[] = [];
+    await mapWithConcurrency(readable, FINGERPRINT_CONCURRENCY, async (item) => {
+      try {
+        const contentHash = await fileContentHash(item.file);
+        if (existingHashes.has(contentHash) || selectedHashes.has(contentHash)) {
+          setItems((current) => current.map((currentItem) => currentItem.id === item.id
+            ? { ...currentItem, contentHash, status: "invalid", message: "Duplicate photo already in this upload queue." }
+            : currentItem));
+          return;
+        }
+        selectedHashes.add(contentHash);
+        fingerprinted.push({ ...item, contentHash, message: "Reading photo metadata..." });
+        setItems((current) => current.map((currentItem) => currentItem.id === item.id
+          ? { ...currentItem, contentHash, message: "Reading photo metadata..." }
+          : currentItem));
+      } catch {
+        setItems((current) => current.map((currentItem) => currentItem.id === item.id
+          ? { ...currentItem, status: "invalid", message: "We could not fingerprint this photo." }
+          : currentItem));
+      }
+    });
+
     const extracted = new Map<string, ExtractedExif>();
-    await mapWithConcurrency(readable, EXIF_CONCURRENCY, async (item) => {
+    await mapWithConcurrency(fingerprinted, EXIF_CONCURRENCY, async (item) => {
       const exif = await extractPhotoExif(item.file);
       extracted.set(item.id, exif);
     });
 
-    const analyzed = routePlaceNoGpsItems(readable.map((item, order) => {
+    const analyzed = routePlaceNoGpsItems(fingerprinted.map((item, order) => {
       const exif = extracted.get(item.id);
       if (!exif) {
         return { id: item.id, order, dayId: item.dayId, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid" as const, message: "We could not read this photo." };
@@ -437,16 +484,19 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
   }
 
   async function submit() {
-    const readyItems = items.filter((item) => item.status === "ready" && item.coordinate);
+    const readyItems = items.filter((item) => item.status === "ready" && item.coordinate && item.contentHash);
     if (readyItems.length === 0) return;
+    setUploadProgress({ completed: 0, total: readyItems.length });
     const result = await onSave(readyItems.map((item) => ({
       clientId: item.id,
       file: item.file,
+      contentHash: item.contentHash!,
       caption: item.caption,
       dayId: item.dayId,
       coordinate: item.coordinate!,
       exif: item.exif,
-    })));
+    })), setUploadProgress);
+    setUploadProgress(null);
     if (!result || result.savedClientIds.length === 0 || result.failedClientIds.length === 0) return;
     const savedIds = new Set(result.savedClientIds);
     setItems((current) => current.filter((item) => !savedIds.has(item.id)));
@@ -505,6 +555,8 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
 
   function clearQueue() {
     setItems([]);
+    setUploadProgress(null);
+    setShowAllQueueItems(false);
     setActiveItemId(null);
     setQueueFilter("all");
     setBatchOverrideDayId(BATCH_OVERRIDE_IDLE);
@@ -612,6 +664,25 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
                   <div className="rounded-md bg-rose-50 px-2 py-2 text-rose-800"><span className="block text-sm">{counts.invalid}</span>Issues</div>
                 </div>
 
+                {isLargeBatch ? (
+                  <div className="rounded-lg border border-stone-200 bg-white px-3 py-3 text-xs leading-5 text-stone-700">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-bold text-stone-950">Album import</span>
+                      <span className="font-semibold text-stone-500">{preparedCount} of {counts.total} prepared</span>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100">
+                      <div className="h-full rounded-full bg-teal-700 transition-all" style={{ width: `${prepareProgressPercent}%` }} />
+                    </div>
+                    <div className="mt-2 text-stone-500">
+                      {counts.reading > 0
+                        ? "Keep this panel open while photos are prepared on your device."
+                        : counts.needsLocation > 0
+                          ? "Most of the album is ready. Place the photos without GPS, then upload."
+                          : "The album is ready to upload."}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="rounded-lg border border-teal-700/15 bg-teal-50 px-3 py-2 text-xs leading-5 text-teal-950">
                   <div className="font-bold">{counts.matchedByDate} date matched · {counts.matchedByRoute} GPS near route · {counts.placedOnRoute} route placed · {counts.unassigned} unassigned</div>
                   {dayBuckets.length > 0 ? <div className="mt-1 text-teal-900/80">{dayBuckets.map((bucket) => `${bucket.count} ${dayLabel(days, bucket.dayId)}`).join(" · ")}</div> : null}
@@ -697,7 +768,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
                     <div className="flex min-h-20 items-center justify-center rounded-md bg-stone-50 px-3 text-center text-xs leading-5 text-stone-500">No photos in this view.</div>
                   ) : (
                     <div className="space-y-1">
-                      {visibleItems.map((item) => {
+                      {displayedItems.map((item) => {
                         const index = items.findIndex((candidate) => candidate.id === item.id);
                         return (
                           <button type="button" key={item.id} onClick={() => setActiveItemId(item.id)} className={cn("grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left transition", activeItemId === item.id ? "bg-teal-50 ring-1 ring-teal-700/30" : "hover:bg-stone-100")}>
@@ -711,6 +782,15 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
                           </button>
                         );
                       })}
+                      {hiddenVisibleCount > 0 ? (
+                        <button type="button" onClick={() => setShowAllQueueItems(true)} className="mt-2 flex w-full items-center justify-center rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-100">
+                          Show {hiddenVisibleCount} more
+                        </button>
+                      ) : isLargeBatch && showAllQueueItems && visibleItems.length > QUEUE_PREVIEW_LIMIT ? (
+                        <button type="button" onClick={() => setShowAllQueueItems(false)} className="mt-2 flex w-full items-center justify-center rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-100">
+                          Show fewer
+                        </button>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -765,7 +845,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
                     <button type="button" onClick={() => setStep("place")} className="flex items-center gap-1.5 rounded-lg border border-teal-700/30 bg-teal-50 px-3 py-3 text-sm font-bold text-teal-900 transition hover:bg-teal-100"><MapPin className="h-4 w-4" /> Place {counts.needsLocation}</button>
                   ) : null}
                   <button type="submit" disabled={counts.ready === 0 || counts.reading > 0 || isSaving} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
-                    {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</> : counts.reading > 0 ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading…</> : <><Upload className="h-4 w-4" /> Upload {counts.ready > 1 ? `${counts.ready} photos` : "photo"}</>}
+                    {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> {uploadProgress ? `Uploading ${uploadProgress.completed} of ${uploadProgress.total}` : "Uploading..."}</> : counts.reading > 0 ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading {counts.reading}</> : <><Upload className="h-4 w-4" /> Upload {counts.ready > 1 ? `${counts.ready} photos` : "photo"}</>}
                   </button>
                 </>
               ) : null}
@@ -773,7 +853,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
                 <>
                   <button type="button" onClick={goToReview} className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm font-bold text-stone-600 transition hover:bg-stone-50"><ArrowLeft className="h-4 w-4" /> Review</button>
                   <button type="submit" disabled={counts.ready === 0 || isSaving} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
-                    {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</> : <><Upload className="h-4 w-4" /> Upload {counts.ready > 1 ? `${counts.ready} photos` : "photo"}</>}
+                    {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> {uploadProgress ? `Uploading ${uploadProgress.completed} of ${uploadProgress.total}` : "Uploading..."}</> : <><Upload className="h-4 w-4" /> Upload {counts.ready > 1 ? `${counts.ready} photos` : "photo"}</>}
                   </button>
                 </>
               ) : null}

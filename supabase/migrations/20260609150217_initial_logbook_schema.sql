@@ -45,6 +45,7 @@ create table if not exists photos (
   day_id uuid references days(id) on delete set null,
   user_id uuid references auth.users(id) on delete set null default auth.uid(),
   uploader_name text,
+  content_hash text,
   image_path text not null,
   thumbnail_path text,
   lat double precision,
@@ -134,6 +135,11 @@ create table if not exists admin_requests (
 );
 
 alter table photos add column if not exists user_id uuid references auth.users(id) on delete set null default auth.uid();
+alter table photos add column if not exists content_hash text;
+
+create unique index if not exists photos_trip_content_hash_unique
+  on photos (trip_id, content_hash)
+  where content_hash is not null;
 alter table notes add column if not exists user_id uuid references auth.users(id) on delete set null default auth.uid();
 
 create or replace function public.is_trip_member(check_trip_id uuid)
