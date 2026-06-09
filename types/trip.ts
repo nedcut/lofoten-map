@@ -88,6 +88,21 @@ export type TripMember = {
   created_at: string;
 };
 
+export type AdminRequestStatus = "pending" | "approved" | "denied";
+
+export type AdminRequest = {
+  id: string;
+  trip_id: string;
+  user_id: string;
+  display_name: string | null;
+  email: string | null;
+  note: string | null;
+  status: AdminRequestStatus;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+};
+
 export type TripData = {
   trip: Trip | null;
   days: Day[];
@@ -96,6 +111,7 @@ export type TripData = {
   notes: Note[];
   places: Place[];
   members: TripMember[];
+  adminRequests: AdminRequest[];
 };
 
 export type MapClickMode = "idle" | "add-note" | "place-photo" | "draw-route";

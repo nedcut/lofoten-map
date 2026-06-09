@@ -115,6 +115,24 @@ create table if not exists trip_members (
   primary key (trip_id, user_id)
 );
 
+-- Admin-upgrade requests. Any trip member can ask to become an admin; existing
+-- admins approve or deny. One active request per user per trip (re-requesting
+-- resets the same row back to 'pending'). Inserts/updates flow through the
+-- security-definer RPCs below, never direct client writes.
+create table if not exists admin_requests (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid references trips(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete cascade default auth.uid(),
+  display_name text,
+  email text,
+  note text,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'denied')),
+  created_at timestamptz default now(),
+  resolved_at timestamptz,
+  resolved_by uuid references auth.users(id) on delete set null,
+  unique (trip_id, user_id)
+);
+
 alter table photos add column if not exists user_id uuid references auth.users(id) on delete set null default auth.uid();
 alter table notes add column if not exists user_id uuid references auth.users(id) on delete set null default auth.uid();
 
@@ -233,8 +251,189 @@ $$;
 
 grant execute on function public.grant_trip_member_by_email(text, text, text) to authenticated;
 
+-- Self-service join: a signed-in user adds themselves to the trip as a plain
+-- member if they are not already on it. Idempotent, so the client can call it on
+-- every sign-in without worrying about duplicates.
+create or replace function public.ensure_trip_membership(target_trip_slug text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  found_trip_id uuid;
+  found_display_name text;
+begin
+  if auth.uid() is null then
+    raise exception 'Must be signed in' using errcode = '42501';
+  end if;
+
+  select id into found_trip_id from public.trips where slug = target_trip_slug;
+  if found_trip_id is null then
+    raise exception 'Trip not found';
+  end if;
+
+  select coalesce(raw_user_meta_data ->> 'full_name', email)
+  into found_display_name
+  from auth.users where id = auth.uid();
+
+  insert into public.trip_members (trip_id, user_id, role, display_name)
+  values (found_trip_id, auth.uid(), 'member', found_display_name)
+  on conflict (trip_id, user_id) do nothing;
+end;
+$$;
+
+grant execute on function public.ensure_trip_membership(text) to authenticated;
+
+-- A trip member asks to be upgraded to admin. Captures their name/email from
+-- auth.users (which the client cannot read) and upserts a pending request.
+create or replace function public.request_trip_admin(target_trip_slug text, request_note text default null)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  found_trip_id uuid;
+  found_display_name text;
+  found_email text;
+begin
+  if auth.uid() is null then
+    raise exception 'Must be signed in' using errcode = '42501';
+  end if;
+
+  select id into found_trip_id from public.trips where slug = target_trip_slug;
+  if found_trip_id is null then
+    raise exception 'Trip not found';
+  end if;
+
+  if not public.is_trip_member(found_trip_id) then
+    raise exception 'Join the trip before requesting admin' using errcode = '42501';
+  end if;
+
+  if public.is_trip_admin(found_trip_id) then
+    raise exception 'You are already an admin';
+  end if;
+
+  select coalesce(raw_user_meta_data ->> 'full_name', email), email
+  into found_display_name, found_email
+  from auth.users where id = auth.uid();
+
+  insert into public.admin_requests (trip_id, user_id, display_name, email, note, status)
+  values (found_trip_id, auth.uid(), found_display_name, found_email, request_note, 'pending')
+  on conflict (trip_id, user_id) do update
+    set status = 'pending',
+        note = excluded.note,
+        display_name = excluded.display_name,
+        email = excluded.email,
+        created_at = now(),
+        resolved_at = null,
+        resolved_by = null;
+end;
+$$;
+
+grant execute on function public.request_trip_admin(text, text) to authenticated;
+
+-- Promote or demote an existing member. Admin-only. Guards against demoting the
+-- last remaining admin, which would leave the trip with no one able to manage it.
+create or replace function public.set_member_role(target_trip_slug text, target_user_id uuid, new_role text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  found_trip_id uuid;
+  current_role text;
+  remaining_admin_count int;
+begin
+  if new_role not in ('admin', 'member') then
+    raise exception 'Role must be admin or member';
+  end if;
+
+  select id into found_trip_id from public.trips where slug = target_trip_slug;
+  if found_trip_id is null then
+    raise exception 'Trip not found';
+  end if;
+
+  if not public.is_trip_admin(found_trip_id) then
+    raise exception 'Only trip admins can change roles' using errcode = '42501';
+  end if;
+
+  select role into current_role
+  from public.trip_members
+  where trip_id = found_trip_id and user_id = target_user_id
+  for update;
+
+  if current_role is null then
+    raise exception 'Member not found';
+  end if;
+
+  if current_role = 'admin' and new_role = 'member' then
+    perform 1
+    from public.trip_members
+    where trip_id = found_trip_id and role = 'admin'
+    for update;
+
+    select count(*) into remaining_admin_count
+    from public.trip_members
+    where trip_id = found_trip_id and role = 'admin';
+
+    if remaining_admin_count <= 1 then
+      raise exception 'Cannot demote the last trip admin' using errcode = '23514';
+    end if;
+  end if;
+
+  update public.trip_members
+    set role = new_role
+    where trip_id = found_trip_id and user_id = target_user_id;
+end;
+$$;
+
+grant execute on function public.set_member_role(text, uuid, text) to authenticated;
+
+-- Approve or deny a pending admin request. Admin-only. Approving promotes the
+-- requester to admin; either way the request is stamped resolved.
+create or replace function public.resolve_admin_request(request_id uuid, approve boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  req public.admin_requests;
+begin
+  select * into req from public.admin_requests where id = request_id;
+  if req.id is null then
+    raise exception 'Request not found';
+  end if;
+
+  if not public.is_trip_admin(req.trip_id) then
+    raise exception 'Only trip admins can resolve requests' using errcode = '42501';
+  end if;
+
+  if req.status <> 'pending' then
+    raise exception 'Request has already been resolved';
+  end if;
+
+  if approve then
+    insert into public.trip_members (trip_id, user_id, role, display_name)
+    values (req.trip_id, req.user_id, 'admin', req.display_name)
+    on conflict (trip_id, user_id) do update set role = 'admin';
+  end if;
+
+  update public.admin_requests
+    set status = case when approve then 'approved' else 'denied' end,
+        resolved_at = now(),
+        resolved_by = auth.uid()
+    where id = request_id;
+end;
+$$;
+
+grant execute on function public.resolve_admin_request(uuid, boolean) to authenticated;
+
 grant usage on schema public to anon, authenticated;
-grant all on table trips, days, route_segments, photos, notes, places, trip_members to authenticated;
+grant all on table trips, days, route_segments, photos, notes, places, trip_members, admin_requests to authenticated;
 -- Public reads: anon needs the table-level SELECT privilege; RLS ("public read"
 -- policies above) still governs which rows it sees.
 grant select on table trips, days, route_segments, photos, notes, places, trip_members to anon;
@@ -247,6 +446,7 @@ alter table photos enable row level security;
 alter table notes enable row level security;
 alter table places enable row level security;
 alter table trip_members enable row level security;
+alter table admin_requests enable row level security;
 
 do $$
 declare
@@ -311,6 +511,13 @@ drop policy if exists "public read trip memberships" on trip_members;
 drop policy if exists "admins write trip memberships" on trip_members;
 create policy "public read trip memberships" on trip_members for select to anon, authenticated using (true);
 create policy "admins write trip memberships" on trip_members for all to authenticated using (public.is_trip_admin(trip_id)) with check (public.is_trip_admin(trip_id));
+
+-- Admin requests are private: you can see your own request, and admins see every
+-- request for trips they manage. All writes go through the security-definer RPCs
+-- above, so there are deliberately no insert/update policies for authenticated.
+drop policy if exists "requesters and admins read admin requests" on admin_requests;
+create policy "requesters and admins read admin requests" on admin_requests for select to authenticated
+  using (user_id = auth.uid() or public.is_trip_admin(trip_id));
 
 -- Public bucket: photos render via plain public URLs for everyone, no signing.
 insert into storage.buckets (id, name, public)

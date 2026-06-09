@@ -19,7 +19,7 @@ import { UploadPhotoPanel, type PhotoUploadItemInput, type PhotoUploadSaveResult
 import { preparePhotoFiles } from "@/lib/photo-processing";
 import { PHOTO_BUCKET, getSupabaseBrowserClient, resolvePhotoUrls } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import type { Day, LngLat, MapClickMode, Note, Photo, Place, RouteMode, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
+import type { AdminRequest, Day, LngLat, MapClickMode, Note, Photo, Place, RouteMode, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
 
@@ -34,8 +34,8 @@ const demoTrip: Trip = { id: demoTripId, title: "Lofoten 2026", slug: "lofoten-2
 const demoRoutes: RouteSegment[] = [{ id: "route-demo", trip_id: demoTripId, day_id: demoDays[1].id, name: "Reine to Kjerkfjorden scouting route", source: "seed", mode: "hike", geometry_geojson: { type: "LineString", coordinates: [[13.089, 67.932], [13.068, 67.941], [13.045, 67.954], [13.019, 67.967]] }, distance_meters: 6200, elevation_gain_meters: 420, created_at: demoCreatedAt }];
 const demoNotes: Note[] = [{ id: "note-demo-1", trip_id: demoTripId, day_id: demoDays[0].id, user_id: null, author_name: "Maja", lat: 67.9328, lng: 13.0888, body: "Sunset light on Reinebringen looked unreal from the harbor.", note_type: "note", created_at: demoCreatedAt }];
 const demoPlaces: Place[] = [{ id: "place-demo-1", trip_id: demoTripId, day_id: demoDays[2].id, name: "Coffee and cinnamon buns", lat: 67.9007, lng: 13.0461, place_type: "food", description: "Good meetup stop before the ferry.", created_at: demoCreatedAt }];
-const demoData: TripData = { trip: demoTrip, days: demoDays, routeSegments: demoRoutes, photos: [], notes: demoNotes, places: demoPlaces, members: [] };
-const emptyData: TripData = { trip: null, days: [], routeSegments: [], photos: [], notes: [], places: [], members: [] };
+const demoData: TripData = { trip: demoTrip, days: demoDays, routeSegments: demoRoutes, photos: [], notes: demoNotes, places: demoPlaces, members: [], adminRequests: [] };
+const emptyData: TripData = { trip: null, days: [], routeSegments: [], photos: [], notes: [], places: [], members: [], adminRequests: [] };
 const UPLOAD_CONCURRENCY = 4;
 
 async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
@@ -129,30 +129,37 @@ export default function Home() {
       if (tripError || !trip) {
         setError(tripError
           ? `We could not load the trip right now. Try refreshing, or ask an admin to check access. ${tripError.message}`
-          : "You are signed in, but this account is not on the trip yet. Ask an admin to add you, then refresh.");
+          : "The trip is not set up yet. Ask an admin to finish creating it, then refresh.");
         return;
       }
-      const [days, routes, photos, notes, places, members] = await Promise.all([
+      // Signed-in visitors auto-join as members before we read the roster, so the
+      // contribute controls light up on first sign-in without an admin invite.
+      if (user) await supabase.rpc("ensure_trip_membership", { target_trip_slug: tripSlug });
+      const adminRequestsQuery = user
+        ? supabase.from("admin_requests").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false })
+        : Promise.resolve({ data: [], error: null });
+      const [days, routes, photos, notes, places, members, adminRequests] = await Promise.all([
         supabase.from("days").select("*").eq("trip_id", trip.id).order("day_number"),
         supabase.from("route_segments").select("*").eq("trip_id", trip.id).order("created_at"),
         supabase.from("photos").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
         supabase.from("notes").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
         supabase.from("places").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
         supabase.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", trip.id).order("created_at"),
+        adminRequestsQuery,
       ]);
-      const failure = [days.error, routes.error, photos.error, notes.error, places.error, members.error].find(Boolean);
+      const failure = [days.error, routes.error, photos.error, notes.error, places.error, members.error, adminRequests.error].find(Boolean);
       if (failure) {
         setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
       } else {
         const resolvedPhotos = resolvePhotoUrls(supabase, (photos.data ?? []) as Photo[]);
-        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: resolvedPhotos, notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[] });
+        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: resolvedPhotos, notes: notes.data ?? [], places: places.data ?? [], members: (members.data ?? []) as TripMember[], adminRequests: (adminRequests.data ?? []) as AdminRequest[] });
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? `We could not sync the trip right now. Try refreshing. ${loadError.message}` : "We could not sync the trip right now. Try refreshing.");
     } finally {
       setLoading(false);
     }
-  }, [supabase, tripSlug]);
+  }, [supabase, tripSlug, user]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -170,6 +177,8 @@ export default function Home() {
       .on("postgres_changes", { event: "*", schema: "public", table: "notes", filter: `trip_id=eq.${data.trip.id}` }, loadData)
       .on("postgres_changes", { event: "*", schema: "public", table: "route_segments", filter: `trip_id=eq.${data.trip.id}` }, loadData)
       .on("postgres_changes", { event: "*", schema: "public", table: "places", filter: `trip_id=eq.${data.trip.id}` }, loadData)
+      .on("postgres_changes", { event: "*", schema: "public", table: "trip_members", filter: `trip_id=eq.${data.trip.id}` }, loadData)
+      .on("postgres_changes", { event: "*", schema: "public", table: "admin_requests", filter: `trip_id=eq.${data.trip.id}` }, loadData)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [data.trip, loadData, supabase]);
@@ -238,6 +247,52 @@ export default function Home() {
     }
   }
 
+  // Shared wrapper for the member-management RPCs: clears the panel message, runs
+  // the call, surfaces success/failure, and reloads on success.
+  async function runMemberOperation(operation: () => PromiseLike<{ error: { message: string } | null }>, successMessage: string) {
+    if (!supabase || !data.trip) return;
+    setMemberSaving(true);
+    setMemberMessage(null);
+    setMemberMessageTone("info");
+    try {
+      const { error: opError } = await operation();
+      if (opError) {
+        setMemberMessageTone("error");
+        setMemberMessage(opError.message);
+      } else {
+        setMemberMessageTone("info");
+        setMemberMessage(successMessage);
+        await loadData();
+      }
+    } catch (opError) {
+      setMemberMessageTone("error");
+      setMemberMessage(opError instanceof Error ? opError.message : "Could not update members.");
+    } finally {
+      setMemberSaving(false);
+    }
+  }
+
+  async function requestAdmin() {
+    await runMemberOperation(
+      () => supabase!.rpc("request_trip_admin", { target_trip_slug: data.trip!.slug }),
+      "Admin request sent. An existing admin will review it.",
+    );
+  }
+
+  async function setMemberRole(targetUserId: string, role: "admin" | "member") {
+    await runMemberOperation(
+      () => supabase!.rpc("set_member_role", { target_trip_slug: data.trip!.slug, target_user_id: targetUserId, new_role: role }),
+      role === "admin" ? "Member promoted to admin." : "Member set back to member.",
+    );
+  }
+
+  async function resolveAdminRequest(requestId: string, approve: boolean) {
+    await runMemberOperation(
+      () => supabase!.rpc("resolve_admin_request", { request_id: requestId, approve }),
+      approve ? "Request approved." : "Request denied.",
+    );
+  }
+
   const filtered = useMemo(() => {
     const matches = (dayId: string | null) => !selectedDayId || dayId === selectedDayId;
     return {
@@ -263,8 +318,24 @@ export default function Home() {
     if (kind === "place") { const item = data.places.find((place) => place.id === id); return item ? { kind, item } : null; }
     const item = data.routeSegments.find((route) => route.id === id); return item ? { kind, item } : null;
   }, [editTargetRef, data]);
+  const pendingAdminRequests = useMemo(() => data.adminRequests.filter((request) => request.status === "pending"), [data.adminRequests]);
+  const currentUserRequest = useMemo(() => data.adminRequests.find((request) => request.user_id === user?.id) ?? null, [data.adminRequests, user?.id]);
   const memberAdmin = currentMember?.role === "admin"
-    ? { members: data.members, message: memberMessage, messageTone: memberMessageTone, isSaving: memberSaving, onGrantMember: grantMember }
+    ? {
+      members: data.members,
+      requests: pendingAdminRequests,
+      currentUserId,
+      message: memberMessage,
+      messageTone: memberMessageTone,
+      isSaving: memberSaving,
+      onGrantMember: grantMember,
+      onSetMemberRole: setMemberRole,
+      onResolveRequest: resolveAdminRequest,
+    }
+    : null;
+  // Shown to signed-in members who are not admins: a way to ask for an upgrade.
+  const adminRequest = supabase && currentMember && currentMember.role !== "admin"
+    ? { status: currentUserRequest?.status ?? null, isSaving: memberSaving, message: memberMessage, messageTone: memberMessageTone, onRequestAdmin: requestAdmin }
     : null;
   const routeDraftDistance = useMemo(() => routeDistanceMeters(routeDraftPoints), [routeDraftPoints]);
   const tripTitle = data.trip?.title ?? "Trip Logbook";
@@ -753,14 +824,14 @@ export default function Home() {
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} /></div>
+        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={setMap} onCoordinatePick={handleCoordinatePick}>
           <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} />
           <RouteDraftLayer map={map} points={routeDraftPoints} />
           <MapLegend visibility={layerVisibility} />
         </MapView>
       </div>
-      {!panel ? <MobileSheet trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} /> : null}
+      {!panel ? <MobileSheet trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}

@@ -3,7 +3,7 @@
 import { ChevronUp } from "lucide-react";
 import { useState } from "react";
 import { AdminDataPanel } from "@/components/AdminDataPanel";
-import { DayList, LayersPanel, MemberAdminPanel, QuickActions, SidebarHeader, type SidebarProps } from "@/components/DaySidebar";
+import { AdminRequestPanel, DayList, LayersPanel, MemberAdminPanel, QuickActions, SidebarHeader, type SidebarProps } from "@/components/DaySidebar";
 import { cn } from "@/lib/utils";
 import type { Day } from "@/types/trip";
 
@@ -89,6 +89,7 @@ export function MobileSheet(props: MobileSheetProps) {
                   <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} />
                   {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
                   {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}
+                  {props.adminRequest ? <AdminRequestPanel {...props.adminRequest} /> : null}
                 </div>
               ) : null}
             </div>
