@@ -5,6 +5,9 @@ what changed, why it mattered, and any verification worth remembering.
 
 ## 2026-06-09
 
+- Initialized Supabase CLI project config, added a baseline migration copied
+  from the current idempotent schema, and documented linked-project dry-run/push
+  commands.
 - Made a missing `admin_requests` table/schema-cache error non-fatal during
   deployed Supabase migrations, with admin-request controls hidden until the
   schema is caught up.

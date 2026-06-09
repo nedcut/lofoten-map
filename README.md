@@ -112,6 +112,33 @@ schema cache, your database is behind the app code. Re-run
 Supabase has reloaded its API schema cache. The trip can still load while that
 admin-request feature is unavailable.
 
+### Supabase CLI workflow
+
+This repo is initialized for the Supabase CLI. The current schema is captured as
+an initial idempotent migration in `supabase/migrations/`, while
+`supabase/schema.sql` remains a convenient SQL Editor recovery file.
+
+Install/authenticate/link once:
+
+```bash
+brew install supabase/tap/supabase  # already installed on this machine
+supabase login
+supabase link --project-ref YOUR_PROJECT_REF
+```
+
+Then use:
+
+```bash
+npm run supabase:migrations  # compare local/remote migration history
+npm run supabase:db:dry-run  # preview what would be pushed
+npm run supabase:db:push     # apply pending migrations to the linked project
+```
+
+For this existing remote database, run the dry-run first. If Supabase reports
+that the baseline migration history is out of sync, repair the migration history
+or run the idempotent schema once from the SQL Editor before relying on
+`db push` for future changes.
+
 ## Deploying to Vercel
 
 The app deploys as a standard Next.js project — Vercel runs `next build`
@@ -180,6 +207,8 @@ npm run test:watch     # Vitest in watch mode
 npm run test:coverage  # unit suite with a coverage report
 npm run build          # production build
 npm run ci             # lint + typecheck + test (mirrors CI)
+npm run supabase:db:dry-run  # preview pending linked-project migrations
+npm run supabase:db:push     # apply pending linked-project migrations
 ```
 
 Unit tests live next to the code they cover (`lib/*.test.ts`) and run under

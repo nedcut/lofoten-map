@@ -11,7 +11,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "ci": "npm run lint && npm run typecheck && npm run test"
+    "ci": "npm run lint && npm run typecheck && npm run test",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:migrations": "supabase migration list --linked",
+    "supabase:db:dry-run": "supabase db push --linked --dry-run",
+    "supabase:db:push": "supabase db push --linked"
   },
   "dependencies": {
     "@supabase/supabase-js": "latest",
