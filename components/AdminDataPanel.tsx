@@ -163,8 +163,8 @@ function photoEditorKey(photo: Photo) {
     keyPart(photo.lat),
     keyPart(photo.lng),
     keyPart(photo.taken_at),
-    // Key off the stable storage paths, not the signed URLs, which are
-    // regenerated on every load and would otherwise remount the edit form.
+    // Key off stable storage paths, not derived public URLs, so URL resolution
+    // cannot remount the edit form.
     keyPart(photo.thumbnail_path),
     photo.image_path,
   ].join("|");

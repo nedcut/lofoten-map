@@ -151,6 +151,7 @@ lib/            exif (EXIF parsing), photo-processing (downscale + thumbnails),
                 — with co-located *.test.ts suites
 supabase/       schema.sql, seed.sql, grant-member.sql
 types/          shared trip data types
+docs/           work log and todo/roadmap notes
 ```
 
 ## Development
@@ -185,16 +186,22 @@ and a demo-mode `build` on every push and pull request to `main`
   - manual map placement, or automatic placement along the day's route, when no
     geotag is present
   - retryable failures and storage cleanup when a database insert fails
-- Admin tools: draw/import route segments, edit trip/day/route/place/photo data,
-  and manage membership (admin-only grant RPC)
+- Admin tools: draw route segments, edit trip/day/route/place/photo data,
+  manage membership, and review admin-access requests
 - Supabase Realtime for photos, notes, places, and route segments
-- Row-level security: member-scoped reads, owner/admin writes
-- Private photo storage served via short-lived (8h) signed URLs
+- Row-level security: public reads, member contributions, owner/admin writes
+- Public photo storage paths resolved to stable public URLs at read time
 - Demo fallback data when Supabase is not configured
 
 ## Roadmap
 
-- Expand member management with pending invites or email notifications
+- See [`docs/TODO.md`](docs/TODO.md) for the working todo list.
+- See [`docs/WORKLOG.md`](docs/WORKLOG.md) for the ongoing project log.
+
+Current larger next moves:
+
+- Add pending invites or email notifications for friends who have not signed in
+  yet
 - Extend test coverage to the EXIF File-reading and canvas/thumbnail paths
 - Add route import from GPX/KML
 - Add offline-friendly drafts for notes and uploads

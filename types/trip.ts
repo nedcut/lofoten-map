@@ -43,8 +43,8 @@ export type Photo = {
   uploader_name: string | null;
   image_path: string;
   thumbnail_path: string | null;
-  // Signed URLs generated at read time from the paths above. Null until signed
-  // (or when signing fails); short-lived, so they are never persisted.
+  // Public URLs generated at read time from the paths above. They are never
+  // persisted, and remain null if a path cannot be resolved.
   image_url: string | null;
   thumbnail_url: string | null;
   lat: number | null;

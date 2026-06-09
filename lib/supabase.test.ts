@@ -26,23 +26,23 @@ function photo(overrides: Partial<Photo>): Photo {
 describe("applyPublicPhotoUrls", () => {
   it("resolves image and thumbnail URLs from the lookup", () => {
     const map = new Map([
-      ["lofoten-2026/a.jpg", "https://signed/a?token=1"],
-      ["lofoten-2026/thumbs/a.jpg", "https://signed/a-thumb?token=2"],
+      ["lofoten-2026/a.jpg", "https://public.example/a.jpg"],
+      ["lofoten-2026/thumbs/a.jpg", "https://public.example/a-thumb.jpg"],
     ]);
     const [result] = applyPublicPhotoUrls([photo({})], map);
-    expect(result.image_url).toBe("https://signed/a?token=1");
-    expect(result.thumbnail_url).toBe("https://signed/a-thumb?token=2");
+    expect(result.image_url).toBe("https://public.example/a.jpg");
+    expect(result.thumbnail_url).toBe("https://public.example/a-thumb.jpg");
   });
 
   it("leaves a URL null when its path is absent from the lookup", () => {
-    const map = new Map([["lofoten-2026/a.jpg", "https://signed/a?token=1"]]);
+    const map = new Map([["lofoten-2026/a.jpg", "https://public.example/a.jpg"]]);
     const [result] = applyPublicPhotoUrls([photo({})], map);
-    expect(result.image_url).toBe("https://signed/a?token=1");
-    expect(result.thumbnail_url).toBeNull(); // thumb path not signed
+    expect(result.image_url).toBe("https://public.example/a.jpg");
+    expect(result.thumbnail_url).toBeNull();
   });
 
   it("keeps thumbnail_url null when the photo has no thumbnail_path", () => {
-    const map = new Map([["lofoten-2026/a.jpg", "https://signed/a?token=1"]]);
+    const map = new Map([["lofoten-2026/a.jpg", "https://public.example/a.jpg"]]);
     const [result] = applyPublicPhotoUrls([photo({ thumbnail_path: null })], map);
     expect(result.thumbnail_url).toBeNull();
   });
@@ -56,7 +56,7 @@ describe("applyPublicPhotoUrls", () => {
   it("preserves all non-URL fields and does not mutate the input", () => {
     const input = photo({ caption: "Reine at dawn", lat: 67.9, lng: 13.1 });
     const snapshot = { ...input };
-    const [result] = applyPublicPhotoUrls([input], new Map([["lofoten-2026/a.jpg", "https://signed/a"]]));
+    const [result] = applyPublicPhotoUrls([input], new Map([["lofoten-2026/a.jpg", "https://public.example/a.jpg"]]));
     expect(result.caption).toBe("Reine at dawn");
     expect(result.lat).toBe(67.9);
     expect(result.image_path).toBe("lofoten-2026/a.jpg");
