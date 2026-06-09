@@ -6,9 +6,10 @@ import { length } from "@turf/turf";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { LineString } from "geojson";
 import type { User } from "@supabase/supabase-js";
-import { AlertCircle, Loader2, LogIn, Mail, ShieldCheck, Sparkles, X } from "lucide-react";
+import { AlertCircle, Loader2, LogIn, Mail, Play, ShieldCheck, Sparkles, X } from "lucide-react";
 import { AddNotePanel } from "@/components/AddNotePanel";
 import { DaySidebar } from "@/components/DaySidebar";
+import { JourneyPlayback, type JourneyFilter } from "@/components/JourneyPlayback";
 import { ManualRoutePanel } from "@/components/ManualRoutePanel";
 import { MapLegend } from "@/components/MapLegend";
 import { MobileSheet } from "@/components/MobileSheet";
@@ -17,6 +18,7 @@ import { TripLayers, type MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
 import { UploadPhotoPanel, type PhotoUploadItemInput, type PhotoUploadProgress, type PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
 import { deriveTripAccess } from "@/lib/access";
+import { buildJourneyItems } from "@/lib/journey";
 import { preparePhotoFiles } from "@/lib/photo-processing";
 import { PHOTO_BUCKET, getSupabaseBrowserClient, resolvePhotoUrls } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -99,6 +101,10 @@ export default function Home() {
   const [mapUnavailable, setMapUnavailable] = useState(false);
   const [panel, setPanel] = useState<"photo" | "note" | "route" | null>(null);
   const [editTargetRef, setEditTargetRef] = useState<{ kind: MapItemKind; id: string } | null>(null);
+  const [activeJourneyId, setActiveJourneyId] = useState<string | null>(null);
+  const [journeyParamChecked, setJourneyParamChecked] = useState(false);
+  const [journeyFilter, setJourneyFilter] = useState<JourneyFilter>("all");
+  const [journeyUploaderFilter, setJourneyUploaderFilter] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(Boolean(supabase));
   const [error, setError] = useState<string | null>(null);
@@ -320,6 +326,18 @@ export default function Home() {
       places: data.places.filter((item) => matches(item.day_id)),
     };
   }, [data, selectedDayId]);
+  const allJourneyItems = useMemo(() => buildJourneyItems(data), [data]);
+  const journeyItems = useMemo(() => allJourneyItems.filter((item) => {
+    if (journeyFilter === "photos" && item.kind !== "photo") return false;
+    if (journeyFilter === "journal" && item.kind === "photo") return false;
+    if (journeyUploaderFilter && (item.kind !== "photo" || item.primary.uploader_name !== journeyUploaderFilter)) return false;
+    return true;
+  }), [allJourneyItems, journeyFilter, journeyUploaderFilter]);
+  const activeJourneyIndex = useMemo(() => {
+    if (!activeJourneyId) return -1;
+    return journeyItems.findIndex((item) => item.id === activeJourneyId);
+  }, [activeJourneyId, journeyItems]);
+  const journeyOpen = Boolean(activeJourneyId);
 
   const access = useMemo(
     () => deriveTripAccess({ supabaseEnabled: Boolean(supabase), userId: user?.id ?? null, members: data.members, adminRequests: data.adminRequests }),
@@ -378,6 +396,70 @@ export default function Home() {
       onDeleteItem: deleteDataItem,
     }
     : null;
+
+  const replaceJourneyUrl = useCallback((itemId: string | null, mode: "push" | "replace" = "replace") => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (itemId) url.searchParams.set("journey", itemId);
+    else url.searchParams.delete("journey");
+    window.history[mode === "push" ? "pushState" : "replaceState"](null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
+  const openJourneyAt = useCallback((itemId: string, mode: "push" | "replace" = "push") => {
+    setActiveJourneyId(itemId);
+    replaceJourneyUrl(itemId, mode);
+  }, [replaceJourneyUrl]);
+
+  const closeJourney = useCallback(() => {
+    setActiveJourneyId(null);
+    replaceJourneyUrl(null);
+  }, [replaceJourneyUrl]);
+
+  const selectJourneyIndex = useCallback((index: number) => {
+    const item = journeyItems[index];
+    if (!item) return;
+    openJourneyAt(item.id, "replace");
+  }, [journeyItems, openJourneyAt]);
+
+  const nextJourneyItem = useCallback(() => {
+    if (journeyItems.length === 0) return;
+    const currentIndex = activeJourneyIndex >= 0 ? activeJourneyIndex : 0;
+    const nextIndex = (currentIndex + 1) % journeyItems.length;
+    selectJourneyIndex(nextIndex);
+  }, [activeJourneyIndex, journeyItems.length, selectJourneyIndex]);
+
+  const prevJourneyItem = useCallback(() => {
+    if (journeyItems.length === 0) return;
+    const currentIndex = activeJourneyIndex >= 0 ? activeJourneyIndex : 0;
+    const nextIndex = (currentIndex - 1 + journeyItems.length) % journeyItems.length;
+    selectJourneyIndex(nextIndex);
+  }, [activeJourneyIndex, journeyItems.length, selectJourneyIndex]);
+
+  useEffect(() => {
+    if (journeyParamChecked || loading || allJourneyItems.length === 0) return;
+    const token = new URL(window.location.href).searchParams.get("journey");
+    if (token && allJourneyItems.some((item) => item.id === token)) setActiveJourneyId(token);
+    setJourneyParamChecked(true);
+  }, [allJourneyItems, journeyParamChecked, loading]);
+
+  useEffect(() => {
+    const handler = () => {
+      const token = new URL(window.location.href).searchParams.get("journey");
+      setActiveJourneyId(token && allJourneyItems.some((item) => item.id === token) ? token : null);
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, [allJourneyItems]);
+
+  useEffect(() => {
+    if (!activeJourneyId) return;
+    if (journeyItems.some((item) => item.id === activeJourneyId)) return;
+    if (journeyItems[0]) {
+      openJourneyAt(journeyItems[0].id, "replace");
+    } else {
+      closeJourney();
+    }
+  }, [activeJourneyId, closeJourney, journeyItems, openJourneyAt]);
 
   const handleCoordinatePick = useCallback((coordinate: LngLat) => {
     if (clickMode === "draw-route") {
@@ -877,6 +959,14 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-2">
           <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{supabase ? (user ? `Signed in ${user.email ?? ""}` : "Viewing as guest") : "Local demo mode"}</div>
+          <button
+            onClick={() => journeyItems[0] && openJourneyAt(journeyItems[0].id)}
+            disabled={journeyItems.length === 0}
+            aria-label="Open Journey Mode"
+            className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[#e7a13d] px-3 py-2 text-xs font-black text-stone-950 shadow-lg transition hover:bg-[#f0ae4b] hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Play className="h-3.5 w-3.5 fill-current" /> <span className="hidden sm:inline">Journey</span>
+          </button>
           {supabase && user ? <button onClick={signOut} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign out</button> : null}
           {supabase && !authLoading && !user ? <button onClick={() => setAuthPanelOpen(true)} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign in</button> : null}
         </div>
@@ -898,6 +988,27 @@ export default function Home() {
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
       {editTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminDataSaving} onClose={() => setEditTargetRef(null)} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
+      {journeyOpen ? (
+        <JourneyPlayback
+          items={journeyItems}
+          allItems={allJourneyItems}
+          activeIndex={Math.max(0, activeJourneyIndex)}
+          days={data.days}
+          routes={data.routeSegments}
+          filter={journeyFilter}
+          uploaderFilter={journeyUploaderFilter}
+          currentUserId={currentUserId}
+          isAdmin={isAdmin}
+          isSaving={adminDataSaving}
+          onFilterChange={setJourneyFilter}
+          onUploaderFilterChange={setJourneyUploaderFilter}
+          onSelectIndex={selectJourneyIndex}
+          onNext={nextJourneyItem}
+          onPrev={prevJourneyItem}
+          onClose={closeJourney}
+          onUpdatePhoto={updatePhoto}
+        />
+      ) : null}
     </main>
   );
 }
