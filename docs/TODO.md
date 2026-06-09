@@ -19,9 +19,6 @@ passes over broad rewrites.
   corrupt-file fallback, HEIC passthrough, and thumbnail generation.
 - Verify the auto-join + admin-request flow against a real Supabase project as:
   guest, newly signed-in member, existing admin, and demoted member.
-- Link the Supabase CLI to the deployed project, dry-run the baseline migration,
-  and either repair migration history or push once so future schema fixes are
-  CLI-driven.
 - Add a thin integration smoke test around the admin-request RPCs once a test
   Supabase project or local Supabase test harness is in place.
 

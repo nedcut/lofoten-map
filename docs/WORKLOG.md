@@ -20,6 +20,9 @@ what changed, why it mattered, and any verification worth remembering.
   migration is pushed.
 - Gitignored `.playwright-mcp/` after rendered-QA debug artifacts slipped into
   a commit.
+- Verified the linked Supabase project is fully migrated: `supabase migration
+  list --linked` shows all three migrations applied, a dry-run push reports up
+  to date, and `trip_members.avatar_path` answers over the public REST API.
 - Initialized Supabase CLI project config, added a baseline migration copied
   from the current idempotent schema, and documented linked-project dry-run/push
   commands.
