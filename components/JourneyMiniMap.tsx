@@ -1,7 +1,7 @@
 "use client";
 
 import mapboxgl from "mapbox-gl";
-import { Expand, MapPin, Shrink } from "lucide-react";
+import { MapPin, Minus, Plus, RotateCcw, RotateCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FeatureCollection, LineString, Point } from "geojson";
 import { LOFOTEN_CENTER, routeFeatureCollection } from "@/lib/geo";
@@ -89,6 +89,23 @@ const HOLD_RADIUS_KM = 0.08;
 // drifted beyond this from the last framed photo (manual pan, or an
 // interrupted flight), stepping should bring the camera back.
 const HOLD_MAX_WANDER_KM = 1.5;
+
+// Collapsed-size presets the +/- buttons step through; the choice persists
+// across sessions. Index 1 is the historical default.
+const COLLAPSED_SIZES = [
+  "h-24 w-36 sm:h-36 sm:w-56",
+  "h-32 w-44 sm:h-48 sm:w-72",
+  "h-44 w-60 sm:h-60 sm:w-96",
+  "h-56 w-[19rem] sm:h-72 sm:w-[30rem]",
+];
+const SIZE_STORAGE_KEY = "lofoten-minimap-size";
+
+function storedSizeIndex() {
+  if (typeof window === "undefined") return 1;
+  const raw = window.localStorage.getItem(SIZE_STORAGE_KEY);
+  const parsed = raw === null ? NaN : Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed < COLLAPSED_SIZES.length ? parsed : 1;
+}
 // Legs longer than this (ferry hops, transfers) skip the ground-level walk and
 // use Mapbox's arcing flyTo instead — panning 20km at hiking zoom is a blur.
 const LONG_LEG_KM = 12;
@@ -128,8 +145,13 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [sizeIndex, setSizeIndex] = useState(storedSizeIndex);
   const [unavailable, setUnavailable] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const collapseTimerRef = useRef<number | null>(null);
+  // Resizing grows the box toward the cursor (it's bottom-anchored on
+  // desktop), which would fire hover-expand mid-adjustment; suppress briefly.
+  const sizeChangedAtRef = useRef(0);
   // One closure tears down whatever stage the current flight is in (animation
   // frames, the post-flight idle listener, or the fallback timer).
   const flightCleanupRef = useRef<(() => void) | null>(null);
@@ -503,6 +525,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   }, [activeItem.coord, cancelFlight, expanded, routes]);
 
   function expand() {
+    if (performance.now() - sizeChangedAtRef.current < 800) return;
     onInteraction();
     if (collapseTimerRef.current) window.clearTimeout(collapseTimerRef.current);
     setExpanded(true);
@@ -513,29 +536,82 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     collapseTimerRef.current = window.setTimeout(() => setExpanded(false), 700);
   }
 
-  return (
-    <div
-      className={cn(
-        "absolute right-3 top-16 z-40 overflow-hidden rounded-2xl border border-white/20 bg-stone-950/70 shadow-2xl transition-all duration-300 md:right-6 md:top-auto md:bottom-6",
-        expanded ? "h-[min(62dvh,32rem)] w-[min(92vw,40rem)]" : "h-32 w-44 sm:h-48 sm:w-72",
-      )}
-      onMouseEnter={expand}
-      onMouseLeave={queueCollapse}
-    >
-      <button type="button" onClick={() => (expanded ? setExpanded(false) : expand())} className="absolute right-1.5 top-1.5 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full bg-stone-950/55 text-white backdrop-blur transition hover:bg-stone-950/75 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30" aria-label={expanded ? "Collapse map" : "Expand map"}>
-        {expanded ? <Shrink className="h-3.5 w-3.5" /> : <Expand className="h-3.5 w-3.5" />}
+  function stepSize(direction: 1 | -1) {
+    sizeChangedAtRef.current = performance.now();
+    setSizeIndex((current) => {
+      const next = Math.min(COLLAPSED_SIZES.length - 1, Math.max(0, current + direction));
+      if (typeof window !== "undefined") window.localStorage.setItem(SIZE_STORAGE_KEY, String(next));
+      return next;
+    });
+  }
+
+  function rotateBy(degrees: number) {
+    const map = mapRef.current;
+    if (!map) return;
+    onInteraction();
+    cancelFlight();
+    map.easeTo({ bearing: map.getBearing() + degrees, duration: 250, essential: true });
+  }
+
+  // With the expand button gone, touch users need a way back out: any tap
+  // outside the mini-map collapses it (hover-leave covers pointer users).
+  useEffect(() => {
+    if (!expanded) return;
+    const handler = (event: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setExpanded(false);
+    };
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
+  }, [expanded]);
+
+  const controlButton = "pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded-full bg-stone-950/55 text-white backdrop-blur transition hover:bg-stone-950/75 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30 disabled:cursor-not-allowed disabled:opacity-40";
+  const sizeControls = (
+    <>
+      <button type="button" onClick={() => stepSize(-1)} disabled={sizeIndex === 0} className={controlButton} aria-label="Shrink mini-map" title="Smaller mini-map">
+        <Minus className="h-3.5 w-3.5" />
       </button>
-      <div ref={containerRef} className="h-full w-full" onPointerDown={expand} />
-      {unavailable ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#e7efe8] p-3 text-center text-xs font-bold text-stone-700">
-          <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-teal-700" /> {activeItem.coord ? unavailable : "Location unknown"}</span>
-        </div>
-      ) : null}
-      {!activeItem.coord && !unavailable ? (
-        <div className="pointer-events-none absolute inset-x-2 bottom-2 rounded-lg bg-[rgba(255,253,246,0.93)] px-2 py-1.5 text-center text-[11px] font-bold text-stone-700 shadow">
-          Location unknown
-        </div>
-      ) : null}
+      <button type="button" onClick={() => stepSize(1)} disabled={sizeIndex === COLLAPSED_SIZES.length - 1} className={controlButton} aria-label="Grow mini-map" title="Larger mini-map">
+        <Plus className="h-3.5 w-3.5" />
+      </button>
+    </>
+  );
+
+  return (
+    <div ref={rootRef} className="absolute right-3 top-16 z-40 md:right-6 md:top-auto md:bottom-6" onMouseLeave={queueCollapse}>
+      {/* Size controls float above the collapsed map (outside the hover-expand
+          zone, so reaching for them doesn't balloon the map mid-click) and
+          move inside the top-right corner once expanded. */}
+      {!expanded ? <div className="absolute -top-9 right-0 flex items-center gap-1">{sizeControls}</div> : null}
+      <div
+        className={cn(
+          "relative overflow-hidden rounded-2xl border border-white/20 bg-stone-950/70 shadow-2xl transition-all duration-300",
+          expanded ? "h-[min(62dvh,32rem)] w-[min(92vw,40rem)]" : COLLAPSED_SIZES[sizeIndex],
+        )}
+        onMouseEnter={expand}
+      >
+        {expanded ? <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1">{sizeControls}</div> : null}
+        <div ref={containerRef} className="h-full w-full" onPointerDown={expand} />
+        {!unavailable ? (
+          <div className="absolute bottom-1.5 right-1.5 z-10 flex items-center gap-1">
+            <button type="button" onClick={() => rotateBy(-15)} className={controlButton} aria-label="Rotate map left" title="Rotate left 15°">
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
+            <button type="button" onClick={() => rotateBy(15)} className={controlButton} aria-label="Rotate map right" title="Rotate right 15°">
+              <RotateCw className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : null}
+        {unavailable ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#e7efe8] p-3 text-center text-xs font-bold text-stone-700">
+            <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-teal-700" /> {activeItem.coord ? unavailable : "Location unknown"}</span>
+          </div>
+        ) : null}
+        {!activeItem.coord && !unavailable ? (
+          <div className="pointer-events-none absolute inset-x-2 bottom-2 rounded-lg bg-[rgba(255,253,246,0.93)] px-2 py-1.5 text-center text-[11px] font-bold text-stone-700 shadow">
+            Location unknown
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
