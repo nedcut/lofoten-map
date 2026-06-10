@@ -120,6 +120,41 @@ body {
   background: #dbe7df;
 }
 
+/* Pulsing ring around the photo currently open in the editor. The outer div is
+   positioned by Mapbox (inline transform), so the animation lives on a child. */
+.lofoten-photo-highlight {
+  width: 76px;
+  height: 76px;
+  cursor: grab;
+}
+
+.lofoten-photo-highlight:active {
+  cursor: grabbing;
+}
+
+.lofoten-photo-highlight-ring {
+  position: absolute;
+  inset: 0;
+  border: 3px solid #e7a13d;
+  border-radius: 18px;
+  box-shadow:
+    0 0 0 7px rgba(231, 161, 61, 0.28),
+    0 0 34px rgba(231, 161, 61, 0.55);
+  animation: lofoten-highlight-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes lofoten-highlight-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.14);
+    opacity: 0.65;
+  }
+}
+
 .lofoten-photo-marker-fallback {
   display: flex;
   width: 100%;

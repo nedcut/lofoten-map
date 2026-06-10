@@ -62,15 +62,19 @@ type Props = {
   onOpenJourney: (photoId: string) => void;
   onPhotoFocus: (photoId: string) => void;
   onPhotoBlur: (photoId: string) => void;
+  onMovePhoto: (photoId: string, coordinate: { lng: number; lat: number }) => void;
+  // The photo currently open in the editor, marked on the map with a pulsing
+  // ring so it's obvious which marker is being edited.
+  highlightedPhotoId: string | null;
 };
 
-export function TripLayers({ map, routes, photos, notes, places, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur }: Props) {
+export function TripLayers({ map, routes, photos, notes, places, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId }: Props) {
   // Popup click handlers are attached once (keyed on [map]); this ref lets those
   // long-lived closures read the latest permissions/callbacks without re-binding.
-  const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur });
+  const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto });
   useEffect(() => {
-    actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur };
-  }, [currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur]);
+    actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto };
+  }, [currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto]);
   const routeData = useMemo(() => routeFeatureCollection(routes), [routes]);
   const photoData = useMemo(() => photoFeatureCollection(photos), [photos]);
   const noteData = useMemo(() => noteFeatureCollection(notes), [notes]);
@@ -146,6 +150,11 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
     const markers = new Map<string, mapboxgl.Marker>();
     const photosById = new Map(photos.map((photo) => [photo.id, photo]));
     let frame = 0;
+    // The marker currently being dragged. refreshMarkers runs on every
+    // sourcedata event (tiles load constantly), and without this guard it
+    // would snap the dragged marker back to its source position — or remove
+    // it outright — mid-drag, killing the drop before dragend can save it.
+    let draggingKey: string | null = null;
 
     function addPopupActions(popup: mapboxgl.Popup, photo: Photo) {
       const body = popup.getElement()?.querySelector(".lofoten-popup-body");
@@ -297,18 +306,33 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
               activeMap.easeTo({ center: coordinates, zoom, duration: 550 });
             });
           });
-          const marker = new mapboxgl.Marker({ element, anchor: "center" }).setLngLat(coordinates).addTo(activeMap);
+          // Owners and admins can drag a misplaced photo straight to where it
+          // belongs; dropping it saves the new location. Clusters can't move.
+          const { isAdmin: admin, currentUserId: viewerId } = actionsRef.current;
+          const draggable = !isCluster && (admin || Boolean(photo.user_id && photo.user_id === viewerId));
+          const marker = new mapboxgl.Marker({ element, anchor: "center", draggable }).setLngLat(coordinates).addTo(activeMap);
+          if (draggable) {
+            element.title = "Drag to move this photo";
+            marker.on("dragstart", () => {
+              draggingKey = key;
+            });
+            marker.on("dragend", () => {
+              draggingKey = null;
+              const dropped = marker.getLngLat();
+              actionsRef.current.onMovePhoto(photo.id, { lng: dropped.lng, lat: dropped.lat });
+            });
+          }
           // Mapbox defaults custom markers to role="img"; these markers are
           // genuine controls, so restore the button semantics after creation.
           element.setAttribute("role", "button");
           markers.set(key, marker);
-        } else {
+        } else if (key !== draggingKey) {
           markers.get(key)?.setLngLat(coordinates);
         }
       }
 
       for (const [key, marker] of markers) {
-        if (seen.has(key)) continue;
+        if (seen.has(key) || key === draggingKey) continue;
         marker.remove();
         markers.delete(key);
       }
@@ -450,6 +474,32 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       activeMap.off("mouseleave", routePopupLayer, resetPointerCursor);
     };
   }, [map]);
+
+  // A pulsing ring on the photo currently open in the editor, so the marker
+  // being edited is unmistakable. A DOM marker (not a layer) so the CSS
+  // animation runs without per-frame map renders. The ring is also draggable:
+  // photos stacked at the same spot stay clustered at every zoom (clustering
+  // is pixel-radius based), so the cluster thumbnail can't be dragged — but
+  // the ring always targets exactly the photo being edited.
+  useEffect(() => {
+    if (!map) return;
+    const photo = highlightedPhotoId ? photos.find((item) => item.id === highlightedPhotoId) : null;
+    if (!photo || photo.lng === null || photo.lat === null) return;
+    const element = document.createElement("div");
+    element.className = "lofoten-photo-highlight";
+    element.title = "Drag to move this photo";
+    const ring = document.createElement("div");
+    ring.className = "lofoten-photo-highlight-ring";
+    element.append(ring);
+    const marker = new mapboxgl.Marker({ element, anchor: "center", draggable: true }).setLngLat([photo.lng, photo.lat]).addTo(map);
+    marker.on("dragend", () => {
+      const dropped = marker.getLngLat();
+      actionsRef.current.onMovePhoto(photo.id, { lng: dropped.lng, lat: dropped.lat });
+    });
+    return () => {
+      marker.remove();
+    };
+  }, [highlightedPhotoId, map, photos]);
 
   return null;
 }

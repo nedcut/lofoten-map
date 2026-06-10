@@ -597,6 +597,55 @@ export default function Home() {
     applyTripUrlState(window.location.href, { item: formatItemToken({ kind, id }), journey: null }, "push");
   }
 
+  // "Edit details" inside Journey Mode: swap the viewer for the editor panel.
+  // Marking the photo as last-focused means reopening Journey resumes there.
+  function editPhotoFromJourney(photoId: string) {
+    const photo = data.photos.find((item) => item.id === photoId);
+    // The map only renders the selected day's markers; hop to the photo's day
+    // so the marker (and its highlight ring) are actually on the map. Runs
+    // before setLastFocusedPhotoId because selectDay clears the focus.
+    if (photo && selectedDayId && photo.day_id !== selectedDayId) selectDay(photo.day_id ?? null);
+    setLastFocusedPhotoId(photoId);
+    setActiveJourneyId(null);
+    startEditFromMap("photo", photoId);
+    // The main map was hidden behind the journey overlay and may be framing a
+    // different part of the trip entirely — bring the edited photo into view.
+    // Delayed past the unhide-resize (60ms effect), and offset so the editor
+    // panel (right on desktop, bottom sheet on mobile) doesn't cover it.
+    if (!map || !photo || photo.lng === null || photo.lat === null) return;
+    const target: [number, number] = [photo.lng, photo.lat];
+    window.setTimeout(() => {
+      const isMobile = window.innerWidth < 768;
+      map.easeTo({
+        center: target,
+        zoom: Math.max(map.getZoom(), 13.5),
+        offset: isMobile ? [0, -120] : [-160, 0],
+        duration: 900,
+        essential: true,
+      });
+    }, 120);
+  }
+
+  // A photo marker was dragged to a new spot. Update local state immediately so
+  // the marker stays where it was dropped while the save round-trips; on error
+  // updatePhoto surfaces the failure and the next load restores server truth.
+  async function movePhoto(photoId: string, coordinate: LngLat) {
+    const photo = data.photos.find((item) => item.id === photoId);
+    if (!photo) return;
+    setData((current) => ({
+      ...current,
+      photos: current.photos.map((item) => item.id === photoId ? { ...item, lat: coordinate.lat, lng: coordinate.lng } : item),
+    }));
+    await updatePhoto(photoId, {
+      day_id: photo.day_id,
+      uploader_name: photo.uploader_name,
+      caption: photo.caption,
+      lat: coordinate.lat,
+      lng: coordinate.lng,
+      taken_at: photo.taken_at,
+    });
+  }
+
   async function deleteFromMap(kind: MapItemKind, id: string) {
     const table = ({ photo: "photos", note: "notes", place: "places", route: "route_segments" } as const)[kind];
     if (!window.confirm("Delete this item? This can't be undone.")) return;
@@ -1118,9 +1167,16 @@ export default function Home() {
     if (!data.trip) return;
     await runAdminOperation(async () => {
       if (supabase) {
-        const { error: updateError } = await supabase.from("photos").update(input).eq("id", photoId).eq("trip_id", data.trip!.id);
+        // .select() makes the update report which rows it touched: RLS filters
+        // silently (no error, zero rows), which would otherwise show "Photo
+        // updated." while writing nothing — and leave an optimistic marker
+        // move on screen that reverts on the next load.
+        const { data: updatedRows, error: updateError } = await supabase.from("photos").update(input).eq("id", photoId).eq("trip_id", data.trip!.id).select("id");
         if (updateError) setAdminDataError(updateError.message);
-        else {
+        else if (!updatedRows || updatedRows.length === 0) {
+          setAdminDataError("The change was not saved — you may not have permission to edit this photo.");
+          await loadData();
+        } else {
           setAdminDataInfo("Photo updated.");
           await loadData();
         }
@@ -1210,7 +1266,7 @@ export default function Home() {
         <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
-            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} /> : null}
+            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} /> : null}
             {!mapUnavailable ? <RouteDraftLayer map={map} points={routeDraftPoints} /> : null}
             {!mapUnavailable ? <MapLegend visibility={layerVisibility} /> : null}
           </MapView>
@@ -1246,6 +1302,7 @@ export default function Home() {
           onPrev={prevJourneyItem}
           onClose={closeJourney}
           onUpdatePhoto={updatePhoto}
+          onEditPhoto={editPhotoFromJourney}
         />
       ) : null}
     </main>

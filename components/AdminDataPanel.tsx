@@ -134,15 +134,15 @@ function dayEditorKey(day: Day) {
   return ["day", day.id, day.day_number, keyPart(day.date), keyPart(day.title), keyPart(day.summary)].join("|");
 }
 
-function routeEditorKey(route: RouteSegment) {
+export function routeEditorKey(route: RouteSegment) {
   return ["route", route.id, keyPart(route.day_id), keyPart(route.name), route.mode, keyPart(route.source)].join("|");
 }
 
-function noteEditorKey(note: Note) {
+export function noteEditorKey(note: Note) {
   return ["note", note.id, keyPart(note.day_id), keyPart(note.author_name), note.body].join("|");
 }
 
-function placeEditorKey(place: Place) {
+export function placeEditorKey(place: Place) {
   return [
     "place",
     place.id,
@@ -155,7 +155,7 @@ function placeEditorKey(place: Place) {
   ].join("|");
 }
 
-function photoEditorKey(photo: Photo) {
+export function photoEditorKey(photo: Photo) {
   return [
     "photo",
     photo.id,
