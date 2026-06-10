@@ -20,6 +20,7 @@ import { gpxTimeToTripDate, groupPointsByDay, parseGpx, simplifyToLineString } f
 import { useTripAuth } from "@/lib/hooks/useTripAuth";
 import { useTripData } from "@/lib/hooks/useTripData";
 import { buildJourneyItems } from "@/lib/journey";
+import type { PhotoOutlier } from "@/lib/photo-outliers";
 import { clearNoteDraft } from "@/lib/offline-drafts";
 import { prepareAvatarFile } from "@/lib/avatar-processing";
 import { prepareMediaFiles } from "@/lib/media-processing";
@@ -136,6 +137,8 @@ export default function Home() {
   const [panel, setPanel] = useState<"photo" | "note" | "route" | null>(null);
   const [editTargetRef, setEditTargetRef] = useState<{ kind: MapItemKind; id: string } | null>(null);
   const [activeJourneyId, setActiveJourneyId] = useState<string | null>(null);
+  const [lastFocusedPhotoId, setLastFocusedPhotoId] = useState<string | null>(null);
+  const [outlierPreview, setOutlierPreview] = useState<PhotoOutlier | null>(null);
   const [deepLinkChecked, setDeepLinkChecked] = useState(false);
   const [journeyFilter, setJourneyFilter] = useState<JourneyFilter>("all");
   const [journeyUploaderFilter, setJourneyUploaderFilter] = useState("");
@@ -338,14 +341,33 @@ export default function Home() {
       onUpdatePhoto: updatePhoto,
       onDeleteItem: deleteDataItem,
       onImportGpx: importGpx,
+      onPreviewOutlier: previewOutlier,
     }
     : null;
+  // Map-friendly shape of the previewed outlier (drops photos with no coords).
+  const outlierOverlay = useMemo(() => {
+    if (!outlierPreview || outlierPreview.photo.lng === null || outlierPreview.photo.lat === null) return null;
+    return {
+      photo: { lng: outlierPreview.photo.lng, lat: outlierPreview.photo.lat },
+      suggested: outlierPreview.suggested,
+      neighbors: outlierPreview.neighbors,
+    };
+  }, [outlierPreview]);
 
   const selectDay = useCallback((dayId: string | null) => {
     setSelectedDayId(dayId);
+    // Switching days is a deliberate change of context, so any lingering
+    // photo-popup focus stops steering where Journey Mode starts.
+    setLastFocusedPhotoId(null);
     if (typeof window === "undefined") return;
     applyTripUrlState(window.location.href, { day: formatDayParam(dayId, data.days) });
   }, [data.days]);
+
+  // A photo only steers the journey start while its popup is open. Guarded so
+  // closing a stale popup can't wipe focus from a newer one opened after it.
+  const handlePhotoBlur = useCallback((photoId: string) => {
+    setLastFocusedPhotoId((current) => (current === photoId ? null : current));
+  }, []);
 
   const openJourneyAt = useCallback((itemId: string, mode: "push" | "replace" = "push") => {
     setActiveJourneyId(itemId);
@@ -378,6 +400,30 @@ export default function Home() {
     setJourneyUploaderFilter("");
     openJourneyAt(`photo:${photoId}`, "push");
   }, [openJourneyAt]);
+
+  // The header Journey button picks its starting item by context: the photo the
+  // user last opened on the map wins, then the first item of the selected day,
+  // then the start of the trip. The fallbacks matter because the last-clicked
+  // photo may have been deleted, and the selected day may have no journal items.
+  const startJourney = useCallback(() => {
+    if (journeyItems.length === 0) return;
+    const lastFocused = lastFocusedPhotoId
+      ? journeyItems.find((item) => item.id === `photo:${lastFocusedPhotoId}`)
+      : undefined;
+    const dayStart = selectedDayId
+      ? journeyItems.find((item) => item.dayId === selectedDayId)
+      : undefined;
+    openJourneyAt((lastFocused ?? dayStart ?? journeyItems[0]).id);
+  }, [journeyItems, lastFocusedPhotoId, openJourneyAt, selectedDayId]);
+
+  // Step the map-view day filter forward/backward through ["All days", day 1,
+  // day 2, ...], clamped at both ends so repeated presses don't wrap around.
+  const stepDay = useCallback((direction: 1 | -1) => {
+    const sequence: Array<string | null> = [null, ...data.days.map((day) => day.id)];
+    const currentIndex = Math.max(0, sequence.indexOf(selectedDayId));
+    const nextIndex = Math.min(sequence.length - 1, Math.max(0, currentIndex + direction));
+    if (nextIndex !== currentIndex) selectDay(sequence[nextIndex]);
+  }, [data.days, selectDay, selectedDayId]);
 
   const nextJourneyItem = useCallback(() => {
     if (journeyItems.length === 0) return;
@@ -436,6 +482,25 @@ export default function Home() {
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
   }, [applyDeepLinkFromUrl]);
+
+  // Arrow keys step the day filter while the map view has focus. Journey Mode
+  // has its own ArrowLeft/Right handler, and open panels capture typing, so the
+  // listener simply isn't attached in those states rather than checking inside.
+  useEffect(() => {
+    if (activeJourneyId || panel || editTargetRef || authPanelOpen || profilePanelOpen) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+      // Capture-phase + stopPropagation so the keystroke never reaches the
+      // Mapbox canvas, which would otherwise also pan the map on arrow keys.
+      event.preventDefault();
+      event.stopPropagation();
+      stepDay(event.key === "ArrowRight" ? 1 : -1);
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [activeJourneyId, authPanelOpen, editTargetRef, panel, profilePanelOpen, stepDay]);
 
   useEffect(() => {
     if (!activeJourneyId) return;
@@ -542,6 +607,74 @@ export default function Home() {
     closePanel();
     setEditTargetRef({ kind, id });
     applyTripUrlState(window.location.href, { item: formatItemToken({ kind, id }), journey: null }, "push");
+  }
+
+  // "Edit details" inside Journey Mode: swap the viewer for the editor panel.
+  // Marking the photo as last-focused means reopening Journey resumes there.
+  function editPhotoFromJourney(photoId: string) {
+    const photo = data.photos.find((item) => item.id === photoId);
+    // The map only renders the selected day's markers; hop to the photo's day
+    // so the marker (and its highlight ring) are actually on the map. Runs
+    // before setLastFocusedPhotoId because selectDay clears the focus.
+    if (photo && selectedDayId && photo.day_id !== selectedDayId) selectDay(photo.day_id ?? null);
+    setLastFocusedPhotoId(photoId);
+    setActiveJourneyId(null);
+    startEditFromMap("photo", photoId);
+    // The main map was hidden behind the journey overlay and may be framing a
+    // different part of the trip entirely — bring the edited photo into view.
+    // Delayed past the unhide-resize (60ms effect), and offset so the editor
+    // panel (right on desktop, bottom sheet on mobile) doesn't cover it.
+    if (!map || !photo || photo.lng === null || photo.lat === null) return;
+    const target: [number, number] = [photo.lng, photo.lat];
+    window.setTimeout(() => {
+      const isMobile = window.innerWidth < 768;
+      map.easeTo({
+        center: target,
+        zoom: Math.max(map.getZoom(), 13.5),
+        offset: isMobile ? [0, -120] : [-160, 0],
+        duration: 900,
+        essential: true,
+      });
+    }, 120);
+  }
+
+  // Hover/click on a Location-check row: show the flagged photo, its
+  // time-neighbor group, and the suggested spot on the map. A click also
+  // frames the map around all of it so an off-screen stray becomes visible.
+  function previewOutlier(outlier: PhotoOutlier | null, options?: { focus?: boolean }) {
+    setOutlierPreview(outlier);
+    if (!options?.focus || !outlier || !map) return;
+    const photo = outlier.photo;
+    if (photo.lng === null || photo.lat === null) return;
+    const coords: [number, number][] = [
+      [photo.lng, photo.lat],
+      [outlier.suggested.lng, outlier.suggested.lat],
+      ...outlier.neighbors.map((neighbor): [number, number] => [neighbor.lng, neighbor.lat]),
+    ];
+    const bounds = coords.reduce((box, coord) => box.extend(coord), new mapboxgl.LngLatBounds(coords[0], coords[0]));
+    const isMobile = window.innerWidth < 768;
+    const padding = isMobile ? { top: 96, right: 48, bottom: 220, left: 48 } : { top: 80, right: 80, bottom: 80, left: 80 };
+    map.fitBounds(bounds, { padding, maxZoom: 14, duration: 800, essential: true });
+  }
+
+  // A photo marker was dragged to a new spot. Update local state immediately so
+  // the marker stays where it was dropped while the save round-trips; on error
+  // updatePhoto surfaces the failure and the next load restores server truth.
+  async function movePhoto(photoId: string, coordinate: LngLat) {
+    const photo = data.photos.find((item) => item.id === photoId);
+    if (!photo) return;
+    setData((current) => ({
+      ...current,
+      photos: current.photos.map((item) => item.id === photoId ? { ...item, lat: coordinate.lat, lng: coordinate.lng } : item),
+    }));
+    await updatePhoto(photoId, {
+      day_id: photo.day_id,
+      uploader_name: photo.uploader_name,
+      caption: photo.caption,
+      lat: coordinate.lat,
+      lng: coordinate.lng,
+      taken_at: photo.taken_at,
+    });
   }
 
   async function deleteFromMap(kind: MapItemKind, id: string) {
@@ -1065,9 +1198,16 @@ export default function Home() {
     if (!data.trip) return;
     await runAdminOperation(async () => {
       if (supabase) {
-        const { error: updateError } = await supabase.from("photos").update(input).eq("id", photoId).eq("trip_id", data.trip!.id);
+        // .select() makes the update report which rows it touched: RLS filters
+        // silently (no error, zero rows), which would otherwise show "Photo
+        // updated." while writing nothing — and leave an optimistic marker
+        // move on screen that reverts on the next load.
+        const { data: updatedRows, error: updateError } = await supabase.from("photos").update(input).eq("id", photoId).eq("trip_id", data.trip!.id).select("id");
         if (updateError) setAdminDataError(updateError.message);
-        else {
+        else if (!updatedRows || updatedRows.length === 0) {
+          setAdminDataError("The change was not saved — you may not have permission to edit this photo.");
+          await loadData();
+        } else {
           setAdminDataInfo("Photo updated.");
           await loadData();
         }
@@ -1129,7 +1269,7 @@ export default function Home() {
         <div className="flex items-center gap-2">
           <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{supabase ? (user ? `Signed in ${user.email ?? ""}` : "Viewing as guest") : "Local demo mode"}</div>
           <button
-            onClick={() => journeyItems[0] && openJourneyAt(journeyItems[0].id)}
+            onClick={startJourney}
             disabled={journeyItems.length === 0}
             aria-label="Open Journey Mode"
             className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[#e7a13d] px-3 py-2 text-xs font-black text-stone-950 shadow-lg transition hover:bg-[#f0ae4b] hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
@@ -1154,16 +1294,16 @@ export default function Home() {
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={selectDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
+        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
-            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} /> : null}
+            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
             {!mapUnavailable ? <RouteDraftLayer map={map} points={routeDraftPoints} /> : null}
             {!mapUnavailable ? <MapLegend visibility={layerVisibility} /> : null}
           </MapView>
         </div>
       </div>
-      {!panel ? <MobileSheet trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={selectDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
+      {!panel ? <MobileSheet trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
@@ -1193,6 +1333,7 @@ export default function Home() {
           onPrev={prevJourneyItem}
           onClose={closeJourney}
           onUpdatePhoto={updatePhoto}
+          onEditPhoto={editPhotoFromJourney}
         />
       ) : null}
     </main>

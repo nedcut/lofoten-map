@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Link, Loader2, Pencil, Save, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Link, Loader2, MapPinned, Pencil, Save, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
 import { formatDateOnly, formatDateTime } from "@/lib/utils";
@@ -37,6 +37,7 @@ type Props = {
   onPrev: () => void;
   onClose: () => void;
   onUpdatePhoto: (photoId: string, input: PhotoUpdate) => Promise<void>;
+  onEditPhoto: (photoId: string) => void;
 };
 
 function itemDate(item: JourneyItem) {
@@ -96,6 +97,7 @@ export function JourneyPlayback({
   onPrev,
   onClose,
   onUpdatePhoto,
+  onEditPhoto,
 }: Props) {
   const activeItem = items[activeIndex] ?? items[0];
   const [isPlaying, setIsPlaying] = useState(false);
@@ -411,9 +413,14 @@ export function JourneyPlayback({
                   <div className="flex items-start gap-3">
                     <p className="min-w-0 flex-1 text-sm leading-6 text-white">{activeItem.primary.caption || "No caption yet."}</p>
                     {canEditCaption ? (
-                      <button onClick={() => setEditingCaption(true)} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 text-white transition hover:bg-white/20" aria-label="Edit caption">
-                        <Pencil className="h-4 w-4" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button onClick={() => setEditingCaption(true)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white transition hover:bg-white/20" aria-label="Edit caption" title="Edit caption">
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => onEditPhoto(activeItem.primary.id)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white transition hover:bg-white/20" aria-label="Edit photo details (location, day, time)" title="Edit details — location, day, time">
+                          <MapPinned className="h-4 w-4" />
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                 )}

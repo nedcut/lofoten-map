@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { NoteEditor, PhotoEditor, PlaceEditor, RouteEditor, type AdminDataProps } from "@/components/AdminDataPanel";
+import { NoteEditor, PhotoEditor, PlaceEditor, RouteEditor, noteEditorKey, photoEditorKey, placeEditorKey, routeEditorKey, type AdminDataProps } from "@/components/AdminDataPanel";
 import type { Day, Note, Photo, Place, RouteSegment } from "@/types/trip";
 
 // A single resolved map item the user picked from a popup. Discriminated so the
@@ -43,8 +43,13 @@ export function EditItemPanel({ target, days, isSaving, onClose, onUpdatePhoto, 
           <button onClick={onClose} className="rounded-full p-2 text-stone-500 hover:bg-stone-900/5" aria-label="Close editor"><X className="h-4 w-4" /></button>
         </div>
         <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
+          {/* Keyed on the item's content so the uncontrolled form remounts with
+              fresh defaultValues when the item changes underneath it — e.g.
+              dragging the marker while the editor is open. Without the key,
+              Save would write the stale pre-drag coordinates back. */}
           {target.kind === "photo" ? (
             <PhotoEditor
+              key={photoEditorKey(target.item)}
               photo={target.item}
               days={days}
               isSaving={isSaving}
@@ -54,6 +59,7 @@ export function EditItemPanel({ target, days, isSaving, onClose, onUpdatePhoto, 
           ) : null}
           {target.kind === "note" ? (
             <NoteEditor
+              key={noteEditorKey(target.item)}
               note={target.item}
               days={days}
               isSaving={isSaving}
@@ -63,6 +69,7 @@ export function EditItemPanel({ target, days, isSaving, onClose, onUpdatePhoto, 
           ) : null}
           {target.kind === "place" ? (
             <PlaceEditor
+              key={placeEditorKey(target.item)}
               place={target.item}
               days={days}
               isSaving={isSaving}
@@ -72,6 +79,7 @@ export function EditItemPanel({ target, days, isSaving, onClose, onUpdatePhoto, 
           ) : null}
           {target.kind === "route" ? (
             <RouteEditor
+              key={routeEditorKey(target.item)}
               route={target.item}
               days={days}
               isSaving={isSaving}

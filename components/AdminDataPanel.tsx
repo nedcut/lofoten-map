@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { CalendarDays, Camera, FileText, Loader2, MapPin, Pencil, Route, Save, Trash2, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, CalendarDays, Camera, FileText, Loader2, MapPin, Pencil, Route, Save, Trash2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { detectPhotoOutliers, type PhotoOutlier } from "@/lib/photo-outliers";
 import type { Day, Note, Photo, Place, RouteMode, RouteSegment, Trip } from "@/types/trip";
 
 type TripUpdate = {
@@ -69,6 +70,9 @@ export type AdminDataProps = {
   onUpdatePhoto: (photoId: string, input: PhotoUpdate) => Promise<void>;
   onDeleteItem: (table: "days" | "route_segments" | "notes" | "places" | "photos", id: string) => Promise<void>;
   onImportGpx: (file: File) => Promise<void>;
+  // Show a location-check outlier on the map (null clears). focus also fits
+  // the map around the photo and its group.
+  onPreviewOutlier: (outlier: PhotoOutlier | null, options?: { focus?: boolean }) => void;
 };
 
 const routeModes: Array<{ value: RouteMode; label: string }> = [
@@ -134,15 +138,15 @@ function dayEditorKey(day: Day) {
   return ["day", day.id, day.day_number, keyPart(day.date), keyPart(day.title), keyPart(day.summary)].join("|");
 }
 
-function routeEditorKey(route: RouteSegment) {
+export function routeEditorKey(route: RouteSegment) {
   return ["route", route.id, keyPart(route.day_id), keyPart(route.name), route.mode, keyPart(route.source)].join("|");
 }
 
-function noteEditorKey(note: Note) {
+export function noteEditorKey(note: Note) {
   return ["note", note.id, keyPart(note.day_id), keyPart(note.author_name), note.body].join("|");
 }
 
-function placeEditorKey(place: Place) {
+export function placeEditorKey(place: Place) {
   return [
     "place",
     place.id,
@@ -155,7 +159,7 @@ function placeEditorKey(place: Place) {
   ].join("|");
 }
 
-function photoEditorKey(photo: Photo) {
+export function photoEditorKey(photo: Photo) {
   return [
     "photo",
     photo.id,
@@ -227,7 +231,141 @@ function PhotoList({ photos, days, isSaving, onSave, onDeleteItem }: Pick<AdminD
   );
 }
 
+function formatOffset(km: number) {
+  return km >= 1 ? `${km.toFixed(1)} km` : `${Math.round(km * 1000)} m`;
+}
+
+// A flagged photo with its evidence and the two ways to resolve it: snap it
+// to where its time-neighbors were taken, or dismiss the flag (per session —
+// some photos legitimately stray, e.g. a zoomed shot of a distant peak).
+// Hovering previews the photo and its group on the map; clicking pins the
+// preview and frames the map around it.
+function OutlierRow({ outlier, isSaving, pinned, onMove, onDismiss, onHover, onSelect }: { outlier: PhotoOutlier; isSaving: boolean; pinned: boolean; onMove: () => Promise<void>; onDismiss: () => void; onHover: (hovering: boolean) => void; onSelect: () => void }) {
+  const { photo } = outlier;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+      onClick={onSelect}
+      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }}
+      className={cn(
+        "grid cursor-pointer grid-cols-[3rem_minmax(0,1fr)] gap-2 rounded-lg border bg-amber-50/70 p-2 transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-amber-400/30",
+        pinned ? "border-amber-500 ring-2 ring-amber-400/40" : "border-amber-300/60 hover:border-amber-400",
+      )}
+    >
+      <div className="h-12 overflow-hidden rounded-md bg-stone-100">
+        {photo.thumbnail_url || photo.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element -- Existing remote URLs come from user uploads.
+          <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-[10px] font-bold text-stone-500">{photo.media_type === "video" ? "Video" : "Photo"}</div>
+        )}
+      </div>
+      <div className="min-w-0 space-y-1.5">
+        <div className="truncate text-sm font-semibold text-stone-900">{photoLabel(photo)}</div>
+        <div className="text-xs leading-4 text-stone-600">
+          {formatOffset(outlier.distanceKm)} away from the {outlier.neighborCount} photos taken within {outlier.windowMinutes} min of it
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={(event) => { event.stopPropagation(); void onMove(); }}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />} Move to group
+          </button>
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); onDismiss(); }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-bold text-stone-600 transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.98]"
+          >
+            <X className="h-3.5 w-3.5" /> Looks right
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The flagged-photo rows plus their map-preview state: hovering shows a row's
+// photo and group on the map, clicking pins it (and frames the map). Pinning
+// and the unmount cleanup live here so a closed section always clears the map.
+function LocationCheckList({ outliers, isSaving, onMove, onDismiss, onPreview }: {
+  outliers: PhotoOutlier[];
+  isSaving: boolean;
+  onMove: (outlier: PhotoOutlier) => Promise<void>;
+  onDismiss: (outlier: PhotoOutlier) => void;
+  onPreview: AdminDataProps["onPreviewOutlier"];
+}) {
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
+  const pinned = pinnedId ? outliers.find((outlier) => outlier.photo.id === pinnedId) ?? null : null;
+  const previewRef = useRef(onPreview);
+  useEffect(() => {
+    previewRef.current = onPreview;
+  }, [onPreview]);
+  // Clear the overlay when the section closes (LazyDetails unmounts children).
+  useEffect(() => () => previewRef.current(null), []);
+  // ...and when the pinned outlier resolves (moved or list recomputed).
+  useEffect(() => {
+    if (pinnedId && !pinned) {
+      setPinnedId(null);
+      previewRef.current(null);
+    }
+  }, [pinned, pinnedId]);
+
+  return (
+    <>
+      {outliers.map((outlier) => (
+        <OutlierRow
+          key={outlier.photo.id}
+          outlier={outlier}
+          isSaving={isSaving}
+          pinned={outlier.photo.id === pinnedId}
+          onHover={(hovering) => onPreview(hovering ? outlier : pinned)}
+          onSelect={() => {
+            setPinnedId(outlier.photo.id);
+            onPreview(outlier, { focus: true });
+          }}
+          onMove={async () => {
+            setPinnedId(null);
+            onPreview(null);
+            await onMove(outlier);
+          }}
+          onDismiss={() => {
+            setPinnedId(null);
+            onPreview(null);
+            onDismiss(outlier);
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
 export function AdminDataPanel(props: AdminDataProps) {
+  // Photos far from where their time-neighbors were taken — usually a wrong
+  // manual placement. Dismissals live for the session only; a photo that is
+  // genuinely fine will simply reappear next visit and can be dismissed again
+  // (or moved, which removes it from the list for good).
+  const outliers = useMemo(() => detectPhotoOutliers(props.photos), [props.photos]);
+  const [dismissedOutliers, setDismissedOutliers] = useState<ReadonlySet<string>>(new Set());
+  const visibleOutliers = outliers.filter((outlier) => !dismissedOutliers.has(outlier.photo.id));
+
+  async function moveOutlier(outlier: PhotoOutlier) {
+    const { photo, suggested } = outlier;
+    await props.onUpdatePhoto(photo.id, {
+      day_id: photo.day_id,
+      uploader_name: photo.uploader_name,
+      caption: photo.caption,
+      lat: suggested.lat,
+      lng: suggested.lng,
+      taken_at: photo.taken_at,
+    });
+  }
+
   async function submitTrip(formData: FormData) {
     await props.onUpdateTrip({
       title: String(formData.get("title") ?? "").trim() || props.trip?.title || "Trip Logbook",
@@ -305,6 +443,25 @@ export function AdminDataPanel(props: AdminDataProps) {
       <LazyDetails summary={<><Camera className="mr-2 inline h-4 w-4 text-teal-700" />Media ({props.photos.length})</>}>
         <div className="mt-3 space-y-3">
           <PhotoList photos={props.photos} days={props.days} isSaving={props.isSaving} onSave={props.onUpdatePhoto} onDeleteItem={props.onDeleteItem} />
+        </div>
+      </LazyDetails>
+
+      <LazyDetails summary={<><AlertTriangle className={cn("mr-2 inline h-4 w-4", visibleOutliers.length > 0 ? "text-amber-600" : "text-teal-700")} />Location check ({visibleOutliers.length})</>}>
+        <div className="mt-3 space-y-2">
+          <p className="text-xs leading-5 text-stone-600">
+            Photos taken around the same time are usually taken near each other. These sit far from their time-neighbors — likely misplaced. Moving snaps the photo to the middle of its group.
+          </p>
+          {visibleOutliers.length === 0 ? (
+            <EmptyRow label="No suspect locations found" />
+          ) : (
+            <LocationCheckList
+              outliers={visibleOutliers}
+              isSaving={props.isSaving}
+              onMove={moveOutlier}
+              onDismiss={(outlier) => setDismissedOutliers((current) => new Set([...current, outlier.photo.id]))}
+              onPreview={props.onPreviewOutlier}
+            />
+          )}
         </div>
       </LazyDetails>
     </section>
