@@ -60,15 +60,17 @@ type Props = {
   onEditItem: (kind: MapItemKind, id: string) => void;
   onDeleteItem: (kind: MapItemKind, id: string) => void;
   onOpenJourney: (photoId: string) => void;
+  onPhotoFocus: (photoId: string) => void;
+  onPhotoBlur: (photoId: string) => void;
 };
 
-export function TripLayers({ map, routes, photos, notes, places, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney }: Props) {
+export function TripLayers({ map, routes, photos, notes, places, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur }: Props) {
   // Popup click handlers are attached once (keyed on [map]); this ref lets those
   // long-lived closures read the latest permissions/callbacks without re-binding.
-  const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney });
+  const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur });
   useEffect(() => {
-    actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney };
-  }, [currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney]);
+    actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur };
+  }, [currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur]);
   const routeData = useMemo(() => routeFeatureCollection(routes), [routes]);
   const photoData = useMemo(() => photoFeatureCollection(photos), [photos]);
   const noteData = useMemo(() => noteFeatureCollection(notes), [notes]);
@@ -205,6 +207,10 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
         .setHTML(content)
         .addTo(activeMap);
       addPopupActions(popup, photo);
+      // The photo counts as "focused" only while its popup is open; dismissing
+      // the popup hands journey-start priority back to the selected day.
+      actionsRef.current.onPhotoFocus(photo.id);
+      popup.on("close", () => actionsRef.current.onPhotoBlur(photo.id));
     }
 
     function closestPhoto(coordinates: [number, number]) {

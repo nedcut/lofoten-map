@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Camera, Check, FileText, Loader2, Map, Mountain, PenLine, Route, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, Mountain, PenLine, Route, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { AdminDataPanel, type AdminDataProps } from "@/components/AdminDataPanel";
 import { cn, formatDateOnly } from "@/lib/utils";
 import type { AdminRequest, AdminRequestStatus, Day, Trip, TripMember } from "@/types/trip";
@@ -12,6 +12,7 @@ export type SidebarProps = {
   days: Day[];
   selectedDayId: string | null;
   onSelectDay: (dayId: string | null) => void;
+  onStepDay: (direction: 1 | -1) => void;
   layerVisibility: LayerVisibility;
   onLayerVisibilityChange: (next: LayerVisibility) => void;
   showLayerControls?: boolean;
@@ -88,10 +89,16 @@ export function QuickActions({ onStartPhotoUpload, onStartAddNote, onStartRouteD
   );
 }
 
-export function DayList({ days, selectedDayId, onSelectDay }: Pick<SidebarProps, "days" | "selectedDayId" | "onSelectDay">) {
+export function DayList({ days, selectedDayId, onSelectDay, onStepDay }: Pick<SidebarProps, "days" | "selectedDayId" | "onSelectDay" | "onStepDay">) {
   return (
     <section className="space-y-3">
-      <div className="flex items-center gap-2 text-sm font-bold text-stone-900"><CalendarDays className="h-4 w-4 text-teal-700" /> Trip days</div>
+      <div className="flex items-center gap-2 text-sm font-bold text-stone-900">
+        <CalendarDays className="h-4 w-4 text-teal-700" /> Trip days
+        <span className="ml-auto flex items-center gap-1">
+          <button onClick={() => onStepDay(-1)} aria-label="Previous day" title="Previous day (←)" className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-200 bg-white/75 text-stone-600 transition hover:border-stone-300 hover:bg-white hover:text-stone-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:scale-[0.95]"><ChevronLeft className="h-4 w-4" /></button>
+          <button onClick={() => onStepDay(1)} aria-label="Next day" title="Next day (→)" className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-200 bg-white/75 text-stone-600 transition hover:border-stone-300 hover:bg-white hover:text-stone-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:scale-[0.95]"><ChevronRight className="h-4 w-4" /></button>
+        </span>
+      </div>
       <div className="space-y-2">
         <button
           onClick={() => onSelectDay(null)}
@@ -240,7 +247,7 @@ export function DaySidebar(props: SidebarProps) {
     <aside className="flex h-full max-h-[78dvh] min-h-0 flex-col gap-4 overflow-y-auto rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.94)] p-4 text-stone-950 shadow-[0_24px_80px_rgba(46,61,54,0.2)] backdrop-blur-xl md:max-h-none md:w-96 md:p-5">
       <SidebarHeader trip={props.trip} />
       <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} onStartRouteDraw={props.onStartRouteDraw} />
-      <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} />
+      <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} />
       {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
       {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
       {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}
