@@ -1,7 +1,10 @@
 "use client";
 
 import { AlertTriangle, ArrowLeft, Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Trash2, Upload, Video, X } from "lucide-react";
-import { along, length as turfLength, lineString, point, pointToLineDistance } from "@turf/turf";
+import along from "@turf/along";
+import turfLength from "@turf/length";
+import { lineString, point } from "@turf/helpers";
+import pointToLineDistance from "@turf/point-to-line-distance";
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { extractPhotoExif, type ExtractedExif } from "@/lib/exif";

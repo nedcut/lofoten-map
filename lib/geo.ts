@@ -1,5 +1,5 @@
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
-import { length } from "@turf/turf";
+import length from "@turf/length";
 import type { Note, Photo, Place, RouteSegment } from "@/types/trip";
 
 export const LOFOTEN_CENTER: [number, number] = [13.0897, 67.9325];

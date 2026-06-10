@@ -1,5 +1,5 @@
 import type { LineString } from "geojson";
-import { simplify } from "@turf/turf";
+import simplify from "@turf/simplify";
 
 export type GpxTrackPoint = {
   lng: number;
