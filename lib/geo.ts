@@ -4,6 +4,31 @@ import type { Note, Photo, Place, RouteSegment } from "@/types/trip";
 
 export const LOFOTEN_CENTER: [number, number] = [13.0897, 67.9325];
 
+export type DayItems = {
+  routes: RouteSegment[];
+  photos: Photo[];
+  notes: Note[];
+  places: Place[];
+};
+
+// Collect every [lng, lat] coordinate from a day's items so callers can frame
+// the map around them. Routes contribute each vertex of their LineString;
+// points contribute their single coordinate. Photos may lack a location, so
+// those are skipped.
+export function collectItemCoordinates({ routes, photos, notes, places }: DayItems): [number, number][] {
+  const coords: [number, number][] = [];
+  for (const route of routes) {
+    const geometry = route.geometry_geojson.type === "Feature" ? route.geometry_geojson.geometry : route.geometry_geojson;
+    for (const position of geometry.coordinates) coords.push([position[0], position[1]]);
+  }
+  for (const photo of photos) {
+    if (photo.lng !== null && photo.lat !== null) coords.push([photo.lng, photo.lat]);
+  }
+  for (const note of notes) coords.push([note.lng, note.lat]);
+  for (const place of places) coords.push([place.lng, place.lat]);
+  return coords;
+}
+
 export function routeFeatureCollection(routes: RouteSegment[]): FeatureCollection<LineString> {
   return {
     type: "FeatureCollection",

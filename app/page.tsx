@@ -2,8 +2,9 @@
 
 import dynamic from "next/dynamic";
 import mapboxgl from "mapbox-gl";
+import { collectItemCoordinates } from "@/lib/geo";
 import length from "@turf/length";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { LineString } from "geojson";
 import { AlertCircle, Loader2, LogIn, Mail, Play, ShieldCheck, Sparkles, UserRound, X } from "lucide-react";
 import { DaySidebar } from "@/components/DaySidebar";
@@ -481,6 +482,39 @@ export default function Home() {
     setRouteDraftPoints([]);
     setPanel(null);
   }, []);
+
+  // Keep the latest filtered items in a ref so the framing effect below can read
+  // them without re-firing every time realtime data updates — we only want to
+  // recenter when the selected day (or map readiness) actually changes.
+  const filteredRef = useRef(filtered);
+  filteredRef.current = filtered;
+
+  // Center the map on the active day (or all days) whenever the selection
+  // changes: build a bounding box around that day's items and fit it with
+  // padding. Mobile gets extra bottom padding so the bottom sheet doesn't cover
+  // the framed content; a lone point falls back to an eased zoom since a
+  // zero-area box can't be fit.
+  useEffect(() => {
+    if (!map) return;
+    const coords = collectItemCoordinates(filteredRef.current);
+    if (coords.length === 0) return;
+
+    const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+    const padding = isMobile
+      ? { top: 96, right: 48, bottom: 220, left: 48 }
+      : { top: 80, right: 80, bottom: 80, left: 80 };
+
+    const bounds = coords.reduce(
+      (box, coord) => box.extend(coord),
+      new mapboxgl.LngLatBounds(coords[0], coords[0]),
+    );
+
+    if (bounds.getNorthEast().distanceTo(bounds.getSouthWest()) < 1) {
+      map.easeTo({ center: bounds.getCenter(), zoom: 13.5, padding, duration: 800, essential: true });
+      return;
+    }
+    map.fitBounds(bounds, { padding, maxZoom: 14, duration: 800, essential: true });
+  }, [map, selectedDayId]);
 
   function startPanel(next: "photo" | "note" | "route") {
     if (!mapActionsEnabled) return;
