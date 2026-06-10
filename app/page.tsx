@@ -26,6 +26,7 @@ import { prepareMediaFiles } from "@/lib/media-processing";
 import { partitionDuplicatePhotos } from "@/lib/photo-dedup";
 import { isMissingSchemaObjectError } from "@/lib/schema-errors";
 import { AVATAR_BUCKET, PHOTO_BUCKET, getSupabaseBrowserClient, resolveMemberAvatars, resolvePhotoUrls } from "@/lib/supabase";
+import { applyTripUrlState, formatDayParam, formatItemToken, parseItemToken, readTripUrlState, resolveDayParam } from "@/lib/trip-url";
 import { cn } from "@/lib/utils";
 import type { AdminRequest, Day, LngLat, MapClickMode, Note, Photo, Place, RouteMode, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
 
@@ -121,7 +122,7 @@ export default function Home() {
   const [panel, setPanel] = useState<"photo" | "note" | "route" | null>(null);
   const [editTargetRef, setEditTargetRef] = useState<{ kind: MapItemKind; id: string } | null>(null);
   const [activeJourneyId, setActiveJourneyId] = useState<string | null>(null);
-  const [journeyParamChecked, setJourneyParamChecked] = useState(false);
+  const [deepLinkChecked, setDeepLinkChecked] = useState(false);
   const [journeyFilter, setJourneyFilter] = useState<JourneyFilter>("all");
   const [journeyUploaderFilter, setJourneyUploaderFilter] = useState("");
   const [saving, setSaving] = useState(false);
@@ -475,23 +476,23 @@ export default function Home() {
     }
     : null;
 
-  const replaceJourneyUrl = useCallback((itemId: string | null, mode: "push" | "replace" = "replace") => {
+  const selectDay = useCallback((dayId: string | null) => {
+    setSelectedDayId(dayId);
     if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    if (itemId) url.searchParams.set("journey", itemId);
-    else url.searchParams.delete("journey");
-    window.history[mode === "push" ? "pushState" : "replaceState"](null, "", `${url.pathname}${url.search}${url.hash}`);
-  }, []);
+    applyTripUrlState(window.location.href, { day: formatDayParam(dayId, data.days) });
+  }, [data.days]);
 
   const openJourneyAt = useCallback((itemId: string, mode: "push" | "replace" = "push") => {
     setActiveJourneyId(itemId);
-    replaceJourneyUrl(itemId, mode);
-  }, [replaceJourneyUrl]);
+    if (typeof window === "undefined") return;
+    applyTripUrlState(window.location.href, { journey: itemId, item: null }, mode);
+  }, []);
 
   const closeJourney = useCallback(() => {
     setActiveJourneyId(null);
-    replaceJourneyUrl(null);
-  }, [replaceJourneyUrl]);
+    if (typeof window === "undefined") return;
+    applyTripUrlState(window.location.href, { journey: null });
+  }, []);
 
   const selectJourneyIndex = useCallback((index: number) => {
     const item = journeyItems[index];
@@ -527,21 +528,49 @@ export default function Home() {
     selectJourneyIndex(nextIndex);
   }, [activeJourneyIndex, journeyItems.length, selectJourneyIndex]);
 
-  useEffect(() => {
-    if (journeyParamChecked || loading || allJourneyItems.length === 0) return;
-    const token = new URL(window.location.href).searchParams.get("journey");
-    if (token && allJourneyItems.some((item) => item.id === token)) setActiveJourneyId(token);
-    setJourneyParamChecked(true);
-  }, [allJourneyItems, journeyParamChecked, loading]);
+  const applyDeepLinkFromUrl = useCallback((href: string) => {
+    const { day, journey, item } = readTripUrlState(href);
+    const dayId = resolveDayParam(day, data.days);
+    setSelectedDayId(dayId);
+
+    const journeyToken = journey && allJourneyItems.some((entry) => entry.id === journey) ? journey : null;
+    setActiveJourneyId(journeyToken);
+
+    const itemRef = parseItemToken(item);
+    if (!itemRef) {
+      setEditTargetRef(null);
+      return;
+    }
+    if (itemRef.kind === "photo") {
+      const photo = data.photos.find((entry) => entry.id === itemRef.id);
+      if (photo) {
+        setJourneyFilter("all");
+        setJourneyUploaderFilter("");
+        setActiveJourneyId(`photo:${photo.id}`);
+        setEditTargetRef(null);
+        return;
+      }
+    }
+    const exists = (
+      (itemRef.kind === "photo" && data.photos.some((entry) => entry.id === itemRef.id))
+      || (itemRef.kind === "note" && data.notes.some((entry) => entry.id === itemRef.id))
+      || (itemRef.kind === "place" && data.places.some((entry) => entry.id === itemRef.id))
+      || (itemRef.kind === "route" && data.routeSegments.some((entry) => entry.id === itemRef.id))
+    );
+    setEditTargetRef(exists ? { kind: itemRef.kind, id: itemRef.id } : null);
+  }, [allJourneyItems, data.days, data.notes, data.photos, data.places, data.routeSegments]);
 
   useEffect(() => {
-    const handler = () => {
-      const token = new URL(window.location.href).searchParams.get("journey");
-      setActiveJourneyId(token && allJourneyItems.some((item) => item.id === token) ? token : null);
-    };
+    if (deepLinkChecked || loading) return;
+    applyDeepLinkFromUrl(window.location.href);
+    setDeepLinkChecked(true);
+  }, [applyDeepLinkFromUrl, deepLinkChecked, loading]);
+
+  useEffect(() => {
+    const handler = () => applyDeepLinkFromUrl(window.location.href);
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
-  }, [allJourneyItems]);
+  }, [applyDeepLinkFromUrl]);
 
   useEffect(() => {
     if (!activeJourneyId) return;
@@ -614,6 +643,7 @@ export default function Home() {
   function startEditFromMap(kind: MapItemKind, id: string) {
     closePanel();
     setEditTargetRef({ kind, id });
+    applyTripUrlState(window.location.href, { item: formatItemToken({ kind, id }), journey: null }, "push");
   }
 
   async function deleteFromMap(kind: MapItemKind, id: string) {
@@ -1158,7 +1188,7 @@ export default function Home() {
         const { error: deleteError } = await supabase.from(table).delete().eq("id", id).eq("trip_id", data.trip!.id);
         if (deleteError) setAdminDataError(deleteError.message);
         else {
-          if (table === "days") setSelectedDayId((current) => current === id ? null : current);
+          if (table === "days") selectDay(selectedDayId === id ? null : selectedDayId);
           if (photoStoragePaths.length > 0) {
             const { error: storageDeleteError } = await supabase.storage.from(PHOTO_BUCKET).remove(photoStoragePaths);
             if (storageDeleteError) setAdminDataError(`Item deleted, but photo file cleanup failed: ${storageDeleteError.message}`);
@@ -1172,7 +1202,7 @@ export default function Home() {
         const deletedPhoto = table === "photos" ? data.photos.find((item) => item.id === id) : null;
         if (deletedPhoto?.image_url?.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.image_url);
         if (deletedPhoto?.thumbnail_url?.startsWith("blob:")) URL.revokeObjectURL(deletedPhoto.thumbnail_url);
-        if (table === "days") setSelectedDayId((current) => current === id ? null : current);
+        if (table === "days") selectDay(selectedDayId === id ? null : selectedDayId);
         setData((current) => ({
           ...current,
           days: table === "days" ? current.days.filter((item) => item.id !== id) : current.days,
@@ -1223,7 +1253,7 @@ export default function Home() {
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
+        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={selectDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
             {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} /> : null}
@@ -1232,7 +1262,7 @@ export default function Home() {
           </MapView>
         </div>
       </div>
-      {!panel ? <MobileSheet trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
+      {!panel ? <MobileSheet trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={selectDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
@@ -1241,7 +1271,7 @@ export default function Home() {
       {panel === "note" ? <AddNotePanel days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
-      {editTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminDataSaving} onClose={() => setEditTargetRef(null)} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
+      {editTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminDataSaving} onClose={() => { setEditTargetRef(null); applyTripUrlState(window.location.href, { item: null }); }} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
       {journeyOpen ? (
         <JourneyPlayback
           items={journeyItems}
