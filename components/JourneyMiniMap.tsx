@@ -90,21 +90,29 @@ const HOLD_RADIUS_KM = 0.08;
 // interrupted flight), stepping should bring the camera back.
 const HOLD_MAX_WANDER_KM = 1.5;
 
-// Collapsed-size presets the +/- buttons step through; the choice persists
-// across sessions. Index 1 is the historical default.
+// Size presets the +/- buttons step through — one ladder per mode, adjusted
+// by whichever is showing, each persisted across sessions. Index 1 is the
+// historical default in both.
 const COLLAPSED_SIZES = [
   "h-24 w-36 sm:h-36 sm:w-56",
   "h-32 w-44 sm:h-48 sm:w-72",
   "h-44 w-60 sm:h-60 sm:w-96",
   "h-56 w-[19rem] sm:h-72 sm:w-[30rem]",
 ];
+const EXPANDED_SIZES = [
+  "h-[min(50dvh,26rem)] w-[min(85vw,32rem)]",
+  "h-[min(62dvh,32rem)] w-[min(92vw,40rem)]",
+  "h-[min(75dvh,42rem)] w-[min(94vw,56rem)]",
+  "h-[min(88dvh,54rem)] w-[min(96vw,72rem)]",
+];
 const SIZE_STORAGE_KEY = "lofoten-minimap-size";
+const EXPANDED_SIZE_STORAGE_KEY = "lofoten-minimap-size-expanded";
 
-function storedSizeIndex() {
+function storedSizeIndex(key: string, presetCount: number) {
   if (typeof window === "undefined") return 1;
-  const raw = window.localStorage.getItem(SIZE_STORAGE_KEY);
+  const raw = window.localStorage.getItem(key);
   const parsed = raw === null ? NaN : Number(raw);
-  return Number.isInteger(parsed) && parsed >= 0 && parsed < COLLAPSED_SIZES.length ? parsed : 1;
+  return Number.isInteger(parsed) && parsed >= 0 && parsed < presetCount ? parsed : 1;
 }
 // Legs longer than this (ferry hops, transfers) skip the ground-level walk and
 // use Mapbox's arcing flyTo instead — panning 20km at hiking zoom is a blur.
@@ -145,7 +153,8 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [sizeIndex, setSizeIndex] = useState(storedSizeIndex);
+  const [sizeIndex, setSizeIndex] = useState(() => storedSizeIndex(SIZE_STORAGE_KEY, COLLAPSED_SIZES.length));
+  const [expandedSizeIndex, setExpandedSizeIndex] = useState(() => storedSizeIndex(EXPANDED_SIZE_STORAGE_KEY, EXPANDED_SIZES.length));
   const [unavailable, setUnavailable] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const collapseTimerRef = useRef<number | null>(null);
@@ -566,11 +575,16 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     collapseTimerRef.current = window.setTimeout(() => setExpanded(false), 700);
   }
 
+  // Adjust whichever mode is showing: the collapsed default when collapsed,
+  // the enlarged size when expanded.
   function stepSize(direction: 1 | -1) {
     sizeChangedAtRef.current = performance.now();
-    setSizeIndex((current) => {
-      const next = Math.min(COLLAPSED_SIZES.length - 1, Math.max(0, current + direction));
-      if (typeof window !== "undefined") window.localStorage.setItem(SIZE_STORAGE_KEY, String(next));
+    const [setter, key, count] = expanded
+      ? [setExpandedSizeIndex, EXPANDED_SIZE_STORAGE_KEY, EXPANDED_SIZES.length] as const
+      : [setSizeIndex, SIZE_STORAGE_KEY, COLLAPSED_SIZES.length] as const;
+    setter((current) => {
+      const next = Math.min(count - 1, Math.max(0, current + direction));
+      if (typeof window !== "undefined") window.localStorage.setItem(key, String(next));
       return next;
     });
   }
@@ -595,12 +609,14 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   }, [expanded]);
 
   const controlButton = "pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded-full bg-stone-950/55 text-white backdrop-blur transition hover:bg-stone-950/75 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30 disabled:cursor-not-allowed disabled:opacity-40";
+  const activeSizeIndex = expanded ? expandedSizeIndex : sizeIndex;
+  const activeSizeCount = expanded ? EXPANDED_SIZES.length : COLLAPSED_SIZES.length;
   const sizeControls = (
     <>
-      <button type="button" onClick={() => stepSize(-1)} disabled={sizeIndex === 0} className={controlButton} aria-label="Shrink mini-map" title="Smaller mini-map">
+      <button type="button" onClick={() => stepSize(-1)} disabled={activeSizeIndex === 0} className={controlButton} aria-label="Shrink mini-map" title="Smaller mini-map">
         <Minus className="h-3.5 w-3.5" />
       </button>
-      <button type="button" onClick={() => stepSize(1)} disabled={sizeIndex === COLLAPSED_SIZES.length - 1} className={controlButton} aria-label="Grow mini-map" title="Larger mini-map">
+      <button type="button" onClick={() => stepSize(1)} disabled={activeSizeIndex === activeSizeCount - 1} className={controlButton} aria-label="Grow mini-map" title="Larger mini-map">
         <Plus className="h-3.5 w-3.5" />
       </button>
     </>
@@ -615,7 +631,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       <div
         className={cn(
           "relative overflow-hidden rounded-2xl border border-white/20 bg-stone-950/70 shadow-2xl transition-all duration-300",
-          expanded ? "h-[min(62dvh,32rem)] w-[min(92vw,40rem)]" : COLLAPSED_SIZES[sizeIndex],
+          expanded ? EXPANDED_SIZES[expandedSizeIndex] : COLLAPSED_SIZES[sizeIndex],
         )}
         onMouseEnter={expand}
       >
