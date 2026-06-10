@@ -162,6 +162,12 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   // not engage then: rapid steps interrupt the flight, and holding against a
   // target the camera never reached would freeze it mid-leg.
   const flightActiveRef = useRef(false);
+  // Monotonic flight generation. Every animation callback checks it belongs
+  // to the current generation before doing anything: under rapid stepping,
+  // cancelAnimationFrame can race the frame that re-arms the loop, leaving a
+  // zombie flight steering the camera toward a stale photo. The generation
+  // check makes a surviving callback exit instead.
+  const flightGenRef = useRef(0);
   const cancelFlight = useCallback(() => {
     flightCleanupRef.current?.();
     flightCleanupRef.current = null;
@@ -361,13 +367,13 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     // in-progress flight so it doesn't keep walking toward a stale target.
     if (!next) {
       cancelFlight();
+      flightGenRef.current++;
       return;
     }
     // Captured before cancelFlight: is the camera mid-motion (our rAF flight,
     // or a Mapbox ease/fly still animating)? Holding still is only valid from
     // a settled camera that genuinely frames the previous target.
     const inMotion = flightActiveRef.current || map.isMoving();
-    cancelFlight();
     // Travel from wherever the camera actually is: identical to the previous
     // item after a completed flight, and free of snap-backs when a flight was
     // interrupted or the user panned away.
@@ -390,10 +396,22 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       && distanceKm(lastTarget, next) < HOLD_RADIUS_KM
       && distanceKm(lastTarget, prev) < HOLD_MAX_WANDER_KM
     ) {
+      cancelFlight();
+      flightGenRef.current++;
       setLegLine(emptyLine());
       return;
     }
-    lastTargetRef.current = next;
+    cancelFlight();
+    const generation = ++flightGenRef.current;
+    // Kill any Mapbox-driven animation (the opening ease, a long-leg flyTo):
+    // it would otherwise keep writing the camera every frame in parallel with
+    // the new flight — and win, carrying the view to the stale target.
+    map.stop();
+    // The anchor records *completed* arrivals only. It is cleared here and
+    // re-set when motion finishes, so an interrupted flight (rapid steps, a
+    // location-less item mid-burst) can never convince the hold logic that
+    // the camera is somewhere it never actually arrived.
+    lastTargetRef.current = null;
 
     const followZoom = expanded ? 13.6 : 12.8;
     const reduceMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -409,6 +427,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     let normalizeAttempts = 0;
     let normalizeFrame = 0;
     const normalize = () => {
+      if (flightGenRef.current !== generation) return;
       if (normalizeAttempts >= 3) return;
       const camNow = map.getFreeCameraOptions();
       const altNow = camNow.position?.toAltitude();
@@ -430,6 +449,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       const targetAlt = photoGround + CAMERA_HEIGHT_M;
       const begin = performance.now();
       const glide = (now: number) => {
+        if (flightGenRef.current !== generation) return;
         const gt = Math.min(1, (now - begin) / 450);
         const k = easeInOut(gt);
         const cam = map.getFreeCameraOptions();
@@ -461,6 +481,9 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       } else {
         map.easeTo({ center: [next.lng, next.lat], zoom: followZoom, pitch: FOLLOW_PITCH, duration: 900, essential: true });
       }
+      // Safe to anchor optimistically: if this animation is interrupted, the
+      // next effect run clears the anchor before the hold logic can read it.
+      lastTargetRef.current = next;
       return cancelFlight;
     }
 
@@ -486,6 +509,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     const startTime = performance.now();
 
     const frame = (now: number) => {
+      if (flightGenRef.current !== generation) return;
       const t = Math.min(1, (now - startTime) / duration);
       const eased = easeInOut(t);
       const blend = Math.min(1, t * 2.5);
@@ -512,8 +536,14 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       );
       camera.setPitchBearing(lerp(startPitch, FOLLOW_PITCH, blend), heading);
       map.setFreeCameraOptions(camera);
-      if (t < 1) frameId = requestAnimationFrame(frame);
-      else flightActiveRef.current = false;
+      if (t < 1) {
+        frameId = requestAnimationFrame(frame);
+      } else {
+        flightActiveRef.current = false;
+        // Arrival completed: this is the only moment the camera verifiably
+        // frames the photo, so only now does it become the hold anchor.
+        lastTargetRef.current = next;
+      }
       // No closing ease: the flight's final frame already poses the camera on
       // the photo, and any zoom-based hand-back races Mapbox's async center
       // elevation over terrain — the very lurch this flight exists to avoid.
