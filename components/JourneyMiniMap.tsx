@@ -136,6 +136,10 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   // The coordinate the camera last flew to, so near-identical photo positions
   // (GPS noise apart) can hold the camera still instead of nudging it.
   const lastTargetRef = useRef<LngLat | null>(null);
+  // True while a free-camera flight is mid-air. The hold-still shortcut must
+  // not engage then: rapid steps interrupt the flight, and holding against a
+  // target the camera never reached would freeze it mid-leg.
+  const flightActiveRef = useRef(false);
   const cancelFlight = useCallback(() => {
     flightCleanupRef.current?.();
     flightCleanupRef.current = null;
@@ -337,6 +341,10 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       cancelFlight();
       return;
     }
+    // Captured before cancelFlight: is the camera mid-motion (our rAF flight,
+    // or a Mapbox ease/fly still animating)? Holding still is only valid from
+    // a settled camera that genuinely frames the previous target.
+    const inMotion = flightActiveRef.current || map.isMoving();
     cancelFlight();
     // Travel from wherever the camera actually is: identical to the previous
     // item after a completed flight, and free of snap-backs when a flight was
@@ -355,7 +363,8 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     // tiny hops can't slowly walk the camera away.
     const lastTarget = lastTargetRef.current;
     if (
-      lastTarget
+      !inMotion
+      && lastTarget
       && distanceKm(lastTarget, next) < HOLD_RADIUS_KM
       && distanceKm(lastTarget, prev) < HOLD_MAX_WANDER_KM
     ) {
@@ -416,6 +425,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     map.on("idle", normalize);
     let frameId = 0;
     flightCleanupRef.current = () => {
+      flightActiveRef.current = false;
       cancelAnimationFrame(frameId);
       cancelAnimationFrame(normalizeFrame);
       map.off("idle", normalize);
@@ -481,11 +491,13 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       camera.setPitchBearing(lerp(startPitch, FOLLOW_PITCH, blend), heading);
       map.setFreeCameraOptions(camera);
       if (t < 1) frameId = requestAnimationFrame(frame);
+      else flightActiveRef.current = false;
       // No closing ease: the flight's final frame already poses the camera on
       // the photo, and any zoom-based hand-back races Mapbox's async center
       // elevation over terrain — the very lurch this flight exists to avoid.
       // The idle normalizer corrects the pose if anything still lands badly.
     };
+    flightActiveRef.current = true;
     frameId = requestAnimationFrame(frame);
     return cancelFlight;
   }, [activeItem.coord, cancelFlight, expanded, routes]);
