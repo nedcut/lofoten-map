@@ -2,49 +2,38 @@
 
 import dynamic from "next/dynamic";
 import mapboxgl from "mapbox-gl";
-import { length } from "@turf/turf";
+import length from "@turf/length";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { LineString } from "geojson";
-import type { User } from "@supabase/supabase-js";
 import { AlertCircle, Loader2, LogIn, Mail, Play, ShieldCheck, Sparkles, UserRound, X } from "lucide-react";
-import { AddNotePanel } from "@/components/AddNotePanel";
 import { DaySidebar } from "@/components/DaySidebar";
 import { JourneyPlayback, type JourneyFilter } from "@/components/JourneyPlayback";
-import { ManualRoutePanel } from "@/components/ManualRoutePanel";
 import { MapLegend } from "@/components/MapLegend";
 import { MobileSheet } from "@/components/MobileSheet";
 import { RouteDraftLayer } from "@/components/RouteDraftLayer";
 import { TripLayers, type MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
-import { ProfilePanel } from "@/components/ProfilePanel";
-import { UploadPhotoPanel, type PhotoUploadItemInput, type PhotoUploadProgress, type PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
 import { deriveTripAccess } from "@/lib/access";
+import { demoTripData, emptyTripData } from "@/lib/demo-trip";
 import { gpxTimeToTripDate, groupPointsByDay, parseGpx, simplifyToLineString } from "@/lib/gpx";
+import { useTripAuth } from "@/lib/hooks/useTripAuth";
+import { useTripData } from "@/lib/hooks/useTripData";
 import { buildJourneyItems } from "@/lib/journey";
+import { clearNoteDraft } from "@/lib/offline-drafts";
 import { prepareAvatarFile } from "@/lib/avatar-processing";
 import { prepareMediaFiles } from "@/lib/media-processing";
 import { partitionDuplicatePhotos } from "@/lib/photo-dedup";
-import { isMissingSchemaObjectError } from "@/lib/schema-errors";
-import { AVATAR_BUCKET, PHOTO_BUCKET, getSupabaseBrowserClient, resolveMemberAvatars, resolvePhotoUrls } from "@/lib/supabase";
+import { AVATAR_BUCKET, PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
 import { applyTripUrlState, formatDayParam, formatItemToken, parseItemToken, readTripUrlState, resolveDayParam } from "@/lib/trip-url";
 import { cn } from "@/lib/utils";
-import type { AdminRequest, Day, LngLat, MapClickMode, Note, Photo, Place, RouteMode, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
+import type { Day, LngLat, MapClickMode, Note, RouteMode, RouteSegment } from "@/types/trip";
+import type { PhotoUploadItemInput, PhotoUploadProgress, PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
-
-const demoTripId = "00000000-0000-4000-8000-000000000001";
-const demoCreatedAt = "2026-01-01T00:00:00.000Z";
-const demoDays: Day[] = [
-  { id: "00000000-0000-4000-8000-000000000101", trip_id: demoTripId, day_number: 1, date: "2026-07-12", title: "Reine arrival", summary: "Settle in, ferry views, and first village walk.", created_at: demoCreatedAt },
-  { id: "00000000-0000-4000-8000-000000000102", trip_id: demoTripId, day_number: 2, date: "2026-07-13", title: "Kjerkfjorden hike", summary: "Trail day toward fjord viewpoints.", created_at: demoCreatedAt },
-  { id: "00000000-0000-4000-8000-000000000103", trip_id: demoTripId, day_number: 3, date: "2026-07-14", title: "Moskenes coast", summary: "Weather window, photo stops, and camp scouting.", created_at: demoCreatedAt },
-];
-const demoTrip: Trip = { id: demoTripId, title: "Lofoten 2026", slug: "lofoten-2026", description: "A shared Lofoten hiking logbook.", start_date: "2026-07-12", end_date: "2026-07-18", created_at: demoCreatedAt };
-const demoRoutes: RouteSegment[] = [{ id: "route-demo", trip_id: demoTripId, day_id: demoDays[1].id, name: "Reine to Kjerkfjorden scouting route", source: "seed", mode: "hike", geometry_geojson: { type: "LineString", coordinates: [[13.089, 67.932], [13.068, 67.941], [13.045, 67.954], [13.019, 67.967]] }, distance_meters: 6200, elevation_gain_meters: 420, created_at: demoCreatedAt }];
-const demoNotes: Note[] = [{ id: "note-demo-1", trip_id: demoTripId, day_id: demoDays[0].id, user_id: null, author_name: "Maja", lat: 67.9328, lng: 13.0888, body: "Sunset light on Reinebringen looked unreal from the harbor.", note_type: "note", created_at: demoCreatedAt }];
-const demoPlaces: Place[] = [{ id: "place-demo-1", trip_id: demoTripId, day_id: demoDays[2].id, name: "Coffee and cinnamon buns", lat: 67.9007, lng: 13.0461, place_type: "food", description: "Good meetup stop before the ferry.", created_at: demoCreatedAt }];
-const demoData: TripData = { trip: demoTrip, days: demoDays, routeSegments: demoRoutes, photos: [], notes: demoNotes, places: demoPlaces, members: [], adminRequests: [] };
-const emptyData: TripData = { trip: null, days: [], routeSegments: [], photos: [], notes: [], places: [], members: [], adminRequests: [] };
+const AddNotePanel = dynamic(() => import("@/components/AddNotePanel").then((mod) => mod.AddNotePanel));
+const ManualRoutePanel = dynamic(() => import("@/components/ManualRoutePanel").then((mod) => mod.ManualRoutePanel));
+const ProfilePanel = dynamic(() => import("@/components/ProfilePanel").then((mod) => mod.ProfilePanel));
+const UploadPhotoPanel = dynamic(() => import("@/components/UploadPhotoPanel").then((mod) => mod.UploadPhotoPanel));
 const UPLOAD_CONCURRENCY = 4;
 // Storage files are uuid-named and never rewritten, so browsers and the CDN
 // can cache them for a year instead of re-downloading every hour.
@@ -97,13 +86,37 @@ function fileExtension(file: File) {
 
 export default function Home() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
-  const [data, setData] = useState<TripData>(() => (supabase ? emptyData : demoData));
-  const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(Boolean(supabase));
-  const [authMessage, setAuthMessage] = useState<string | null>(null);
-  const [authMessageTone, setAuthMessageTone] = useState<"info" | "error">("info");
-  const [authSubmitting, setAuthSubmitting] = useState(false);
-  const [authPanelOpen, setAuthPanelOpen] = useState(false);
+  const tripSlug = process.env.NEXT_PUBLIC_TRIP_SLUG ?? "lofoten-2026";
+  const {
+    user,
+    authLoading,
+    authMessage,
+    authMessageTone,
+    authSubmitting,
+    authPanelOpen,
+    setAuthPanelOpen,
+    signIn,
+    signInWithGoogle,
+    signOut,
+  } = useTripAuth(supabase);
+  const {
+    data,
+    setData,
+    loading,
+    error,
+    notice,
+    setError,
+    setNotice,
+    loadData,
+    adminRequestsAvailable,
+    profilesAvailable,
+  } = useTripData({
+    supabase,
+    user,
+    authLoading,
+    tripSlug,
+    initialData: supabase ? emptyTripData : demoTripData,
+  });
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [memberMessage, setMemberMessage] = useState<string | null>(null);
@@ -126,155 +139,6 @@ export default function Home() {
   const [journeyFilter, setJourneyFilter] = useState<JourneyFilter>("all");
   const [journeyUploaderFilter, setJourneyUploaderFilter] = useState("");
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(Boolean(supabase));
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [adminRequestsAvailable, setAdminRequestsAvailable] = useState(true);
-  const [profilesAvailable, setProfilesAvailable] = useState(true);
-
-  const tripSlug = process.env.NEXT_PUBLIC_TRIP_SLUG ?? "lofoten-2026";
-
-  useEffect(() => {
-    if (!supabase) return;
-    let mounted = true;
-    supabase.auth.getSession().then(({ data: sessionData }) => {
-      if (!mounted) return;
-      setUser(sessionData.session?.user ?? null);
-      setAuthLoading(false);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setAuthLoading(false);
-      setAuthMessage(null);
-      setAuthMessageTone("info");
-      // Close the sign-in modal once a session lands. Data reloads via the
-      // auth-driven effect below; signing out drops to the public view, not blank.
-      if (session?.user) setAuthPanelOpen(false);
-    });
-    return () => {
-      mounted = false;
-      listener.subscription.unsubscribe();
-    };
-  }, [supabase]);
-
-  const loadData = useCallback(async () => {
-    if (!supabase) return;
-    setLoading(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const { data: trip, error: tripError } = await supabase.from("trips").select("*").eq("slug", tripSlug).maybeSingle();
-      if (tripError || !trip) {
-        setError(tripError
-          ? `We could not load the trip right now. Try refreshing, or ask an admin to check access. ${tripError.message}`
-          : "The trip is not set up yet. Ask an admin to finish creating it, then refresh.");
-        return;
-      }
-      // Signed-in visitors auto-join as members before we read the roster, so the
-      // contribute controls light up on first sign-in without an admin invite.
-      if (user) await supabase.rpc("ensure_trip_membership", { target_trip_slug: tripSlug });
-      const adminRequestsQuery = user
-        ? supabase.from("admin_requests").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false })
-        : Promise.resolve({ data: [], error: null });
-      const [days, routes, photos, notes, places, members, adminRequests] = await Promise.all([
-        supabase.from("days").select("*").eq("trip_id", trip.id).order("day_number"),
-        supabase.from("route_segments").select("*").eq("trip_id", trip.id).order("created_at"),
-        supabase.from("photos").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
-        supabase.from("notes").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
-        supabase.from("places").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
-        supabase.from("trip_members").select("trip_id,user_id,role,display_name,avatar_path,created_at").eq("trip_id", trip.id).order("created_at"),
-        adminRequestsQuery,
-      ]);
-      const adminRequestsMissing = isMissingSchemaObjectError(adminRequests.error, "admin_requests");
-      setAdminRequestsAvailable(!adminRequestsMissing);
-      // Tolerate a deployed schema that predates the avatar migration: refetch
-      // the roster without avatar_path so membership and roles keep working,
-      // and hide profile editing until the migration lands.
-      const profilesMissing = isMissingSchemaObjectError(members.error, "avatar_path");
-      setProfilesAvailable(!profilesMissing);
-      const membersResult = profilesMissing
-        ? await supabase.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", trip.id).order("created_at")
-        : members;
-      if (adminRequestsMissing || profilesMissing) {
-        const stale = [adminRequestsMissing ? "Admin access requests" : null, profilesMissing ? "Member profiles" : null].filter(Boolean).join(" and ");
-        setNotice(`${stale} are temporarily unavailable. Push the latest Supabase migrations, then refresh.`);
-      }
-      const failure = [days.error, routes.error, photos.error, notes.error, places.error, membersResult.error, adminRequestsMissing ? null : adminRequests.error].find(Boolean);
-      if (failure) {
-        setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
-      } else {
-        const resolvedPhotos = resolvePhotoUrls(supabase, (photos.data ?? []) as Photo[]);
-        const memberRows = ((membersResult.data ?? []) as Partial<TripMember>[]).map((member) => ({ avatar_path: null, ...member })) as TripMember[];
-        const resolvedMembers = resolveMemberAvatars(supabase, memberRows);
-        setData({ trip, days: days.data ?? [], routeSegments: (routes.data ?? []) as RouteSegment[], photos: resolvedPhotos, notes: notes.data ?? [], places: places.data ?? [], members: resolvedMembers, adminRequests: adminRequestsMissing ? [] : (adminRequests.data ?? []) as AdminRequest[] });
-      }
-    } catch (loadError) {
-      setError(loadError instanceof Error ? `We could not sync the trip right now. Try refreshing. ${loadError.message}` : "We could not sync the trip right now. Try refreshing.");
-    } finally {
-      setLoading(false);
-    }
-  }, [supabase, tripSlug, user]);
-
-  useEffect(() => {
-    if (!supabase) return;
-    if (authLoading) return;
-    // Load for everyone — reads are public. Re-runs on sign in/out so member-only
-    // controls and any write-gated data refresh with the new session.
-    loadData();
-  }, [authLoading, loadData, supabase, user]);
-
-  useEffect(() => {
-    if (!supabase || !data.trip) return;
-    const channel = supabase
-      .channel("lofoten-logbook-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "photos", filter: `trip_id=eq.${data.trip.id}` }, loadData)
-      .on("postgres_changes", { event: "*", schema: "public", table: "notes", filter: `trip_id=eq.${data.trip.id}` }, loadData)
-      .on("postgres_changes", { event: "*", schema: "public", table: "route_segments", filter: `trip_id=eq.${data.trip.id}` }, loadData)
-      .on("postgres_changes", { event: "*", schema: "public", table: "places", filter: `trip_id=eq.${data.trip.id}` }, loadData)
-      .on("postgres_changes", { event: "*", schema: "public", table: "trip_members", filter: `trip_id=eq.${data.trip.id}` }, loadData);
-    if (adminRequestsAvailable) {
-      channel.on("postgres_changes", { event: "*", schema: "public", table: "admin_requests", filter: `trip_id=eq.${data.trip.id}` }, loadData);
-    }
-    channel.subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [adminRequestsAvailable, data.trip, loadData, supabase]);
-
-  async function signIn(email: string) {
-    if (!supabase) return;
-    setAuthSubmitting(true);
-    setAuthMessage(null);
-    setAuthMessageTone("info");
-    const { error: signInError } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.origin },
-    });
-    setAuthMessageTone(signInError ? "error" : "info");
-    setAuthMessage(signInError ? signInError.message : "Check your email for a sign-in link.");
-    setAuthSubmitting(false);
-  }
-
-  async function signInWithGoogle() {
-    if (!supabase) return;
-    setAuthSubmitting(true);
-    setAuthMessage(null);
-    setAuthMessageTone("info");
-    const { error: signInError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: window.location.origin },
-    });
-    if (signInError) {
-      setAuthMessageTone("error");
-      setAuthMessage(signInError.message);
-      setAuthSubmitting(false);
-    }
-  }
-
-  async function signOut() {
-    if (!supabase) return;
-    await supabase.auth.signOut();
-    setUser(null);
-    // Keep the data — reads are public, so signing out just drops edit access.
-  }
 
   async function saveProfile(input: { displayName: string; avatarFile: File | null; removeAvatar: boolean }) {
     if (!supabase || !data.trip || !user) return;
@@ -679,7 +543,10 @@ export default function Home() {
       setError(saveError instanceof Error ? saveError.message : "Could not save note.");
     } finally {
       setSaving(false);
-      if (didSave) closePanel();
+      if (didSave) {
+        clearNoteDraft(tripSlug);
+        closePanel();
+      }
     }
   }
 
@@ -1268,7 +1135,7 @@ export default function Home() {
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
       {supabase && !authLoading && !user && authPanelOpen ? <AuthPanel message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
       {supabase && user && currentMember && profilesAvailable && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
-      {panel === "note" ? <AddNotePanel days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
+      {panel === "note" ? <AddNotePanel tripSlug={tripSlug} days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
       {editTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminDataSaving} onClose={() => { setEditTargetRef(null); applyTripUrlState(window.location.href, { item: null }); }} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
