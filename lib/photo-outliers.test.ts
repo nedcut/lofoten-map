@@ -52,6 +52,8 @@ describe("detectPhotoOutliers", () => {
     expect(outliers[0].suggested.lat).toBeCloseTo(67.9, 2);
     expect(outliers[0].suggested.lng).toBeCloseTo(13.0, 2);
     expect(outliers[0].neighborCount).toBe(4);
+    expect(outliers[0].neighbors).toHaveLength(4);
+    expect(outliers[0].neighbors[0]).toEqual({ lat: 67.9, lng: 13.0 });
   });
 
   it("stays robust when two photos are misplaced together", () => {

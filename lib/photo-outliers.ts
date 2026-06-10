@@ -9,6 +9,8 @@ export type PhotoOutlier = {
   distanceKm: number;
   // Robust center of the neighbors: the suggested corrected position.
   suggested: LngLat;
+  // Where the time-neighbors sit, for showing the group on the map.
+  neighbors: LngLat[];
   neighborCount: number;
   windowMinutes: number;
 };
@@ -78,6 +80,7 @@ export function detectPhotoOutliers(photos: Photo[], options: DetectOutlierOptio
         photo: candidate.photo,
         distanceKm: offsetKm,
         suggested,
+        neighbors: neighbors.map((entry) => entry.coord),
         neighborCount: neighbors.length,
         windowMinutes,
       });

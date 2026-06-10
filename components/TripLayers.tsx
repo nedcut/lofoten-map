@@ -66,9 +66,12 @@ type Props = {
   // The photo currently open in the editor, marked on the map with a pulsing
   // ring so it's obvious which marker is being edited.
   highlightedPhotoId: string | null;
+  // A location-check preview: the flagged photo, its time-neighbor group,
+  // and the suggested corrected position.
+  outlierPreview: { photo: { lng: number; lat: number }; suggested: { lng: number; lat: number }; neighbors: Array<{ lng: number; lat: number }> } | null;
 };
 
-export function TripLayers({ map, routes, photos, notes, places, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId }: Props) {
+export function TripLayers({ map, routes, photos, notes, places, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId, outlierPreview }: Props) {
   // Popup click handlers are attached once (keyed on [map]); this ref lets those
   // long-lived closures read the latest permissions/callbacks without re-binding.
   const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto });
@@ -503,6 +506,55 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       marker.remove();
     };
   }, [highlightedPhotoId, map, photos]);
+
+  // Location-check preview: a pulsing ring on the flagged photo, a dot on
+  // each time-neighbor, a dashed ring at the suggested spot, and a line
+  // connecting photo to suggestion. Drawn from the outlier data itself, so it
+  // shows even when the day filter hides the photo's marker.
+  useEffect(() => {
+    if (!map || !outlierPreview) return;
+    const { photo, suggested, neighbors } = outlierPreview;
+    const markers: mapboxgl.Marker[] = [];
+
+    const ringHost = document.createElement("div");
+    ringHost.className = "lofoten-photo-highlight";
+    ringHost.style.pointerEvents = "none";
+    const ring = document.createElement("div");
+    ring.className = "lofoten-photo-highlight-ring";
+    ringHost.append(ring);
+    markers.push(new mapboxgl.Marker({ element: ringHost, anchor: "center" }).setLngLat([photo.lng, photo.lat]).addTo(map));
+
+    for (const neighbor of neighbors) {
+      const dot = document.createElement("div");
+      dot.className = "lofoten-outlier-neighbor";
+      markers.push(new mapboxgl.Marker({ element: dot, anchor: "center" }).setLngLat([neighbor.lng, neighbor.lat]).addTo(map));
+    }
+
+    const center = document.createElement("div");
+    center.className = "lofoten-outlier-center";
+    markers.push(new mapboxgl.Marker({ element: center, anchor: "center" }).setLngLat([suggested.lng, suggested.lat]).addTo(map));
+
+    const lineData: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: [{ type: "Feature", geometry: { type: "LineString", coordinates: [[photo.lng, photo.lat], [suggested.lng, suggested.lat]] }, properties: {} }],
+    };
+    const emptyLine: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    if (!getSource(map, "outlier-preview")) {
+      try {
+        map.addSource("outlier-preview", { type: "geojson", data: lineData });
+        map.addLayer({ id: "outlier-preview-line", type: "line", source: "outlier-preview", layout: { "line-cap": "round" }, paint: { "line-color": "#0f766e", "line-width": 2.5, "line-dasharray": [1.2, 1.8], "line-opacity": 0.85 } });
+      } catch {
+        // Style not ready yet; the markers still show, the line joins later.
+      }
+    } else {
+      (getSource(map, "outlier-preview") as mapboxgl.GeoJSONSource).setData(lineData);
+    }
+
+    return () => {
+      for (const marker of markers) marker.remove();
+      (getSource(map, "outlier-preview") as mapboxgl.GeoJSONSource | undefined)?.setData(emptyLine);
+    };
+  }, [map, outlierPreview]);
 
   return null;
 }

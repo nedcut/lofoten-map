@@ -20,6 +20,7 @@ import { gpxTimeToTripDate, groupPointsByDay, parseGpx, simplifyToLineString } f
 import { useTripAuth } from "@/lib/hooks/useTripAuth";
 import { useTripData } from "@/lib/hooks/useTripData";
 import { buildJourneyItems } from "@/lib/journey";
+import type { PhotoOutlier } from "@/lib/photo-outliers";
 import { clearNoteDraft } from "@/lib/offline-drafts";
 import { prepareAvatarFile } from "@/lib/avatar-processing";
 import { prepareMediaFiles } from "@/lib/media-processing";
@@ -137,6 +138,7 @@ export default function Home() {
   const [editTargetRef, setEditTargetRef] = useState<{ kind: MapItemKind; id: string } | null>(null);
   const [activeJourneyId, setActiveJourneyId] = useState<string | null>(null);
   const [lastFocusedPhotoId, setLastFocusedPhotoId] = useState<string | null>(null);
+  const [outlierPreview, setOutlierPreview] = useState<PhotoOutlier | null>(null);
   const [deepLinkChecked, setDeepLinkChecked] = useState(false);
   const [journeyFilter, setJourneyFilter] = useState<JourneyFilter>("all");
   const [journeyUploaderFilter, setJourneyUploaderFilter] = useState("");
@@ -339,8 +341,18 @@ export default function Home() {
       onUpdatePhoto: updatePhoto,
       onDeleteItem: deleteDataItem,
       onImportGpx: importGpx,
+      onPreviewOutlier: previewOutlier,
     }
     : null;
+  // Map-friendly shape of the previewed outlier (drops photos with no coords).
+  const outlierOverlay = useMemo(() => {
+    if (!outlierPreview || outlierPreview.photo.lng === null || outlierPreview.photo.lat === null) return null;
+    return {
+      photo: { lng: outlierPreview.photo.lng, lat: outlierPreview.photo.lat },
+      suggested: outlierPreview.suggested,
+      neighbors: outlierPreview.neighbors,
+    };
+  }, [outlierPreview]);
 
   const selectDay = useCallback((dayId: string | null) => {
     setSelectedDayId(dayId);
@@ -624,6 +636,25 @@ export default function Home() {
         essential: true,
       });
     }, 120);
+  }
+
+  // Hover/click on a Location-check row: show the flagged photo, its
+  // time-neighbor group, and the suggested spot on the map. A click also
+  // frames the map around all of it so an off-screen stray becomes visible.
+  function previewOutlier(outlier: PhotoOutlier | null, options?: { focus?: boolean }) {
+    setOutlierPreview(outlier);
+    if (!options?.focus || !outlier || !map) return;
+    const photo = outlier.photo;
+    if (photo.lng === null || photo.lat === null) return;
+    const coords: [number, number][] = [
+      [photo.lng, photo.lat],
+      [outlier.suggested.lng, outlier.suggested.lat],
+      ...outlier.neighbors.map((neighbor): [number, number] => [neighbor.lng, neighbor.lat]),
+    ];
+    const bounds = coords.reduce((box, coord) => box.extend(coord), new mapboxgl.LngLatBounds(coords[0], coords[0]));
+    const isMobile = window.innerWidth < 768;
+    const padding = isMobile ? { top: 96, right: 48, bottom: 220, left: 48 } : { top: 80, right: 80, bottom: 80, left: 80 };
+    map.fitBounds(bounds, { padding, maxZoom: 14, duration: 800, essential: true });
   }
 
   // A photo marker was dragged to a new spot. Update local state immediately so
@@ -1266,7 +1297,7 @@ export default function Home() {
         <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
-            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} /> : null}
+            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
             {!mapUnavailable ? <RouteDraftLayer map={map} points={routeDraftPoints} /> : null}
             {!mapUnavailable ? <MapLegend visibility={layerVisibility} /> : null}
           </MapView>

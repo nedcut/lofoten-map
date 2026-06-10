@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, CalendarDays, Camera, FileText, Loader2, MapPin, Pencil, Route, Save, Trash2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { detectPhotoOutliers, type PhotoOutlier } from "@/lib/photo-outliers";
@@ -70,6 +70,9 @@ export type AdminDataProps = {
   onUpdatePhoto: (photoId: string, input: PhotoUpdate) => Promise<void>;
   onDeleteItem: (table: "days" | "route_segments" | "notes" | "places" | "photos", id: string) => Promise<void>;
   onImportGpx: (file: File) => Promise<void>;
+  // Show a location-check outlier on the map (null clears). focus also fits
+  // the map around the photo and its group.
+  onPreviewOutlier: (outlier: PhotoOutlier | null, options?: { focus?: boolean }) => void;
 };
 
 const routeModes: Array<{ value: RouteMode; label: string }> = [
@@ -235,10 +238,23 @@ function formatOffset(km: number) {
 // A flagged photo with its evidence and the two ways to resolve it: snap it
 // to where its time-neighbors were taken, or dismiss the flag (per session —
 // some photos legitimately stray, e.g. a zoomed shot of a distant peak).
-function OutlierRow({ outlier, isSaving, onMove, onDismiss }: { outlier: PhotoOutlier; isSaving: boolean; onMove: () => Promise<void>; onDismiss: () => void }) {
+// Hovering previews the photo and its group on the map; clicking pins the
+// preview and frames the map around it.
+function OutlierRow({ outlier, isSaving, pinned, onMove, onDismiss, onHover, onSelect }: { outlier: PhotoOutlier; isSaving: boolean; pinned: boolean; onMove: () => Promise<void>; onDismiss: () => void; onHover: (hovering: boolean) => void; onSelect: () => void }) {
   const { photo } = outlier;
   return (
-    <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2 rounded-lg border border-amber-300/60 bg-amber-50/70 p-2">
+    <div
+      role="button"
+      tabIndex={0}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+      onClick={onSelect}
+      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }}
+      className={cn(
+        "grid cursor-pointer grid-cols-[3rem_minmax(0,1fr)] gap-2 rounded-lg border bg-amber-50/70 p-2 transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-amber-400/30",
+        pinned ? "border-amber-500 ring-2 ring-amber-400/40" : "border-amber-300/60 hover:border-amber-400",
+      )}
+    >
       <div className="h-12 overflow-hidden rounded-md bg-stone-100">
         {photo.thumbnail_url || photo.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element -- Existing remote URLs come from user uploads.
@@ -256,14 +272,14 @@ function OutlierRow({ outlier, isSaving, onMove, onDismiss }: { outlier: PhotoOu
           <button
             type="button"
             disabled={isSaving}
-            onClick={onMove}
+            onClick={(event) => { event.stopPropagation(); void onMove(); }}
             className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />} Move to group
           </button>
           <button
             type="button"
-            onClick={onDismiss}
+            onClick={(event) => { event.stopPropagation(); onDismiss(); }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-bold text-stone-600 transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.98]"
           >
             <X className="h-3.5 w-3.5" /> Looks right
@@ -271,6 +287,61 @@ function OutlierRow({ outlier, isSaving, onMove, onDismiss }: { outlier: PhotoOu
         </div>
       </div>
     </div>
+  );
+}
+
+// The flagged-photo rows plus their map-preview state: hovering shows a row's
+// photo and group on the map, clicking pins it (and frames the map). Pinning
+// and the unmount cleanup live here so a closed section always clears the map.
+function LocationCheckList({ outliers, isSaving, onMove, onDismiss, onPreview }: {
+  outliers: PhotoOutlier[];
+  isSaving: boolean;
+  onMove: (outlier: PhotoOutlier) => Promise<void>;
+  onDismiss: (outlier: PhotoOutlier) => void;
+  onPreview: AdminDataProps["onPreviewOutlier"];
+}) {
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
+  const pinned = pinnedId ? outliers.find((outlier) => outlier.photo.id === pinnedId) ?? null : null;
+  const previewRef = useRef(onPreview);
+  useEffect(() => {
+    previewRef.current = onPreview;
+  }, [onPreview]);
+  // Clear the overlay when the section closes (LazyDetails unmounts children).
+  useEffect(() => () => previewRef.current(null), []);
+  // ...and when the pinned outlier resolves (moved or list recomputed).
+  useEffect(() => {
+    if (pinnedId && !pinned) {
+      setPinnedId(null);
+      previewRef.current(null);
+    }
+  }, [pinned, pinnedId]);
+
+  return (
+    <>
+      {outliers.map((outlier) => (
+        <OutlierRow
+          key={outlier.photo.id}
+          outlier={outlier}
+          isSaving={isSaving}
+          pinned={outlier.photo.id === pinnedId}
+          onHover={(hovering) => onPreview(hovering ? outlier : pinned)}
+          onSelect={() => {
+            setPinnedId(outlier.photo.id);
+            onPreview(outlier, { focus: true });
+          }}
+          onMove={async () => {
+            setPinnedId(null);
+            onPreview(null);
+            await onMove(outlier);
+          }}
+          onDismiss={() => {
+            setPinnedId(null);
+            onPreview(null);
+            onDismiss(outlier);
+          }}
+        />
+      ))}
+    </>
   );
 }
 
@@ -383,15 +454,13 @@ export function AdminDataPanel(props: AdminDataProps) {
           {visibleOutliers.length === 0 ? (
             <EmptyRow label="No suspect locations found" />
           ) : (
-            visibleOutliers.map((outlier) => (
-              <OutlierRow
-                key={outlier.photo.id}
-                outlier={outlier}
-                isSaving={props.isSaving}
-                onMove={() => moveOutlier(outlier)}
-                onDismiss={() => setDismissedOutliers((current) => new Set([...current, outlier.photo.id]))}
-              />
-            ))
+            <LocationCheckList
+              outliers={visibleOutliers}
+              isSaving={props.isSaving}
+              onMove={moveOutlier}
+              onDismiss={(outlier) => setDismissedOutliers((current) => new Set([...current, outlier.photo.id]))}
+              onPreview={props.onPreviewOutlier}
+            />
           )}
         </div>
       </LazyDetails>
