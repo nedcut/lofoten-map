@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { CalendarDays, Camera, FileText, Loader2, MapPin, Pencil, Route, Save, Trash2, Upload } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { AlertTriangle, CalendarDays, Camera, FileText, Loader2, MapPin, Pencil, Route, Save, Trash2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { detectPhotoOutliers, type PhotoOutlier } from "@/lib/photo-outliers";
 import type { Day, Note, Photo, Place, RouteMode, RouteSegment, Trip } from "@/types/trip";
 
 type TripUpdate = {
@@ -227,7 +228,73 @@ function PhotoList({ photos, days, isSaving, onSave, onDeleteItem }: Pick<AdminD
   );
 }
 
+function formatOffset(km: number) {
+  return km >= 1 ? `${km.toFixed(1)} km` : `${Math.round(km * 1000)} m`;
+}
+
+// A flagged photo with its evidence and the two ways to resolve it: snap it
+// to where its time-neighbors were taken, or dismiss the flag (per session —
+// some photos legitimately stray, e.g. a zoomed shot of a distant peak).
+function OutlierRow({ outlier, isSaving, onMove, onDismiss }: { outlier: PhotoOutlier; isSaving: boolean; onMove: () => Promise<void>; onDismiss: () => void }) {
+  const { photo } = outlier;
+  return (
+    <div className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2 rounded-lg border border-amber-300/60 bg-amber-50/70 p-2">
+      <div className="h-12 overflow-hidden rounded-md bg-stone-100">
+        {photo.thumbnail_url || photo.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element -- Existing remote URLs come from user uploads.
+          <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-[10px] font-bold text-stone-500">{photo.media_type === "video" ? "Video" : "Photo"}</div>
+        )}
+      </div>
+      <div className="min-w-0 space-y-1.5">
+        <div className="truncate text-sm font-semibold text-stone-900">{photoLabel(photo)}</div>
+        <div className="text-xs leading-4 text-stone-600">
+          {formatOffset(outlier.distanceKm)} away from the {outlier.neighborCount} photos taken within {outlier.windowMinutes} min of it
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={onMove}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />} Move to group
+          </button>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-bold text-stone-600 transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.98]"
+          >
+            <X className="h-3.5 w-3.5" /> Looks right
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AdminDataPanel(props: AdminDataProps) {
+  // Photos far from where their time-neighbors were taken — usually a wrong
+  // manual placement. Dismissals live for the session only; a photo that is
+  // genuinely fine will simply reappear next visit and can be dismissed again
+  // (or moved, which removes it from the list for good).
+  const outliers = useMemo(() => detectPhotoOutliers(props.photos), [props.photos]);
+  const [dismissedOutliers, setDismissedOutliers] = useState<ReadonlySet<string>>(new Set());
+  const visibleOutliers = outliers.filter((outlier) => !dismissedOutliers.has(outlier.photo.id));
+
+  async function moveOutlier(outlier: PhotoOutlier) {
+    const { photo, suggested } = outlier;
+    await props.onUpdatePhoto(photo.id, {
+      day_id: photo.day_id,
+      uploader_name: photo.uploader_name,
+      caption: photo.caption,
+      lat: suggested.lat,
+      lng: suggested.lng,
+      taken_at: photo.taken_at,
+    });
+  }
+
   async function submitTrip(formData: FormData) {
     await props.onUpdateTrip({
       title: String(formData.get("title") ?? "").trim() || props.trip?.title || "Trip Logbook",
@@ -305,6 +372,27 @@ export function AdminDataPanel(props: AdminDataProps) {
       <LazyDetails summary={<><Camera className="mr-2 inline h-4 w-4 text-teal-700" />Media ({props.photos.length})</>}>
         <div className="mt-3 space-y-3">
           <PhotoList photos={props.photos} days={props.days} isSaving={props.isSaving} onSave={props.onUpdatePhoto} onDeleteItem={props.onDeleteItem} />
+        </div>
+      </LazyDetails>
+
+      <LazyDetails summary={<><AlertTriangle className={cn("mr-2 inline h-4 w-4", visibleOutliers.length > 0 ? "text-amber-600" : "text-teal-700")} />Location check ({visibleOutliers.length})</>}>
+        <div className="mt-3 space-y-2">
+          <p className="text-xs leading-5 text-stone-600">
+            Photos taken around the same time are usually taken near each other. These sit far from their time-neighbors — likely misplaced. Moving snaps the photo to the middle of its group.
+          </p>
+          {visibleOutliers.length === 0 ? (
+            <EmptyRow label="No suspect locations found" />
+          ) : (
+            visibleOutliers.map((outlier) => (
+              <OutlierRow
+                key={outlier.photo.id}
+                outlier={outlier}
+                isSaving={props.isSaving}
+                onMove={() => moveOutlier(outlier)}
+                onDismiss={() => setDismissedOutliers((current) => new Set([...current, outlier.photo.id]))}
+              />
+            ))
+          )}
         </div>
       </LazyDetails>
     </section>

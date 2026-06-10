@@ -287,7 +287,10 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
           ? closestPhoto(coordinates)
           : photosById.get(String(feature.properties?.id ?? ""));
         if (!photo) continue;
-        const key = isCluster ? `cluster-${clusterId}` : `photo-${photo.id}`;
+        // The count is part of the cluster key: marker elements are created
+        // once and only repositioned after, so a cluster whose membership
+        // changed (e.g. a photo moved into it) must re-render its badge.
+        const key = isCluster ? `cluster-${clusterId}-${Number(feature.properties?.point_count)}` : `photo-${photo.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
