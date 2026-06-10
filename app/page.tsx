@@ -22,8 +22,8 @@ import { deriveTripAccess } from "@/lib/access";
 import { gpxTimeToTripDate, groupPointsByDay, parseGpx, simplifyToLineString } from "@/lib/gpx";
 import { buildJourneyItems } from "@/lib/journey";
 import { prepareAvatarFile } from "@/lib/avatar-processing";
+import { prepareMediaFiles } from "@/lib/media-processing";
 import { partitionDuplicatePhotos } from "@/lib/photo-dedup";
-import { preparePhotoFiles } from "@/lib/photo-processing";
 import { isMissingSchemaObjectError } from "@/lib/schema-errors";
 import { AVATAR_BUCKET, PHOTO_BUCKET, getSupabaseBrowserClient, resolveMemberAvatars, resolvePhotoUrls } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -88,6 +88,9 @@ function fileExtension(file: File) {
   if (file.type === "image/jpeg") return "jpg";
   if (file.type === "image/png") return "png";
   if (file.type === "image/webp") return "webp";
+  if (file.type === "video/quicktime") return "mov";
+  if (file.type === "video/mp4" || file.type === "video/x-m4v") return "mp4";
+  if (file.type === "video/webm") return "webm";
   return file.name.split(".").pop()?.toLowerCase() || "jpg";
 }
 
@@ -668,7 +671,7 @@ export default function Home() {
     try {
       if (!supabase) {
         const rows = await Promise.all(inputs.map(async (input) => {
-          const prepared = await preparePhotoFiles(input.file);
+          const prepared = await prepareMediaFiles(input.file);
           const row = {
             id: crypto.randomUUID(),
             trip_id: data.trip!.id,
@@ -676,6 +679,7 @@ export default function Home() {
             user_id: user?.id ?? null,
             uploader_name: uploaderName,
             content_hash: input.contentHash,
+            media_type: input.mediaType,
             // Demo mode has no Storage: preview straight from local blob URLs and
             // leave the storage paths empty (never read in this branch).
             image_path: "",
@@ -697,7 +701,7 @@ export default function Home() {
         didSave = true;
       } else {
         if (!user) {
-          setError("Sign in before uploading photos to Supabase.");
+          setError("Sign in before uploading media to Supabase.");
           return;
         }
         const rows: Array<{
@@ -706,6 +710,7 @@ export default function Home() {
           day_id: string | null;
           uploader_name: string;
           content_hash: string;
+          media_type: "photo" | "video";
           image_path: string;
           thumbnail_path: string | null;
           lat: number;
@@ -718,18 +723,18 @@ export default function Home() {
         const warnings: string[] = [];
         const uploadedPaths: string[] = [];
         const { uploads: uploadCandidates, duplicates } = partitionDuplicatePhotos(
-          inputs.map((input) => ({ input, contentHash: input.contentHash, takenAt: input.exif?.takenAt ?? null, coordinate: input.coordinate })),
+          inputs.map((input) => ({ input, contentHash: input.contentHash, mediaType: input.mediaType, takenAt: input.exif?.takenAt ?? null, coordinate: input.coordinate })),
           data.photos,
         );
         for (const duplicate of duplicates) {
-          failures.push(`${duplicate.input.file.name}: duplicate photo skipped`);
+          failures.push(`${duplicate.input.file.name}: duplicate media skipped`);
           failedClientIds.push(duplicate.input.clientId);
           markUploadComplete();
         }
         const uploadInputs = uploadCandidates.map((candidate) => candidate.input);
 
         await mapWithConcurrency(uploadInputs, UPLOAD_CONCURRENCY, async (input) => {
-          const prepared = await preparePhotoFiles(input.file);
+          const prepared = await prepareMediaFiles(input.file);
           const extension = fileExtension(prepared.imageFile);
           const path = `${data.trip!.slug}/${crypto.randomUUID()}.${extension}`;
           const thumbnailPath = prepared.thumbnailFile ? `${data.trip!.slug}/thumbs/${crypto.randomUUID()}.jpg` : null;
@@ -764,6 +769,7 @@ export default function Home() {
             day_id: input.dayId,
             uploader_name: uploaderName,
             content_hash: input.contentHash,
+            media_type: input.mediaType,
             image_path: path,
             thumbnail_path: thumbnailStoragePath,
             lat: input.coordinate.lat,
@@ -785,7 +791,7 @@ export default function Home() {
           const freshRows = rows.filter((row) => !clashes.has(row.content_hash));
           if (clashedRows.length > 0) {
             await supabase.storage.from(PHOTO_BUCKET).remove(clashedRows.flatMap((row) => [row.image_path, row.thumbnail_path].filter((rowPath): rowPath is string => Boolean(rowPath))));
-            failures.push(`${clashedRows.length} photo${clashedRows.length === 1 ? "" : "s"} already uploaded by someone else, skipped`);
+            failures.push(`${clashedRows.length} media item${clashedRows.length === 1 ? "" : "s"} already uploaded by someone else, skipped`);
             failedClientIds.push(...clashedRows.map((row) => row.client_id));
           }
           const insertRows = freshRows.map((row) => ({
@@ -793,6 +799,7 @@ export default function Home() {
             day_id: row.day_id,
             uploader_name: row.uploader_name,
             content_hash: row.content_hash,
+            media_type: row.media_type,
             image_path: row.image_path,
             thumbnail_path: row.thumbnail_path,
             lat: row.lat,
@@ -815,10 +822,10 @@ export default function Home() {
           }
         }
         if (failures.length > 0) {
-          setError(`${failures.length} photo${failures.length === 1 ? "" : "s"} failed to upload. ${failures.slice(0, 2).join(" ")}`);
+          setError(`${failures.length} media item${failures.length === 1 ? "" : "s"} failed to upload. ${failures.slice(0, 2).join(" ")}`);
           didSave = false;
         } else if (warnings.length > 0) {
-          setNotice(`${rows.length} photo${rows.length === 1 ? "" : "s"} uploaded. ${warnings.length} thumbnail${warnings.length === 1 ? "" : "s"} could not be created, but the original photos are saved.`);
+          setNotice(`${rows.length} media item${rows.length === 1 ? "" : "s"} uploaded. ${warnings.length} thumbnail${warnings.length === 1 ? "" : "s"} could not be created, but the originals are saved.`);
         }
       }
       return { savedClientIds, failedClientIds };

@@ -2,6 +2,7 @@ import type { Photo } from "@/types/trip";
 
 export type PhotoDedupCandidate = {
   contentHash: string;
+  mediaType?: "photo" | "video";
   takenAt: string | null | undefined;
   coordinate: { lat: number; lng: number };
 };
@@ -28,11 +29,15 @@ export function photoMetadataKey(takenAt: string | null | undefined, lat: number
  */
 export function partitionDuplicatePhotos<T extends PhotoDedupCandidate>(candidates: T[], existing: Photo[]): { uploads: T[]; duplicates: T[] } {
   const seenHashes = new Set(existing.map((photo) => photo.content_hash).filter((hash): hash is string => Boolean(hash)));
-  const seenMeta = new Set(existing.map((photo) => photoMetadataKey(photo.taken_at, photo.lat, photo.lng)).filter((key): key is string => Boolean(key)));
+  const seenMeta = new Set(existing.map((photo) => {
+    const key = photoMetadataKey(photo.taken_at, photo.lat, photo.lng);
+    return key ? `${photo.media_type ?? "photo"}|${key}` : null;
+  }).filter((key): key is string => Boolean(key)));
   const uploads: T[] = [];
   const duplicates: T[] = [];
   for (const candidate of candidates) {
-    const metaKey = photoMetadataKey(candidate.takenAt, candidate.coordinate.lat, candidate.coordinate.lng);
+    const metadata = photoMetadataKey(candidate.takenAt, candidate.coordinate.lat, candidate.coordinate.lng);
+    const metaKey = metadata ? `${candidate.mediaType ?? "photo"}|${metadata}` : null;
     if (seenHashes.has(candidate.contentHash) || (metaKey !== null && seenMeta.has(metaKey))) {
       duplicates.push(candidate);
       continue;

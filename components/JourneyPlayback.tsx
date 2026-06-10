@@ -52,7 +52,7 @@ function dayLabel(days: Day[], dayId: string | null) {
 }
 
 function itemKindLabel(item: JourneyItem) {
-  if (item.kind === "photo") return "Photo";
+  if (item.kind === "photo") return item.primary.media_type === "video" ? "Video" : "Photo";
   if (item.kind === "note") return "Note";
   return item.primary.place_type || "Place";
 }
@@ -106,6 +106,9 @@ export function JourneyPlayback({
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const resumeTimerRef = useRef<number | null>(null);
   const autoplayTimerRef = useRef<number | null>(null);
+  const videoFallbackTimerRef = useRef<number | null>(null);
+  const isPlayingRef = useRef(isPlaying);
+  const activeIndexRef = useRef(activeIndex);
   const uploaders = useMemo(() => {
     const values = allItems.flatMap((item) => item.kind === "photo" && item.primary.uploader_name ? [item.primary.uploader_name] : []);
     return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
@@ -122,11 +125,38 @@ export function JourneyPlayback({
   }, [activeItem]);
 
   useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  useEffect(() => {
+    activeIndexRef.current = activeIndex;
+  }, [activeIndex]);
+
+  useEffect(() => {
     return () => {
       if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current);
       if (autoplayTimerRef.current) window.clearTimeout(autoplayTimerRef.current);
+      if (videoFallbackTimerRef.current) window.clearTimeout(videoFallbackTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (videoFallbackTimerRef.current) window.clearTimeout(videoFallbackTimerRef.current);
+  }, [activeIndex]);
+
+  function advanceVideoInSlideshow() {
+    if (!isPlayingRef.current) return;
+    if (activeIndexRef.current >= items.length - 1) setIsPlaying(false);
+    else onNext();
+  }
+
+  function scheduleVideoAdvance(durationMs: number) {
+    if (videoFallbackTimerRef.current) window.clearTimeout(videoFallbackTimerRef.current);
+    videoFallbackTimerRef.current = window.setTimeout(() => {
+      videoFallbackTimerRef.current = null;
+      advanceVideoInSlideshow();
+    }, Math.max(durationMs, 3000));
+  }
 
   function noteInteraction() {
     setInteractionHold(true);
@@ -135,7 +165,7 @@ export function JourneyPlayback({
   }
 
   useEffect(() => {
-    if (!isPlaying || interactionHold || !activeItem || items.length < 2) return;
+    if (!isPlaying || interactionHold || !activeItem || items.length < 2 || (activeItem.kind === "photo" && activeItem.primary.media_type === "video")) return;
     const baseDuration = activeItem.kind === "photo" && !activeItem.primary.caption ? 5000 : 7000;
     const duration = baseDuration / speed;
     const isLast = activeIndex >= items.length - 1;
@@ -185,7 +215,7 @@ export function JourneyPlayback({
   useEffect(() => {
     const urls = [1, -1, 2]
       .map((offset) => items[activeIndex + offset])
-      .filter((item) => item?.kind === "photo")
+      .filter((item) => item?.kind === "photo" && item.primary.media_type !== "video")
       .map((item) => (item as Extract<JourneyItem, { kind: "photo" }>).primary.image_url)
       .filter((url): url is string => Boolean(url));
     const preloaded = urls.map((url) => {
@@ -201,7 +231,7 @@ export function JourneyPlayback({
     <>
       <select value={filter} onChange={(event) => onFilterChange(event.target.value as JourneyFilter)} className="max-w-[8rem] rounded-full border border-white/15 bg-stone-950/45 px-3 py-2 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20">
         <option value="all">All</option>
-        <option value="photos">Photos</option>
+        <option value="photos">Media</option>
         <option value="journal">Journal</option>
       </select>
       {uploaders.length > 0 ? (
@@ -241,8 +271,13 @@ export function JourneyPlayback({
   const progress = items.length <= 1 ? 1 : activeIndex / (items.length - 1);
   // The backdrop is heavily blurred, so the small thumbnail is indistinguishable
   // from the full image while costing a fraction of the bytes and decode/GPU work.
-  const backgroundUrl = activeItem.kind === "photo" ? (activeItem.primary.thumbnail_url ?? activeItem.primary.image_url) : null;
-  const imageUrl = activeItem.kind === "photo" ? activeItem.primary.image_url : null;
+  const backgroundUrl = activeItem.kind === "photo"
+    ? activeItem.primary.media_type === "video"
+      ? activeItem.primary.thumbnail_url
+      : (activeItem.primary.thumbnail_url ?? activeItem.primary.image_url)
+    : null;
+  const imageUrl = activeItem.kind === "photo" && activeItem.primary.media_type !== "video" ? activeItem.primary.image_url : null;
+  const videoUrl = activeItem.kind === "photo" && activeItem.primary.media_type === "video" ? activeItem.primary.image_url : null;
 
   async function saveCaption() {
     if (activeItem.kind !== "photo") return;
@@ -299,7 +334,38 @@ export function JourneyPlayback({
       </div>
 
       <div className="relative z-10 flex h-full items-center justify-center px-4 pb-36 pt-20 md:px-16 md:pb-28 md:pt-24">
-        {imageUrl ? (
+        {videoUrl ? (
+          <div className="flex h-full w-full items-center justify-center">
+            <video
+              key={videoUrl}
+              src={videoUrl}
+              poster={activeItem.kind === "photo" ? activeItem.primary.thumbnail_url ?? undefined : undefined}
+              autoPlay={isPlaying}
+              muted={isPlaying}
+              playsInline
+              controls
+              onLoadedMetadata={(event) => {
+                if (!isPlayingRef.current) return;
+                const video = event.currentTarget;
+                void video.play().catch(() => {
+                  const durationMs = Number.isFinite(video.duration) && video.duration > 0
+                    ? (video.duration * 1000) / speed
+                    : 30000;
+                  scheduleVideoAdvance(durationMs);
+                });
+              }}
+              onEnded={() => {
+                if (videoFallbackTimerRef.current) window.clearTimeout(videoFallbackTimerRef.current);
+                advanceVideoInSlideshow();
+              }}
+              onError={() => {
+                if (!isPlayingRef.current) return;
+                scheduleVideoAdvance(5000);
+              }}
+              className="max-h-full max-w-full rounded-lg object-contain shadow-[0_36px_100px_rgba(0,0,0,0.45)]"
+            />
+          </div>
+        ) : imageUrl ? (
           <div className="flex h-full w-full items-center justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element -- User-uploaded image URLs are rendered directly in the viewer. */}
             <img src={imageUrl} alt={title} decoding="async" fetchPriority="high" className="max-h-full max-w-full rounded-lg object-contain shadow-[0_36px_100px_rgba(0,0,0,0.45)]" />

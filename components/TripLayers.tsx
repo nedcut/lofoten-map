@@ -154,7 +154,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       const journeyButton = document.createElement("button");
       journeyButton.type = "button";
       journeyButton.className = "lofoten-popup-action lofoten-popup-action-journey";
-      journeyButton.textContent = "Open in Journey";
+      journeyButton.textContent = photo.media_type === "video" ? "Play video" : "Open in Journey";
       journeyButton.addEventListener("click", () => {
         popup.remove();
         actionsRef.current.onOpenJourney(photo.id);
@@ -192,9 +192,14 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
         formatDateTime(photo.taken_at || photo.created_at),
         photo.uploader_name ? `by ${photo.uploader_name}` : "",
       ].filter(Boolean).join(" · ");
-      const imageUrl = photo.thumbnail_url || photo.image_url;
-      const image = imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="Trip photo" class="lofoten-popup-image"/>` : "";
-      const content = `<div class="lofoten-popup-card lofoten-popup-card-photo">${image}<div class="lofoten-popup-body"><span class="lofoten-popup-tag lofoten-popup-tag-photo">photo</span><div class="lofoten-popup-title">${escapeHtml(photo.caption || "Untitled photo")}</div><div class="lofoten-popup-meta">${escapeHtml(meta)}</div></div></div>`;
+      const imageUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
+      const mediaLabel = photo.media_type === "video" ? "video" : "photo";
+      const image = imageUrl
+        ? `<img src="${escapeHtml(imageUrl)}" alt="Trip ${mediaLabel}" class="lofoten-popup-image"/>`
+        : photo.media_type === "video"
+          ? `<div class="lofoten-popup-image lofoten-popup-video-fallback">Video</div>`
+          : "";
+      const content = `<div class="lofoten-popup-card lofoten-popup-card-photo">${image}<div class="lofoten-popup-body"><span class="lofoten-popup-tag lofoten-popup-tag-photo">${mediaLabel}</span><div class="lofoten-popup-title">${escapeHtml(photo.caption || `Untitled ${mediaLabel}`)}</div><div class="lofoten-popup-meta">${escapeHtml(meta)}</div></div></div>`;
       const popup = new mapboxgl.Popup({ offset: 34, className: "lofoten-popup", maxWidth: "17rem" })
         .setLngLat([photo.lng, photo.lat])
         .setHTML(content)
@@ -222,8 +227,9 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       const element = document.createElement("button");
       element.type = "button";
       element.className = `lofoten-photo-marker${count > 1 ? " lofoten-photo-marker-cluster" : ""}`;
-      element.setAttribute("aria-label", count > 1 ? `View cluster of ${count} photos` : `View ${photo.caption || "trip photo"}`);
-      const imageUrl = photo.thumbnail_url || photo.image_url;
+      const mediaNoun = photo.media_type === "video" ? "video" : "photo";
+      element.setAttribute("aria-label", count > 1 ? `View cluster of ${count} media items` : `View ${photo.caption || `trip ${mediaNoun}`}`);
+      const imageUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
       if (imageUrl) {
         const image = document.createElement("img");
         image.src = imageUrl;
@@ -233,7 +239,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       } else {
         const fallback = document.createElement("span");
         fallback.className = "lofoten-photo-marker-fallback";
-        fallback.textContent = "Photo";
+        fallback.textContent = photo.media_type === "video" ? "Video" : "Photo";
         element.append(fallback);
       }
       if (count > 1) {

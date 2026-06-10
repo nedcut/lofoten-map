@@ -30,7 +30,7 @@ function countsLabel(counts: PeekCounts): string {
   const journalPins = counts.notes + counts.places;
   const parts = [];
   if (counts.routes) parts.push(pluralize(counts.routes, "route"));
-  if (counts.photos) parts.push(pluralize(counts.photos, "photo"));
+  if (counts.photos) parts.push(pluralize(counts.photos, "media item"));
   if (journalPins) parts.push(pluralize(journalPins, "journal pin"));
   return parts.length > 0 ? parts.join(" · ") : "Nothing on the map yet";
 }

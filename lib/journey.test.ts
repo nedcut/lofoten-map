@@ -17,6 +17,7 @@ function photo(input: Partial<Photo> & Pick<Photo, "id">): Photo {
     user_id: null,
     uploader_name: null,
     content_hash: null,
+    media_type: "photo",
     image_path: "",
     thumbnail_path: null,
     image_url: null,

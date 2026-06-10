@@ -43,8 +43,12 @@ export const AVATAR_BUCKET = "avatars";
  * `path -> url` lookup. A path missing from the map yields a null URL.
  * Kept separate from the client call so it can be unit-tested directly.
  */
+export function normalizePhoto(photo: Photo): Photo {
+  return { ...photo, media_type: photo.media_type ?? "photo" };
+}
+
 export function applyPublicPhotoUrls(photos: Photo[], urlByPath: Map<string, string>): Photo[] {
-  return photos.map((photo) => ({
+  return photos.map((photo) => normalizePhoto({
     ...photo,
     image_url: urlByPath.get(photo.image_path) ?? null,
     thumbnail_url: photo.thumbnail_path ? urlByPath.get(photo.thumbnail_path) ?? null : null,

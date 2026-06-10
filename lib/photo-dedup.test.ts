@@ -10,6 +10,7 @@ function photo(overrides: Partial<Photo>): Photo {
     user_id: null,
     uploader_name: "Friend",
     content_hash: null,
+    media_type: "photo",
     image_path: "trip/one.jpg",
     thumbnail_path: null,
     image_url: null,
@@ -73,6 +74,39 @@ describe("partitionDuplicatePhotos", () => {
   it("dedupes within the batch itself", () => {
     const { uploads, duplicates } = partitionDuplicatePhotos(
       [candidate({ contentHash: "hash-a" }), candidate({ contentHash: "hash-a" })],
+      [],
+    );
+    expect(uploads).toHaveLength(1);
+    expect(duplicates).toHaveLength(1);
+  });
+
+  it("keeps a photo and video captured at the same time and place", () => {
+    const { uploads, duplicates } = partitionDuplicatePhotos(
+      [
+        candidate({ contentHash: "still-hash" }),
+        { ...candidate({ contentHash: "motion-hash" }), mediaType: "video" as const },
+      ],
+      [],
+    );
+    expect(uploads).toHaveLength(2);
+    expect(duplicates).toHaveLength(0);
+  });
+
+  it("keeps a new video when an existing photo shares the same capture metadata", () => {
+    const { uploads, duplicates } = partitionDuplicatePhotos(
+      [{ ...candidate({ contentHash: "motion-hash" }), mediaType: "video" as const }],
+      [photo({ content_hash: "stored-still-hash" })],
+    );
+    expect(uploads).toHaveLength(1);
+    expect(duplicates).toHaveLength(0);
+  });
+
+  it("skips a duplicate video in the same batch by metadata", () => {
+    const { uploads, duplicates } = partitionDuplicatePhotos(
+      [
+        { ...candidate({ contentHash: "motion-a" }), mediaType: "video" as const },
+        { ...candidate({ contentHash: "motion-b" }), mediaType: "video" as const },
+      ],
       [],
     );
     expect(uploads).toHaveLength(1);

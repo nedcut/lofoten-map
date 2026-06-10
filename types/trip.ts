@@ -42,6 +42,7 @@ export type Photo = {
   user_id: string | null;
   uploader_name: string | null;
   content_hash: string | null;
+  media_type: "photo" | "video";
   image_path: string;
   thumbnail_path: string | null;
   // Public URLs generated at read time from the paths above. They are never

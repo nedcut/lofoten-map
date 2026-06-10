@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyPublicPhotoUrls } from "./supabase";
+import { applyPublicPhotoUrls, normalizePhoto } from "./supabase";
 import type { Photo } from "@/types/trip";
 
 function photo(overrides: Partial<Photo>): Photo {
@@ -10,6 +10,7 @@ function photo(overrides: Partial<Photo>): Photo {
     user_id: null,
     uploader_name: "Friend",
     content_hash: null,
+    media_type: "photo",
     image_path: "lofoten-2026/a.jpg",
     thumbnail_path: "lofoten-2026/thumbs/a.jpg",
     image_url: null,
@@ -54,6 +55,19 @@ describe("applyPublicPhotoUrls", () => {
     expect(result.thumbnail_url).toBeNull();
   });
 
+  it("defaults media_type to photo when missing", () => {
+    const [result] = applyPublicPhotoUrls([photo({ media_type: undefined as unknown as "photo" })], new Map());
+    expect(result.media_type).toBe("photo");
+  });
+});
+
+describe("normalizePhoto", () => {
+  it("fills in photo media_type", () => {
+    expect(normalizePhoto(photo({ media_type: undefined as unknown as "photo" })).media_type).toBe("photo");
+  });
+});
+
+describe("applyPublicPhotoUrls field preservation", () => {
   it("preserves all non-URL fields and does not mutate the input", () => {
     const input = photo({ caption: "Reine at dawn", lat: 67.9, lng: 13.1 });
     const snapshot = { ...input };

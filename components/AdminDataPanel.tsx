@@ -212,7 +212,7 @@ function LazyDetails({ summary, className, children }: { summary: ReactNode; cla
 
 function PhotoList({ photos, days, isSaving, onSave, onDeleteItem }: Pick<AdminDataProps, "photos" | "days" | "isSaving"> & { onSave: AdminDataProps["onUpdatePhoto"]; onDeleteItem: AdminDataProps["onDeleteItem"] }) {
   const [visibleCount, setVisibleCount] = useState(PHOTO_PAGE_SIZE);
-  if (photos.length === 0) return <EmptyRow label="No photos yet" />;
+  if (photos.length === 0) return <EmptyRow label="No media yet" />;
   return (
     <>
       {photos.slice(0, visibleCount).map((photo) => (
@@ -302,7 +302,7 @@ export function AdminDataPanel(props: AdminDataProps) {
         </div>
       </LazyDetails>
 
-      <LazyDetails summary={<><Camera className="mr-2 inline h-4 w-4 text-teal-700" />Photos ({props.photos.length})</>}>
+      <LazyDetails summary={<><Camera className="mr-2 inline h-4 w-4 text-teal-700" />Media ({props.photos.length})</>}>
         <div className="mt-3 space-y-3">
           <PhotoList photos={props.photos} days={props.days} isSaving={props.isSaving} onSave={props.onUpdatePhoto} onDeleteItem={props.onDeleteItem} />
         </div>
@@ -447,8 +447,10 @@ export function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo
   return (
     <form action={submit} className="grid grid-cols-[4rem_minmax(0,1fr)] gap-2 rounded-lg border border-stone-200 bg-white p-2">
       <div className="h-16 overflow-hidden rounded-md bg-stone-100">
-        {/* eslint-disable-next-line @next/next/no-img-element -- Existing remote URLs come from user uploads. */}
-        <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+        {photo.media_type === "video" && !photo.thumbnail_url
+          ? <div className="flex h-full items-center justify-center text-xs font-bold text-stone-500">Video</div>
+          // eslint-disable-next-line @next/next/no-img-element -- Existing remote URLs come from user uploads.
+          : <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />}
       </div>
       <div className="min-w-0 space-y-2">
         <select name="day_id" defaultValue={photo.day_id ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">{dayOptions(days)}</select>

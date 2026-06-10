@@ -1,10 +1,12 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Trash2, Upload, Video, X } from "lucide-react";
 import { along, length as turfLength, lineString, point, pointToLineDistance } from "@turf/turf";
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { extractPhotoExif, type ExtractedExif } from "@/lib/exif";
+import { fileContentHash } from "@/lib/file-hash";
+import { detectMediaType } from "@/lib/media-processing";
 import { cn } from "@/lib/utils";
 import type { LineString } from "geojson";
 import type { Day, LngLat, RouteSegment } from "@/types/trip";
@@ -12,6 +14,7 @@ import type { Day, LngLat, RouteSegment } from "@/types/trip";
 export type PhotoUploadItemInput = {
   clientId: string;
   file: File;
+  mediaType: "photo" | "video";
   contentHash: string;
   caption: string;
   dayId: string | null;
@@ -40,12 +43,13 @@ type Props = {
   onSave: (items: PhotoUploadItemInput[], onProgress: (progress: PhotoUploadProgress) => void) => Promise<PhotoUploadSaveResult | void>;
 };
 
-const MAX_FILE_SIZE = 30 * 1024 * 1024;
+const MAX_IMAGE_FILE_SIZE = 30 * 1024 * 1024;
+const MAX_VIDEO_FILE_SIZE = 250 * 1024 * 1024;
 const EXIF_CONCURRENCY = 4;
 const FINGERPRINT_CONCURRENCY = 2;
+const VIDEO_FINGERPRINT_CONCURRENCY = 1;
 const LARGE_BATCH_THRESHOLD = 50;
 const QUEUE_PREVIEW_LIMIT = 40;
-const IMAGE_EXTENSIONS = [".heic", ".heif", ".jpg", ".jpeg", ".png", ".webp", ".gif"];
 const BATCH_OVERRIDE_IDLE = "__idle";
 const ALL_DAYS_VALUE = "__all";
 
@@ -60,6 +64,7 @@ type QueueFilter = "all" | "review" | "needs-location" | "invalid";
 type QueueItem = {
   id: string;
   file: File;
+  mediaType: "photo" | "video";
   contentHash: string | null;
   caption: string;
   dayId: string | null;
@@ -75,14 +80,8 @@ type AnalyzedItem = Pick<QueueItem, "id" | "dayId" | "dayMatchSource" | "locatio
   order: number;
 };
 
-function isSupportedImage(file: File) {
-  const lowerName = file.name.toLowerCase();
-  return file.type.startsWith("image/") || IMAGE_EXTENSIONS.some((extension) => lowerName.endsWith(extension));
-}
-
-async function fileContentHash(file: File) {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+function mediaLabel(mediaType: "photo" | "video") {
+  return mediaType === "video" ? "video" : "photo";
 }
 
 function formatBytes(bytes: number) {
@@ -397,13 +396,15 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
 
     const nextItems: QueueItem[] = selected.map((file) => {
       const id = crypto.randomUUID();
-      if (!isSupportedImage(file)) {
-        return { id, file, contentHash: null, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: "Unsupported file type." };
+      const mediaType = detectMediaType(file);
+      if (!mediaType) {
+        return { id, file, mediaType: "photo", contentHash: null, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: "Unsupported file type." };
       }
-      if (file.size > MAX_FILE_SIZE) {
-        return { id, file, contentHash: null, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: `Over ${formatBytes(MAX_FILE_SIZE)}. Export a smaller copy first.` };
+      const maxSize = mediaType === "video" ? MAX_VIDEO_FILE_SIZE : MAX_IMAGE_FILE_SIZE;
+      if (file.size > maxSize) {
+        return { id, file, mediaType, contentHash: null, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: `Over ${formatBytes(maxSize)}. Export a smaller copy first.` };
       }
-      return { id, file, contentHash: null, caption: "", dayId: defaultDayId, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "reading", message: "Preparing photo..." };
+      return { id, file, mediaType, contentHash: null, caption: "", dayId: defaultDayId, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "reading", message: `Preparing ${mediaType}...` };
     });
 
     setItems((current) => [...current, ...nextItems]);
@@ -413,37 +414,41 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
 
     const readable = nextItems.filter((item) => item.status === "reading");
     const fingerprinted: QueueItem[] = [];
-    await mapWithConcurrency(readable, FINGERPRINT_CONCURRENCY, async (item) => {
+    async function fingerprintItem(item: QueueItem) {
       try {
         const contentHash = await fileContentHash(item.file);
         if (existingHashes.has(contentHash) || selectedHashes.has(contentHash)) {
           setItems((current) => current.map((currentItem) => currentItem.id === item.id
-            ? { ...currentItem, contentHash, status: "invalid", message: "Duplicate photo already in this upload queue." }
+            ? { ...currentItem, contentHash, status: "invalid", message: `Duplicate ${mediaLabel(item.mediaType)} already in this upload queue.` }
             : currentItem));
           return;
         }
         selectedHashes.add(contentHash);
-        fingerprinted.push({ ...item, contentHash, message: "Reading photo metadata..." });
+        fingerprinted.push({ ...item, contentHash, message: `Reading ${mediaLabel(item.mediaType)} metadata...` });
         setItems((current) => current.map((currentItem) => currentItem.id === item.id
-          ? { ...currentItem, contentHash, message: "Reading photo metadata..." }
+          ? { ...currentItem, contentHash, message: `Reading ${mediaLabel(item.mediaType)} metadata...` }
           : currentItem));
       } catch {
         setItems((current) => current.map((currentItem) => currentItem.id === item.id
-          ? { ...currentItem, status: "invalid", message: "We could not fingerprint this photo." }
+          ? { ...currentItem, status: "invalid", message: `We could not fingerprint this ${mediaLabel(item.mediaType)}.` }
           : currentItem));
       }
-    });
+    }
+    const photoItems = readable.filter((item) => item.mediaType === "photo");
+    const videoItems = readable.filter((item) => item.mediaType === "video");
+    await mapWithConcurrency(photoItems, FINGERPRINT_CONCURRENCY, fingerprintItem);
+    await mapWithConcurrency(videoItems, VIDEO_FINGERPRINT_CONCURRENCY, fingerprintItem);
 
     const extracted = new Map<string, ExtractedExif>();
     await mapWithConcurrency(fingerprinted, EXIF_CONCURRENCY, async (item) => {
-      const exif = await extractPhotoExif(item.file);
+      const exif = await extractPhotoExif(item.file, { mediaType: item.mediaType });
       extracted.set(item.id, exif);
     });
 
     const analyzed = routePlaceNoGpsItems(fingerprinted.map((item, order) => {
       const exif = extracted.get(item.id);
       if (!exif) {
-        return { id: item.id, order, dayId: item.dayId, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid" as const, message: "We could not read this photo." };
+        return { id: item.id, order, dayId: item.dayId, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid" as const, message: `We could not read this ${mediaLabel(item.mediaType)}.` };
       }
       const coordinate = exif.lat !== null && exif.lng !== null ? { lat: exif.lat, lng: exif.lng } : null;
       const matchedDayId = findDayIdForExifDate(days, exif);
@@ -490,6 +495,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
     const result = await onSave(readyItems.map((item) => ({
       clientId: item.id,
       file: item.file,
+      mediaType: item.mediaType,
       contentHash: item.contentHash!,
       caption: item.caption,
       dayId: item.dayId,
@@ -590,8 +596,10 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
         <div className="pointer-events-auto mx-auto flex max-w-xl items-center gap-3 rounded-2xl border border-teal-700/30 bg-[rgba(255,253,246,0.98)] p-3 shadow-[0_20px_60px_rgba(46,61,54,0.3)] backdrop-blur-xl">
           <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100">
             {activePreviewUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- Object URLs from local files cannot be optimized by next/image.
-              <img src={activePreviewUrl} alt="" className="h-full w-full object-cover" />
+              activeItem?.mediaType === "video"
+                ? <video src={activePreviewUrl} muted playsInline className="h-full w-full object-cover" />
+                // eslint-disable-next-line @next/next/no-img-element -- Object URLs from local files cannot be optimized by next/image.
+                : <img src={activePreviewUrl} alt="" className="h-full w-full object-cover" />
             ) : <div className="flex h-full items-center justify-center text-stone-400"><Camera className="h-4 w-4" /></div>}
           </div>
           <div className="min-w-0 flex-1">
@@ -622,7 +630,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
         {/* Header: title + step progress + close. */}
         <div className="flex items-start justify-between gap-3 border-b border-stone-200/70 px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.9rem)] md:px-5 md:pt-4">
           <div className="min-w-0">
-            <h2 className="font-serif text-2xl font-semibold tracking-tight text-stone-950">{STEP_TITLES[step]}</h2>
+            <h2 className="font-serif text-2xl font-semibold tracking-tight text-stone-950">{step === "select" ? "Add photos & videos" : STEP_TITLES[step]}</h2>
             <div className="mt-1.5 flex items-center gap-1.5">
               {steps.map((value, index) => (
                 <span key={value} className={cn("h-1.5 rounded-full transition-all", index === stepIndex ? "w-6 bg-teal-700" : index < stepIndex ? "w-3 bg-teal-700/50" : "w-3 bg-stone-200")} aria-hidden />
@@ -639,17 +647,17 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-5">
             {step === "select" ? (
               <div className="flex h-full flex-col">
-                <p className="text-sm leading-6 text-stone-600">Choose one shot or a whole camera roll batch. GPS, dates, and route placement are prepared on your device before anything uploads.</p>
+                <p className="text-sm leading-6 text-stone-600">Choose photos, videos, or a whole camera roll batch. GPS, dates, poster frames, and route placement are prepared on your device before anything uploads.</p>
                 <div className="mt-4 grid gap-3">
                   <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-teal-700/35 bg-teal-50 px-4 py-6 text-center text-teal-950 transition hover:bg-teal-100">
                     <Images className="h-7 w-7" />
                     <span className="text-base font-black">Choose from camera roll</span>
-                    <span className="text-xs text-teal-900/70">iPhone, Android, HEIC, JPG, PNG</span>
-                    <input name="photo" type="file" accept="image/*,.heic,.heif" multiple className="hidden" onChange={handleFileInputChange} />
+                    <span className="text-xs text-teal-900/70">iPhone, Android, HEIC, JPG, MOV, MP4</span>
+                    <input name="media" type="file" accept="image/*,video/*,.heic,.heif,.mov,.m4v" multiple className="hidden" onChange={handleFileInputChange} />
                   </label>
                   <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-700 transition hover:bg-stone-50">
                     <FileImage className="h-4 w-4" /> Browse exported camera files
-                    <input type="file" accept="image/*,.heic,.heif" multiple className="hidden" onChange={handleFileInputChange} />
+                    <input type="file" accept="image/*,video/*,.heic,.heif,.mov,.m4v" multiple className="hidden" onChange={handleFileInputChange} />
                   </label>
                 </div>
               </div>
@@ -713,17 +721,19 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
                   <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 rounded-lg border border-stone-200 bg-white p-2 shadow-sm">
                     <div className="h-28 overflow-hidden rounded-md bg-stone-100">
                       {activePreviewUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- Object URLs from local files cannot be optimized by next/image.
-                        <img src={activePreviewUrl} alt="" className="h-full w-full object-cover" />
+                        activeItem.mediaType === "video"
+                          ? <video src={activePreviewUrl} muted playsInline controls className="h-full w-full object-cover" />
+                          // eslint-disable-next-line @next/next/no-img-element -- Object URLs from local files cannot be optimized by next/image.
+                          : <img src={activePreviewUrl} alt="" className="h-full w-full object-cover" />
                       ) : <div className="flex h-full items-center justify-center text-stone-400"><Camera className="h-5 w-5" /></div>}
                     </div>
                     <div className="min-w-0 py-1">
                       <div className="flex items-start gap-2">
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-bold text-stone-950">{activeItem.file.name}</div>
+                          <div className="flex items-center gap-1.5 truncate text-sm font-bold text-stone-950">{activeItem.mediaType === "video" ? <Video className="h-3.5 w-3.5 shrink-0" /> : null}{activeItem.file.name}</div>
                           <div className="mt-1 text-xs text-stone-500">{formatBytes(activeItem.file.size)}</div>
                         </div>
-                        <button type="button" onClick={() => removeItem(activeItem.id)} disabled={isSaving} className="rounded-md p-1.5 text-stone-500 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-45" aria-label="Remove selected photo">
+                        <button type="button" onClick={() => removeItem(activeItem.id)} disabled={isSaving} className="rounded-md p-1.5 text-stone-500 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-45" aria-label="Remove selected media">
                           <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
@@ -744,7 +754,7 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
                   const value = event.target.value;
                   if (!activeItem) return;
                   setItems((current) => current.map((item) => item.id === activeItem.id ? { ...item, caption: value } : item));
-                }} maxLength={280} placeholder="Caption for selected photo" className="min-h-16 w-full rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+                }} maxLength={280} placeholder="Caption for selected media" className="min-h-16 w-full rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
 
                 <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600">
                   <span>Selected day</span>
@@ -796,8 +806,8 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
                 </div>
 
                 <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-stone-300 bg-white px-4 py-2.5 text-sm font-bold text-stone-600 transition hover:bg-stone-50">
-                  <Images className="h-4 w-4" /> Add more photos
-                  <input type="file" accept="image/*,.heic,.heif" multiple className="hidden" onChange={handleFileInputChange} />
+                  <Images className="h-4 w-4" /> Add more media
+                  <input type="file" accept="image/*,video/*,.heic,.heif,.mov,.m4v" multiple className="hidden" onChange={handleFileInputChange} />
                 </label>
               </div>
             ) : null}

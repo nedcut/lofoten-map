@@ -65,7 +65,7 @@ export function QuickActions({ onStartPhotoUpload, onStartAddNote, onStartRouteD
           onClick={onStartPhotoUpload}
           className="flex items-center justify-center gap-2 rounded-xl bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_28px_rgba(184,106,31,0.22)] transition-all duration-150 hover:-translate-y-0.5 hover:bg-[#f0ae4b] hover:shadow-[0_16px_34px_rgba(184,106,31,0.3)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:translate-y-0 active:scale-[0.98]"
         >
-          <Camera className="h-4 w-4" /> Upload photo
+          <Camera className="h-4 w-4" /> Upload media
         </button>
       ) : null}
       {onStartAddNote ? (
@@ -130,7 +130,7 @@ export function LayersPanel({ layerVisibility, onLayerVisibilityChange }: Pick<S
       <div className="flex items-center gap-2 text-sm font-bold text-stone-900"><Map className="h-4 w-4 text-teal-700" /> Layers</div>
       {([
         ["routes", "Routes", Route],
-        ["photos", "Photos", Camera],
+        ["photos", "Media", Camera],
         ["notes", "Notes & places", FileText],
       ] as const).map(([key, label, Icon]) => (
         <label key={key} className="flex cursor-pointer items-center justify-between rounded-lg bg-[#f7f1e7] px-3 py-2 text-sm text-stone-800 transition hover:bg-[#f1e8d8]">

@@ -128,7 +128,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-export async function extractPhotoExif(file: File): Promise<ExtractedExif> {
+export async function extractPhotoExif(file: File, options?: { mediaType?: "photo" | "video" }): Promise<ExtractedExif> {
+  const label = options?.mediaType === "video" ? "video" : "photo";
   try {
     // Cap the read so a single corrupt/huge file in a big batch can never hang
     // the queue (which would otherwise leave items stuck "reading" forever).
@@ -150,7 +151,7 @@ export async function extractPhotoExif(file: File): Promise<ExtractedExif> {
       takenAt,
       takenDate,
       exifFound: Boolean(takenAt),
-      message: "No GPS metadata found. Tap the map to place this photo manually.",
+      message: `No GPS metadata found. Tap the map to place this ${label} manually.`,
     };
   } catch {
     return {
@@ -159,7 +160,7 @@ export async function extractPhotoExif(file: File): Promise<ExtractedExif> {
       takenAt: null,
       takenDate: null,
       exifFound: false,
-      message: "We could not read EXIF metadata. Tap the map to place this photo manually.",
+      message: `We could not read metadata. Tap the map to place this ${label} manually.`,
     };
   }
 }

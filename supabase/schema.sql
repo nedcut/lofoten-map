@@ -46,6 +46,7 @@ create table if not exists photos (
   user_id uuid references auth.users(id) on delete set null default auth.uid(),
   uploader_name text,
   content_hash text,
+  media_type text not null default 'photo' check (media_type in ('photo', 'video')),
   image_path text not null,
   thumbnail_path text,
   lat double precision,
@@ -137,6 +138,21 @@ create table if not exists admin_requests (
 
 alter table photos add column if not exists user_id uuid references auth.users(id) on delete set null default auth.uid();
 alter table photos add column if not exists content_hash text;
+alter table photos add column if not exists media_type text not null default 'photo';
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'photos_media_type_check'
+      and conrelid = 'public.photos'::regclass
+  ) then
+    alter table public.photos
+      add constraint photos_media_type_check
+      check (media_type in ('photo', 'video'));
+  end if;
+end $$;
 
 create unique index if not exists photos_trip_content_hash_unique
   on photos (trip_id, content_hash)
