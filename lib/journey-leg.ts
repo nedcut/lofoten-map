@@ -103,3 +103,18 @@ export function lerpBearing(from: number, to: number, t: number): number {
 export function offsetPoint(origin: Position, km: number, bearingDeg: number): Position {
   return destination(point(origin), km, bearingDeg, { units: "kilometers" }).geometry.coordinates;
 }
+
+// Great-circle distance between two coordinates, in kilometers.
+export function distanceKm(a: LngLat, b: LngLat): number {
+  return distance(point([a.lng, a.lat]), point([b.lng, b.lat]), { units: "kilometers" });
+}
+
+// Turn from `from` toward `to` along the shortest arc, but never more than
+// `maxTurnDeg`. This is what makes the follow-camera only *lightly* face the
+// route: small course corrections happen, but a leg pointing the other way
+// (stepping backwards through the journey) pans over the shoulder instead of
+// spinning the camera 180°.
+export function steerBearing(from: number, to: number, maxTurnDeg: number): number {
+  const delta = ((to - from + 540) % 360) - 180;
+  return from + Math.max(-maxTurnDeg, Math.min(maxTurnDeg, delta));
+}

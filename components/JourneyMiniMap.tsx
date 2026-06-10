@@ -5,7 +5,7 @@ import { Expand, MapPin, Shrink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FeatureCollection, LineString, Point } from "geojson";
 import { LOFOTEN_CENTER, routeFeatureCollection } from "@/lib/geo";
-import { bearingAlongLeg, legBetween, lerpBearing, offsetPoint, pointAlongLeg, type JourneyLeg } from "@/lib/journey-leg";
+import { bearingAlongLeg, distanceKm, legBetween, lerpBearing, offsetPoint, pointAlongLeg, steerBearing, type JourneyLeg } from "@/lib/journey-leg";
 import { cn } from "@/lib/utils";
 import type { JourneyItem } from "@/lib/journey";
 import type { Day, LngLat, RouteSegment } from "@/types/trip";
@@ -69,12 +69,26 @@ function activePointData(item: JourneyItem): FeatureCollection<Point> {
 
 // The camera tilts into the terrain while following a leg, reading like a
 // hiker's view rather than a flat chart.
-const FOLLOW_PITCH = 56;
+const FOLLOW_PITCH = 50;
 // Free-camera flight parameters: the camera glides this high above the ground,
 // trailing far enough behind the path point that, at FOLLOW_PITCH, the point
-// sits centered in view (horizontal offset = height * tan(pitch)).
-const CAMERA_HEIGHT_M = 800;
+// sits centered in view (horizontal offset = height * tan(pitch)). Height is
+// generous so ridgelines between camera and subject stay below the view.
+const CAMERA_HEIGHT_M = 1150;
 const CAMERA_TRAIL_KM = (CAMERA_HEIGHT_M * Math.tan((FOLLOW_PITCH * Math.PI) / 180)) / 1000;
+// The camera follows the route's *position* but only lightly its direction:
+// per leg it turns at most this much toward the leg's overall bearing. Keeps
+// switchbacks from yawing the view around and makes stepping backwards a calm
+// reverse pan instead of a 180° spin.
+const MAX_TURN_DEG = 30;
+// Photos within this range of the last framed photo don't move the camera at
+// all — a shift this small is GPS noise, and the active dot moving a few
+// pixels communicates it better than a camera flight does.
+const HOLD_RADIUS_KM = 0.08;
+// ...but only while the user hasn't wandered off: if the map center has
+// drifted beyond this from the last framed photo (manual pan, or an
+// interrupted flight), stepping should bring the camera back.
+const HOLD_MAX_WANDER_KM = 1.5;
 // Legs longer than this (ferry hops, transfers) skip the ground-level walk and
 // use Mapbox's arcing flyTo instead — panning 20km at hiking zoom is a blur.
 const LONG_LEG_KM = 12;
@@ -119,6 +133,9 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   // One closure tears down whatever stage the current flight is in (animation
   // frames, the post-flight idle listener, or the fallback timer).
   const flightCleanupRef = useRef<(() => void) | null>(null);
+  // The coordinate the camera last flew to, so near-identical photo positions
+  // (GPS noise apart) can hold the camera still instead of nudging it.
+  const lastTargetRef = useRef<LngLat | null>(null);
   const cancelFlight = useCallback(() => {
     flightCleanupRef.current?.();
     flightCleanupRef.current = null;
@@ -326,45 +343,89 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     // interrupted or the user panned away.
     const center = map.getCenter();
     const prev: LngLat = { lng: center.lng, lat: center.lat };
-
-    const followZoom = expanded ? 13.6 : 12.8;
-    const reduceMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const leg = reduceMotion ? null : legBetween(prev, next, routes);
     const setLegLine = (data: FeatureCollection<LineString>) => {
       const source = getSource(map, "journey-leg") as mapboxgl.GeoJSONSource | undefined;
       source?.setData(data);
     };
 
-    // With terrain on, zoom is measured against the center's ground elevation,
-    // which Mapbox updates asynchronously as DEM tiles load. Arriving over a
-    // summit can therefore leave the camera re-expressed at a wildly different
-    // zoom — even after a corrective ease, if the DEM tile lands later. So
-    // instead of a one-shot fix, re-check at every "idle" (tiles loaded, all
-    // transitions done) and re-ease while the zoom has drifted, with a cap so
-    // a genuinely contested state can't loop forever.
+    // Hold still for GPS-noise hops: when the next photo is within a few dozen
+    // meters of the last one the camera framed (and the view hasn't wandered
+    // off it), moving the map communicates nothing — the active dot shifting a
+    // few pixels does. The anchor stays put across held steps so a chain of
+    // tiny hops can't slowly walk the camera away.
+    const lastTarget = lastTargetRef.current;
+    if (
+      lastTarget
+      && distanceKm(lastTarget, next) < HOLD_RADIUS_KM
+      && distanceKm(lastTarget, prev) < HOLD_MAX_WANDER_KM
+    ) {
+      setLegLine(emptyLine());
+      return;
+    }
+    lastTargetRef.current = next;
+
+    const followZoom = expanded ? 13.6 : 12.8;
+    const reduceMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const leg = reduceMotion ? null : legBetween(prev, next, routes);
+
+    // With terrain on, every zoom-based camera write races Mapbox's async
+    // center-elevation updates — over a summit, "zoom 12.8" can be placed
+    // relative to sea level and park the camera meters off the deck. So the
+    // arrival check works in altitude space instead: at every "idle" (tiles
+    // loaded, transitions done), verify the camera's clearance above the
+    // photo's ground, and when it's unhealthy glide the free camera back to
+    // the canonical pose — never via zoom, which would re-enter the race.
     let normalizeAttempts = 0;
+    let normalizeFrame = 0;
     const normalize = () => {
-      if (normalizeAttempts >= 4) return;
-      // Over elevated terrain a correctly-framed camera legitimately reads a
-      // little below the target (zoom is ground-relative), so only step in for
-      // gross drift like the summit re-expression (~5 levels), not the ~0.7
-      // offset of an otherwise healthy arrival.
-      if (Math.abs(map.getZoom() - followZoom) < 1.5) return;
+      if (normalizeAttempts >= 3) return;
+      const camNow = map.getFreeCameraOptions();
+      const altNow = camNow.position?.toAltitude();
+      const camLngLat = camNow.position?.toLngLat();
+      const photoGround = map.queryTerrainElevation([next.lng, next.lat]);
+      if (altNow == null || !camLngLat || photoGround == null) return;
+      // Clearance against the higher of the photo's ground and the camera's
+      // own ground: the camera trails behind the photo and can sit over a
+      // ridge well above it — "fine above the photo" can still scrape terrain.
+      const cameraGround = map.queryTerrainElevation(camLngLat) ?? photoGround;
+      const clearance = altNow - Math.max(photoGround, cameraGround);
+      if (clearance >= 500 && clearance <= 2600) return;
       normalizeAttempts++;
-      map.easeTo({ center: [next.lng, next.lat], zoom: followZoom, pitch: FOLLOW_PITCH, duration: 450, essential: true });
+      const fromLngLat = camNow.position?.toLngLat() ?? { lng: next.lng, lat: next.lat };
+      const fromAlt = altNow;
+      const bearingNow = map.getBearing();
+      const pitchNow = map.getPitch();
+      const trail = offsetPoint([next.lng, next.lat], CAMERA_TRAIL_KM, bearingNow + 180);
+      const targetAlt = photoGround + CAMERA_HEIGHT_M;
+      const begin = performance.now();
+      const glide = (now: number) => {
+        const gt = Math.min(1, (now - begin) / 450);
+        const k = easeInOut(gt);
+        const cam = map.getFreeCameraOptions();
+        cam.position = mapboxgl.MercatorCoordinate.fromLngLat(
+          { lng: lerp(fromLngLat.lng, trail[0], k), lat: lerp(fromLngLat.lat, trail[1], k) },
+          lerp(fromAlt, targetAlt, k),
+        );
+        cam.setPitchBearing(lerp(pitchNow, FOLLOW_PITCH, k), bearingNow);
+        map.setFreeCameraOptions(cam);
+        if (gt < 1) normalizeFrame = requestAnimationFrame(glide);
+      };
+      cancelAnimationFrame(normalizeFrame);
+      normalizeFrame = requestAnimationFrame(glide);
     };
     map.on("idle", normalize);
     let frameId = 0;
     flightCleanupRef.current = () => {
       cancelAnimationFrame(frameId);
+      cancelAnimationFrame(normalizeFrame);
       map.off("idle", normalize);
     };
 
     if (!leg || leg.lengthKm > LONG_LEG_KM) {
       setLegLine(legCollection(leg));
       if (leg) {
-        // Too far to walk: arc over the leg instead, still facing travel-wards.
-        map.flyTo({ center: [next.lng, next.lat], zoom: followZoom, pitch: FOLLOW_PITCH, bearing: bearingAlongLeg(leg, 1), maxDuration: 4500, essential: true });
+        // Too far to walk: arc over the leg instead, turning only lightly.
+        map.flyTo({ center: [next.lng, next.lat], zoom: followZoom, pitch: FOLLOW_PITCH, bearing: steerBearing(map.getBearing(), bearingAlongLeg(leg, 1), MAX_TURN_DEG), maxDuration: 4500, essential: true });
       } else {
         map.easeTo({ center: [next.lng, next.lat], zoom: followZoom, pitch: FOLLOW_PITCH, duration: 900, essential: true });
       }
@@ -374,9 +435,9 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     setLegLine(legCollection(leg));
     // Pace roughly with distance so short hops feel quick and long ones sweep,
     // clamped to stay inside the autoplay window.
-    const duration = Math.min(3600, Math.max(1400, leg.lengthKm * 900));
+    const duration = Math.min(3800, Math.max(1600, leg.lengthKm * 1000));
     // Fly with the free-camera API: the camera is an explicit 3D position
-    // (ground-hugging altitude, looking ahead along the path), so none of the
+    // (ground-hugging altitude at fixed pitch), so none of the
     // zoom-vs-ground-elevation re-expression that made jumpTo flights lurch
     // applies. The opening blend glides in from wherever the camera is now —
     // including a part-finished previous flight — instead of snapping.
@@ -384,26 +445,34 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     const startLngLat = startCamera.position?.toLngLat() ?? { lng: prev.lng, lat: prev.lat };
     const startAltitude = startCamera.position?.toAltitude() ?? CAMERA_HEIGHT_M;
     const startPitch = map.getPitch();
+    // One heading decision per leg: turn at most MAX_TURN_DEG toward the leg's
+    // overall direction, then ease monotonically onto it. No per-frame route
+    // tracking — the position follows the trail; the orientation stays calm.
+    const startBearing = map.getBearing();
+    const targetHeading = steerBearing(startBearing, bearingAlongLeg(leg, 0, leg.lengthKm), MAX_TURN_DEG);
     let ground = map.queryTerrainElevation([prev.lng, prev.lat]) ?? 0;
-    let heading = map.getBearing();
     const startTime = performance.now();
 
     const frame = (now: number) => {
       const t = Math.min(1, (now - startTime) / duration);
       const eased = easeInOut(t);
       const blend = Math.min(1, t * 2.5);
+      const heading = lerpBearing(startBearing, targetHeading, easeInOut(t));
       const pathPos = pointAlongLeg(leg, eased);
-      // A generous bearing look-ahead plus a gentle lerp keeps switchbacks from
-      // yawing the camera around; it banks through turns instead.
-      heading = lerpBearing(heading, bearingAlongLeg(leg, eased, 0.25), 0.1);
-      // Smooth the terrain sample so the camera doesn't step when DEM tiles
-      // resolve; null (tile not loaded yet) just keeps the last known ground.
-      const sampled = map.queryTerrainElevation([pathPos[0], pathPos[1]]);
-      if (sampled != null) ground = lerp(ground, sampled, 0.12);
-      // Chase-cam: trail behind the path point so it stays centered, at a fixed
-      // pitch set explicitly — deriving orientation from a lookAt point made
-      // the pitch swing with terrain height (lookAtPoint assumes altitude 0).
       const trail = offsetPoint(pathPos, CAMERA_TRAIL_KM, heading + 180);
+      // Ride above the higher of the ground under the camera and under the
+      // subject, smoothed so DEM tiles resolving mid-flight don't step the
+      // altitude — this is what keeps ridgelines from swallowing the view.
+      // Asymmetric: climb quickly when ground rises toward the camera, sink
+      // back lazily, like a drone clearing a ridge.
+      const sampled = [
+        map.queryTerrainElevation([trail[0], trail[1]]),
+        map.queryTerrainElevation([pathPos[0], pathPos[1]]),
+      ].filter((value): value is number => value != null);
+      if (sampled.length > 0) {
+        const target = Math.max(...sampled);
+        ground = lerp(ground, target, target > ground ? 0.35 : 0.06);
+      }
       const camera = map.getFreeCameraOptions();
       camera.position = mapboxgl.MercatorCoordinate.fromLngLat(
         { lng: lerp(startLngLat.lng, trail[0], blend), lat: lerp(startLngLat.lat, trail[1], blend) },
@@ -411,13 +480,11 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       );
       camera.setPitchBearing(lerp(startPitch, FOLLOW_PITCH, blend), heading);
       map.setFreeCameraOptions(camera);
-      if (t < 1) {
-        frameId = requestAnimationFrame(frame);
-        return;
-      }
-      // Hand back to the regular camera with a closing ease onto the photo;
-      // the idle normalizer above corrects any terrain re-expression after.
-      map.easeTo({ center: [next.lng, next.lat], zoom: followZoom, pitch: FOLLOW_PITCH, bearing: heading, duration: 700, essential: true });
+      if (t < 1) frameId = requestAnimationFrame(frame);
+      // No closing ease: the flight's final frame already poses the camera on
+      // the photo, and any zoom-based hand-back races Mapbox's async center
+      // elevation over terrain — the very lurch this flight exists to avoid.
+      // The idle normalizer corrects the pose if anything still lands badly.
     };
     frameId = requestAnimationFrame(frame);
     return cancelFlight;

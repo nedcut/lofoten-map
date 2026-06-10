@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Position } from "geojson";
-import { bearingAlongLeg, legBetween, lerpBearing, offsetPoint, pointAlongLeg } from "./journey-leg";
+import { bearingAlongLeg, distanceKm, legBetween, lerpBearing, offsetPoint, pointAlongLeg, steerBearing } from "./journey-leg";
 import type { RouteSegment } from "@/types/trip";
 
 function route(coordinates: Position[], overrides: Partial<RouteSegment> = {}): RouteSegment {
@@ -113,6 +113,29 @@ describe("offsetPoint", () => {
     const [eastLng, eastLat] = offsetPoint([13.0, 67.9], 1, 90);
     expect(eastLng).toBeGreaterThan(13.0);
     expect(eastLat).toBeCloseTo(67.9, 3);
+  });
+});
+
+describe("distanceKm", () => {
+  it("measures great-circle distance", () => {
+    expect(distanceKm({ lng: 13, lat: 67.9 }, { lng: 13, lat: 67.9 })).toBe(0);
+    // 0.01° of latitude is ~1.11km
+    expect(distanceKm({ lng: 13, lat: 67.9 }, { lng: 13, lat: 67.91 })).toBeCloseTo(1.11, 1);
+  });
+});
+
+describe("steerBearing", () => {
+  it("passes small corrections through unclamped", () => {
+    expect(steerBearing(40, 55, 30)).toBeCloseTo(55);
+  });
+
+  it("caps large turns at the limit, including reversals", () => {
+    expect(steerBearing(0, 170, 30)).toBeCloseTo(30);
+    expect(steerBearing(0, -170, 30)).toBeCloseTo(-30);
+  });
+
+  it("turns along the shortest arc across north", () => {
+    expect(steerBearing(350, 10, 30)).toBeCloseTo(370);
   });
 });
 
