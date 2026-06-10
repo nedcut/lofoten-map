@@ -1,10 +1,12 @@
 "use client";
 
 import { Loader2, MapPin, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { clearNoteDraft, readNoteDraft, writeNoteDraft } from "@/lib/offline-drafts";
 import type { Day, LngLat } from "@/types/trip";
 
 type Props = {
+  tripSlug: string;
   days: Day[];
   selectedCoordinate: LngLat | null;
   defaultDayId: string | null;
@@ -20,17 +22,36 @@ function noteDraftHint(hasCoordinate: boolean, hasBody: boolean) {
   return "Note is ready to save.";
 }
 
-export function AddNotePanel({ days, selectedCoordinate, defaultDayId, isSaving, onCancel, onSave }: Props) {
-  const [body, setBody] = useState("");
+export function AddNotePanel({ tripSlug, days, selectedCoordinate, defaultDayId, isSaving, onCancel, onSave }: Props) {
+  const savedDraft = readNoteDraft(tripSlug);
+  const [body, setBody] = useState(savedDraft?.body ?? "");
+  const [authorName, setAuthorName] = useState(savedDraft?.authorName ?? "");
+  const [dayId, setDayId] = useState(savedDraft?.dayId ?? defaultDayId ?? "");
   const hasBody = body.trim().length > 0;
   const hasCoordinate = Boolean(selectedCoordinate);
+  const hasDraft = Boolean(savedDraft?.body.trim() || savedDraft?.authorName.trim() || savedDraft?.coordinate);
+
+  useEffect(() => {
+    writeNoteDraft(tripSlug, {
+      body,
+      authorName,
+      dayId: dayId || null,
+      coordinate: selectedCoordinate,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [authorName, body, dayId, selectedCoordinate, tripSlug]);
 
   async function submit(formData: FormData) {
     await onSave({
       body: body.trim(),
-      authorName: String(formData.get("authorName") ?? "").trim(),
-      dayId: String(formData.get("dayId") || "") || null,
+      authorName: authorName.trim() || String(formData.get("authorName") ?? "").trim(),
+      dayId: dayId || null,
     });
+  }
+
+  function handleCancel() {
+    clearNoteDraft(tripSlug);
+    onCancel();
   }
 
   return (
@@ -41,7 +62,7 @@ export function AddNotePanel({ days, selectedCoordinate, defaultDayId, isSaving,
             <h2 className="font-serif text-2xl font-semibold tracking-tight">Add a trail note</h2>
             <p className="mt-1 text-sm leading-5 text-stone-600">Tap the map to choose a location, then save a short note.</p>
           </div>
-          <button onClick={onCancel} className="rounded-full p-2 text-stone-500 hover:bg-stone-900/5" aria-label="Close note panel"><X className="h-4 w-4" /></button>
+          <button onClick={handleCancel} className="rounded-full p-2 text-stone-500 hover:bg-stone-900/5" aria-label="Close note panel"><X className="h-4 w-4" /></button>
         </div>
         <form action={submit} className="min-h-0 space-y-3 overflow-y-auto pr-1">
           <div className="rounded-lg border border-teal-700/25 bg-teal-50 p-3 text-sm text-teal-950">
@@ -50,11 +71,11 @@ export function AddNotePanel({ days, selectedCoordinate, defaultDayId, isSaving,
           </div>
           <textarea name="body" required maxLength={240} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Describe the viewpoint, camp spot, weather, or inside joke..." className="min-h-24 w-full rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
           <div aria-live="polite" className="rounded-lg border border-teal-700/15 bg-teal-50 px-3 py-2 text-xs font-semibold leading-5 text-teal-950">
-            {noteDraftHint(hasCoordinate, hasBody)}
+            {hasDraft && !hasCoordinate ? "Draft restored. Pick a map location to finish saving." : noteDraftHint(hasCoordinate, hasBody)}
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <input name="authorName" placeholder="Your name" className="rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-            <select name="dayId" defaultValue={defaultDayId ?? ""} className="rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">
+            <input name="authorName" value={authorName} onChange={(event) => setAuthorName(event.target.value)} placeholder="Your name" className="rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+            <select name="dayId" value={dayId} onChange={(event) => setDayId(event.target.value)} className="rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">
               <option value="">All days</option>
               {days.map((day) => <option key={day.id} value={day.id}>Day {day.day_number}</option>)}
             </select>
