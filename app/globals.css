@@ -65,6 +65,107 @@ body {
   box-shadow: 0 12px 30px rgba(46, 61, 54, 0.18) !important;
 }
 .mapboxgl-ctrl button { color: #1c1917 !important; }
+
+.lofoten-photo-marker {
+  width: 48px;
+  height: 48px;
+  cursor: pointer;
+  overflow: visible;
+  border: 3px solid #fffdf6;
+  border-radius: 12px;
+  background: #e7a13d;
+  padding: 0;
+  box-shadow:
+    0 2px 5px rgba(28, 25, 23, 0.22),
+    0 10px 22px rgba(46, 61, 54, 0.22);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.lofoten-photo-marker::before,
+.lofoten-photo-marker::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 2px;
+  border: 2px solid #fffdf6;
+  border-radius: 11px;
+  background: #d6ccb8;
+  box-shadow: 0 4px 10px rgba(28, 25, 23, 0.16);
+}
+
+.lofoten-photo-marker:not(.lofoten-photo-marker-cluster)::before,
+.lofoten-photo-marker:not(.lofoten-photo-marker-cluster)::after {
+  display: none;
+}
+
+.lofoten-photo-marker-cluster {
+  width: 56px;
+  height: 56px;
+}
+
+.lofoten-photo-marker-cluster::before {
+  transform: translate(5px, -4px) rotate(7deg);
+}
+
+.lofoten-photo-marker-cluster::after {
+  transform: translate(-5px, 4px) rotate(-5deg);
+}
+
+.lofoten-photo-marker img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 9px;
+  object-fit: cover;
+  background: #dbe7df;
+}
+
+.lofoten-photo-marker-fallback {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  color: #fffdf6;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.lofoten-photo-marker-count {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  min-width: 25px;
+  height: 25px;
+  padding: 0 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fffdf6;
+  border-radius: 999px;
+  background: #0f766e;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 4px 10px rgba(28, 25, 23, 0.24);
+}
+
+.lofoten-photo-marker:hover,
+.lofoten-photo-marker:focus-visible {
+  z-index: 2;
+  box-shadow:
+    0 3px 7px rgba(28, 25, 23, 0.24),
+    0 14px 28px rgba(46, 61, 54, 0.28);
+}
+
+.lofoten-photo-marker:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, 0.55);
+  outline-offset: 4px;
+}
+
 .map-unavailable .mapboxgl-ctrl,
 .map-unavailable .mapboxgl-ctrl-bottom-left,
 .map-unavailable .mapboxgl-ctrl-bottom-right,

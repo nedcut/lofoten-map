@@ -90,8 +90,22 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       }
 
       if (!getSource(map, "photos")) {
-        map.addSource("photos", { type: "geojson", data: photoData });
-        map.addLayer({ id: "photos-circle", type: "circle", source: "photos", paint: { "circle-radius": 9, "circle-color": "#fffdf6", "circle-stroke-width": 4, "circle-stroke-color": "#e7a13d" } });
+        map.addSource("photos", {
+          type: "geojson",
+          data: photoData,
+          cluster: true,
+          clusterMaxZoom: 17,
+          clusterRadius: 64,
+        });
+        // This transparent layer gives queryRenderedFeatures a viewport-aware
+        // view of both clusters and individual photos. The visible markers are
+        // HTML thumbnails managed below.
+        map.addLayer({
+          id: "photos-hit",
+          type: "circle",
+          source: "photos",
+          paint: { "circle-radius": 28, "circle-opacity": 0 },
+        });
       } else {
         (getSource(map, "photos") as mapboxgl.GeoJSONSource).setData(photoData);
       }
@@ -111,7 +125,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       }
 
       for (const id of ["routes-shadow", "routes-line"]) setLayerVisibility(map, id, visibility.routes);
-      setLayerVisibility(map, "photos-circle", visibility.photos);
+      setLayerVisibility(map, "photos-hit", visibility.photos);
       for (const id of ["notes-circle", "places-circle"]) setLayerVisibility(map, id, visibility.notes);
     };
 
@@ -127,8 +141,191 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
   useEffect(() => {
     if (!map) return;
     const activeMap = map;
+    const markers = new Map<string, mapboxgl.Marker>();
+    const photosById = new Map(photos.map((photo) => [photo.id, photo]));
+    let frame = 0;
+
+    function addPopupActions(popup: mapboxgl.Popup, photo: Photo) {
+      const body = popup.getElement()?.querySelector(".lofoten-popup-body");
+      if (!body) return;
+
+      const journeyBar = document.createElement("div");
+      journeyBar.className = "lofoten-popup-actions";
+      const journeyButton = document.createElement("button");
+      journeyButton.type = "button";
+      journeyButton.className = "lofoten-popup-action lofoten-popup-action-journey";
+      journeyButton.textContent = "Open in Journey";
+      journeyButton.addEventListener("click", () => {
+        popup.remove();
+        actionsRef.current.onOpenJourney(photo.id);
+      });
+      journeyBar.append(journeyButton);
+      body.append(journeyBar);
+
+      const { isAdmin: admin, currentUserId: viewerId } = actionsRef.current;
+      if (!admin && (!photo.user_id || photo.user_id !== viewerId)) return;
+      const manageBar = document.createElement("div");
+      manageBar.className = "lofoten-popup-actions";
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "lofoten-popup-action";
+      editButton.textContent = "Edit";
+      editButton.addEventListener("click", () => {
+        popup.remove();
+        actionsRef.current.onEditItem("photo", photo.id);
+      });
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "lofoten-popup-action lofoten-popup-action-danger";
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", () => {
+        popup.remove();
+        actionsRef.current.onDeleteItem("photo", photo.id);
+      });
+      manageBar.append(editButton, deleteButton);
+      body.append(manageBar);
+    }
+
+    function showPhotoPopup(photo: Photo) {
+      if (photo.lng === null || photo.lat === null) return;
+      const meta = [
+        formatDateTime(photo.taken_at || photo.created_at),
+        photo.uploader_name ? `by ${photo.uploader_name}` : "",
+      ].filter(Boolean).join(" · ");
+      const imageUrl = photo.thumbnail_url || photo.image_url;
+      const image = imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="Trip photo" class="lofoten-popup-image"/>` : "";
+      const content = `<div class="lofoten-popup-card lofoten-popup-card-photo">${image}<div class="lofoten-popup-body"><span class="lofoten-popup-tag lofoten-popup-tag-photo">photo</span><div class="lofoten-popup-title">${escapeHtml(photo.caption || "Untitled photo")}</div><div class="lofoten-popup-meta">${escapeHtml(meta)}</div></div></div>`;
+      const popup = new mapboxgl.Popup({ offset: 34, className: "lofoten-popup", maxWidth: "17rem" })
+        .setLngLat([photo.lng, photo.lat])
+        .setHTML(content)
+        .addTo(activeMap);
+      addPopupActions(popup, photo);
+    }
+
+    function closestPhoto(coordinates: [number, number]) {
+      let closest: Photo | null = null;
+      let closestDistance = Number.POSITIVE_INFINITY;
+      for (const photo of photos) {
+        if (photo.lng === null || photo.lat === null) continue;
+        const lngDistance = (photo.lng - coordinates[0]) * Math.cos((photo.lat * Math.PI) / 180);
+        const latDistance = photo.lat - coordinates[1];
+        const distance = lngDistance * lngDistance + latDistance * latDistance;
+        if (distance < closestDistance) {
+          closest = photo;
+          closestDistance = distance;
+        }
+      }
+      return closest;
+    }
+
+    function createMarkerElement(photo: Photo, count: number) {
+      const element = document.createElement("button");
+      element.type = "button";
+      element.className = `lofoten-photo-marker${count > 1 ? " lofoten-photo-marker-cluster" : ""}`;
+      element.setAttribute("aria-label", count > 1 ? `View cluster of ${count} photos` : `View ${photo.caption || "trip photo"}`);
+      const imageUrl = photo.thumbnail_url || photo.image_url;
+      if (imageUrl) {
+        const image = document.createElement("img");
+        image.src = imageUrl;
+        image.alt = "";
+        image.draggable = false;
+        element.append(image);
+      } else {
+        const fallback = document.createElement("span");
+        fallback.className = "lofoten-photo-marker-fallback";
+        fallback.textContent = "Photo";
+        element.append(fallback);
+      }
+      if (count > 1) {
+        const badge = document.createElement("span");
+        badge.className = "lofoten-photo-marker-count";
+        badge.textContent = count > 999 ? "999+" : String(count);
+        element.append(badge);
+      }
+      return element;
+    }
+
+    function refreshMarkers() {
+      if (!visibility.photos || !hasLayer(activeMap, "photos-hit")) {
+        for (const marker of markers.values()) marker.remove();
+        markers.clear();
+        return;
+      }
+
+      const features = activeMap.queryRenderedFeatures({ layers: ["photos-hit"] });
+      const seen = new Set<string>();
+      const canvas = activeMap.getCanvas();
+      for (const feature of features) {
+        if (!feature.geometry || feature.geometry.type !== "Point") continue;
+        const coordinates = feature.geometry.coordinates as [number, number];
+        const projected = activeMap.project(coordinates);
+        if (projected.x < -36 || projected.y < -36 || projected.x > canvas.clientWidth + 36 || projected.y > canvas.clientHeight + 36) continue;
+        const clusterId = Number(feature.properties?.cluster_id);
+        const isCluster = Boolean(feature.properties?.cluster);
+        const photo = isCluster
+          ? closestPhoto(coordinates)
+          : photosById.get(String(feature.properties?.id ?? ""));
+        if (!photo) continue;
+        const key = isCluster ? `cluster-${clusterId}` : `photo-${photo.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        if (!markers.has(key)) {
+          const count = isCluster ? Number(feature.properties?.point_count) : 1;
+          const element = createMarkerElement(photo, count);
+          element.addEventListener("click", (event) => {
+            event.stopPropagation();
+            if (!isCluster) {
+              showPhotoPopup(photo);
+              return;
+            }
+            const source = getSource(activeMap, "photos") as mapboxgl.GeoJSONSource | undefined;
+            source?.getClusterExpansionZoom(clusterId, (error, zoom) => {
+              if (error || zoom === null || zoom === undefined) return;
+              activeMap.easeTo({ center: coordinates, zoom, duration: 550 });
+            });
+          });
+          const marker = new mapboxgl.Marker({ element, anchor: "center" }).setLngLat(coordinates).addTo(activeMap);
+          // Mapbox defaults custom markers to role="img"; these markers are
+          // genuine controls, so restore the button semantics after creation.
+          element.setAttribute("role", "button");
+          markers.set(key, marker);
+        } else {
+          markers.get(key)?.setLngLat(coordinates);
+        }
+      }
+
+      for (const [key, marker] of markers) {
+        if (seen.has(key)) continue;
+        marker.remove();
+        markers.delete(key);
+      }
+    }
+
+    function scheduleRefresh() {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(refreshMarkers);
+    }
+
+    scheduleRefresh();
+    activeMap.on("moveend", scheduleRefresh);
+    activeMap.on("zoomend", scheduleRefresh);
+    activeMap.on("sourcedata", scheduleRefresh);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      activeMap.off("moveend", scheduleRefresh);
+      activeMap.off("zoomend", scheduleRefresh);
+      activeMap.off("sourcedata", scheduleRefresh);
+      for (const marker of markers.values()) marker.remove();
+    };
+  }, [map, photos, visibility.photos]);
+
+  useEffect(() => {
+    if (!map) return;
+    const activeMap = map;
     let handlersAttached = false;
-    const pointPopupLayers = ["photos-circle", "notes-circle", "places-circle"];
+    const pointPopupLayers = ["notes-circle", "places-circle"];
     const routePopupLayer = "routes-line";
 
     function tag(kind: string) {
@@ -166,23 +363,6 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       body.append(bar);
     }
 
-    // Photo popups get an "Open in Journey" button for everyone (no ownership
-    // gate): it just launches the cinematic viewer at this photo.
-    function injectJourneyButton(popup: mapboxgl.Popup, id: string) {
-      if (!id) return;
-      const body = popup.getElement()?.querySelector(".lofoten-popup-body");
-      if (!body) return;
-      const bar = document.createElement("div");
-      bar.className = "lofoten-popup-actions";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "lofoten-popup-action lofoten-popup-action-journey";
-      button.textContent = "Open in Journey";
-      button.addEventListener("click", () => { popup.remove(); actionsRef.current.onOpenJourney(id); });
-      bar.append(button);
-      body.append(bar);
-    }
-
     function showPointPopup(event: mapboxgl.MapLayerMouseEvent) {
       const feature = event.features?.[0];
       if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
@@ -191,19 +371,13 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       const byline = (person: unknown) => (person ? `<span class="lofoten-popup-by">by ${escapeHtml(person)}</span>` : "");
 
       let content: string;
-      if (props.kind === "photo") {
-        const meta = [formatDateTime(String(props.taken_at || props.created_at || "")), props.uploader_name ? `by ${props.uploader_name}` : ""].filter(Boolean).join(" · ");
-        const imageUrl = props.thumbnail_url || props.image_url;
-        const image = imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="Trip photo" class="lofoten-popup-image"/>` : "";
-        content = `<div class="lofoten-popup-card lofoten-popup-card-photo">${image}<div class="lofoten-popup-body">${tag("photo")}<div class="lofoten-popup-title">${escapeHtml(props.caption || "Untitled photo")}</div><div class="lofoten-popup-meta">${escapeHtml(meta)}</div></div></div>`;
-      } else if (props.kind === "note") {
+      if (props.kind === "note") {
         content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("note")}<div class="lofoten-popup-title">${escapeHtml(props.body || props.title || "Trail note")}</div><div class="lofoten-popup-meta">${byline(props.author_name)}</div></div></div>`;
       } else {
         const meta = [props.place_type, props.description].filter(Boolean).map((value) => escapeHtml(value)).join(" · ");
         content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("place")}<div class="lofoten-popup-title">${escapeHtml(props.name || props.title || "Place")}</div><div class="lofoten-popup-meta">${meta || "Shared trip marker"}</div></div></div>`;
       }
       const popup = new mapboxgl.Popup({ offset: 18, className: "lofoten-popup", maxWidth: "17rem" }).setLngLat(coordinates).setHTML(content).addTo(activeMap);
-      if (props.kind === "photo") injectJourneyButton(popup, String(props.id ?? ""));
       injectActions(popup, props.kind as MapItemKind, String(props.id ?? ""), (props.user_id as string | null) ?? null);
     }
 
