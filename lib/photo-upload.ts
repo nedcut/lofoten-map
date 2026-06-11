@@ -29,6 +29,11 @@ export type PhotoBatchOutcome = {
   insertErrorMessage: string | null;
   /** True when at least one row was inserted into the photos table. */
   inserted: boolean;
+  /**
+   * The inserted rows as returned by the database, so the caller can patch
+   * them into local state instead of refetching every table.
+   */
+  insertedRows: Photo[];
 };
 
 type PendingRow = {
@@ -78,6 +83,7 @@ export async function uploadPhotoBatch(options: {
   const failedClientIds: string[] = [];
   let insertErrorMessage: string | null = null;
   let inserted = false;
+  let insertedRows: Photo[] = [];
 
   const { uploads: uploadCandidates, duplicates } = partitionDuplicatePhotos(
     inputs.map((input) => ({ input, contentHash: input.contentHash, mediaType: input.mediaType, takenAt: input.exif?.takenAt ?? null, coordinate: input.coordinate })),
@@ -165,7 +171,7 @@ export async function uploadPhotoBatch(options: {
       exif_found: row.exif_found,
     }));
     if (insertRows.length > 0) {
-      const { error: insertError } = await supabase.from("photos").insert(insertRows);
+      const { data: returnedRows, error: insertError } = await supabase.from("photos").insert(insertRows).select();
       if (insertError) {
         if (uploadedPaths.length > 0) await supabase.storage.from(PHOTO_BUCKET).remove(uploadedPaths);
         insertErrorMessage = insertError.message;
@@ -173,9 +179,10 @@ export async function uploadPhotoBatch(options: {
       } else {
         savedClientIds.push(...freshRows.map((row) => row.client_id));
         inserted = true;
+        insertedRows = (returnedRows ?? []) as Photo[];
       }
     }
   }
 
-  return { savedClientIds, failedClientIds, failures, warnings, uploadedCount: rows.length, insertErrorMessage, inserted };
+  return { savedClientIds, failedClientIds, failures, warnings, uploadedCount: rows.length, insertErrorMessage, inserted, insertedRows };
 }

@@ -24,7 +24,7 @@ import { clearNoteDraft } from "@/lib/offline-drafts";
 import { prepareAvatarFile } from "@/lib/avatar-processing";
 import { prepareMediaFiles } from "@/lib/media-processing";
 import { uploadPhotoBatch } from "@/lib/photo-upload";
-import { AVATAR_BUCKET, IMMUTABLE_CACHE_SECONDS, PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
+import { AVATAR_BUCKET, IMMUTABLE_CACHE_SECONDS, PHOTO_BUCKET, getSupabaseBrowserClient, resolvePhotoUrls } from "@/lib/supabase";
 import { applyTripUrlState, formatDayParam, formatItemToken, parseItemToken, readTripUrlState, resolveDayParam } from "@/lib/trip-url";
 import { cn } from "@/lib/utils";
 import type { Day, LngLat, MapClickMode, Note, RouteMode, RouteSegment } from "@/types/trip";
@@ -736,7 +736,12 @@ export default function Home() {
         failedClientIds.push(...outcome.failedClientIds);
         if (outcome.insertErrorMessage) setError(outcome.insertErrorMessage);
         if (outcome.inserted) {
-          await loadData();
+          // Patch the returned rows into local state instead of refetching
+          // every table; the realtime echo of this insert upserts by id, so
+          // the two paths converge instead of duplicating.
+          const resolved = resolvePhotoUrls(supabase, outcome.insertedRows);
+          const insertedIds = new Set(resolved.map((row) => row.id));
+          setData((current) => ({ ...current, photos: [...resolved, ...current.photos.filter((photo) => !insertedIds.has(photo.id))] }));
           didSave = true;
         }
         if (outcome.failures.length > 0) {

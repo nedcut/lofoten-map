@@ -67,11 +67,14 @@ function fakeSupabase(options: { failUploadFor?: string[]; clashHashes?: string[
           in: async () => ({ data: (options.clashHashes ?? []).map((hash) => ({ content_hash: hash })) }),
         }),
       }),
-      insert: async (rows: Array<Record<string, unknown>>) => {
-        if (options.insertErrorMessage) return { error: { message: options.insertErrorMessage } };
-        inserted.push(...rows);
-        return { error: null };
-      },
+      insert: (rows: Array<Record<string, unknown>>) => ({
+        select: async () => {
+          if (options.insertErrorMessage) return { data: null, error: { message: options.insertErrorMessage } };
+          inserted.push(...rows);
+          const returned = rows.map((row, index) => ({ ...row, id: `row-${index}` }));
+          return { data: returned, error: null };
+        },
+      }),
     }),
   } as unknown as SupabaseClient;
   return { client, uploaded, removed, inserted };
@@ -109,6 +112,8 @@ describe("uploadPhotoBatch", () => {
     expect(inserted).toHaveLength(2);
     expect(inserted[0]).not.toHaveProperty("client_id");
     expect(inserted[0]).toMatchObject({ trip_id: "trip-1", uploader_name: "Ned", media_type: "video" });
+    expect(result.insertedRows).toHaveLength(2);
+    expect(result.insertedRows[0].id).toBe("row-0");
   });
 
   it("skips items that duplicate existing photos without touching storage", async () => {
