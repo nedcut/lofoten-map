@@ -7,6 +7,7 @@ import { mapWithConcurrency } from "@/lib/concurrency";
 import { extractPhotoExif, type ExtractedExif } from "@/lib/exif";
 import { fileContentHash } from "@/lib/file-hash";
 import { detectMediaType } from "@/lib/media-processing";
+import { clearPhotoDraft, readPhotoDraft, writePhotoDraft, type PhotoDraft } from "@/lib/photo-draft-store";
 import {
   coordinateKey,
   dayLabel,
@@ -49,6 +50,8 @@ export type PhotoUploadProgress = {
 type Props = {
   days: Day[];
   routes: RouteSegment[];
+  // Keys the offline draft of the import queue in IndexedDB.
+  tripSlug: string;
   defaultDayId: string | null;
   pendingCoordinate: LngLat | null;
   isSaving: boolean;
@@ -73,7 +76,7 @@ const STEP_TITLES: Record<Step, string> = {
   place: "Place on map",
 };
 
-export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate, isSaving, onCancel, onCoordinatePreview, onSave }: Props) {
+export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pendingCoordinate, isSaving, onCancel, onCoordinatePreview, onSave }: Props) {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   // Lets the map-tap effect target the active photo without depending on
@@ -92,6 +95,55 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
   const minimized = placeMode !== null;
   const previewCoordinateKeyRef = useRef<string | null>(null);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
+  // A queue saved by a previous session (tab closed or crashed mid-import),
+  // offered for restore while the current queue is still empty.
+  const [restorableDraft, setRestorableDraft] = useState<PhotoDraft | null>(null);
+  const hadItemsRef = useRef(false);
+  const draftTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void readPhotoDraft(tripSlug).then((draft) => {
+      if (!cancelled && draft && draft.items.length > 0) setRestorableDraft(draft);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tripSlug]);
+
+  // Persist the analyzed queue (debounced) so a crash or reload mid-import
+  // does not lose the selected batch. Skips the initial empty state so an
+  // unopened panel never clears a restorable draft.
+  useEffect(() => {
+    if (items.length > 0) hadItemsRef.current = true;
+    if (!hadItemsRef.current) return;
+    if (draftTimerRef.current !== null) window.clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = window.setTimeout(() => {
+      draftTimerRef.current = null;
+      const persistable = items.filter((item) => item.status === "ready" || item.status === "needs-location");
+      if (persistable.length === 0) void clearPhotoDraft(tripSlug);
+      else void writePhotoDraft(tripSlug, persistable);
+    }, 800);
+    return () => {
+      if (draftTimerRef.current !== null) {
+        window.clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+    };
+  }, [items, tripSlug]);
+
+  function restoreDraft() {
+    if (!restorableDraft) return;
+    setItems(restorableDraft.items);
+    setActiveItemId(restorableDraft.items[0]?.id ?? null);
+    setStep("review");
+    setRestorableDraft(null);
+  }
+
+  function discardDraft() {
+    setRestorableDraft(null);
+    void clearPhotoDraft(tripSlug);
+  }
 
   const visibleItems = useMemo(() => {
     if (queueFilter === "all") return items;
@@ -331,7 +383,13 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
       exif: item.exif,
     })), setUploadProgress);
     setUploadProgress(null);
-    if (!result || result.savedClientIds.length === 0 || result.failedClientIds.length === 0) return;
+    if (!result || result.savedClientIds.length === 0) return;
+    if (result.failedClientIds.length === 0) {
+      // Everything saved; the parent is about to close the panel, so clear
+      // the draft now rather than relying on the debounced persist.
+      void clearPhotoDraft(tripSlug);
+      return;
+    }
     const savedIds = new Set(result.savedClientIds);
     setItems((current) => current.filter((item) => !savedIds.has(item.id)));
     setActiveItemId(result.failedClientIds[0] ?? null);
@@ -476,6 +534,20 @@ export function UploadPhotoPanel({ days, routes, defaultDayId, pendingCoordinate
             {step === "select" ? (
               <div className="flex h-full flex-col">
                 <p className="text-sm leading-6 text-stone-600">Choose photos, videos, or a whole camera roll batch. GPS, dates, poster frames, and route placement are prepared on your device before anything uploads.</p>
+                {restorableDraft && items.length === 0 ? (
+                  <div className="mt-4 space-y-2 rounded-xl border border-amber-300/70 bg-amber-50 p-3 text-sm text-amber-950">
+                    <div className="font-bold">Unfinished import found</div>
+                    <p className="text-xs leading-5 text-amber-900/80">{restorableDraft.items.length} media item{restorableDraft.items.length === 1 ? "" : "s"} from a previous session never finished uploading.</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button type="button" onClick={restoreDraft} className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-xs font-bold text-white transition hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-[0.98]">
+                        <RotateCcw className="h-3.5 w-3.5" /> Restore
+                      </button>
+                      <button type="button" onClick={discardDraft} className="inline-flex items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.98]">
+                        <Trash2 className="h-3.5 w-3.5" /> Discard
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="mt-4 grid gap-3">
                   <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-teal-700/35 bg-teal-50 px-4 py-6 text-center text-teal-950 transition hover:bg-teal-100">
                     <Images className="h-7 w-7" />

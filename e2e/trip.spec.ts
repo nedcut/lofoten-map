@@ -32,6 +32,25 @@ test.describe("desktop", () => {
     await expect(page).toHaveURL(/day=/);
   });
 
+  test("photo import queue survives a reload as a restorable draft", async ({ page }) => {
+    await page.goto("/");
+    if (await page.getByRole("heading", { name: "Mapbox token needed" }).isVisible()) {
+      test.skip(true, "no Mapbox token; map actions are disabled");
+    }
+    await page.getByRole("button", { name: "Upload media" }).first().click();
+    // 1x1 PNG; no GPS, so the item parks at needs-location and is persistable.
+    const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    await page.locator("input[type=file]").first().setInputFiles({ name: "draft-photo.png", mimeType: "image/png", buffer: pixel });
+    await expect(page.getByText("Tap map to place").first()).toBeVisible();
+    // Wait past the debounced IndexedDB write, then simulate a lost session.
+    await page.waitForTimeout(1200);
+    await page.reload();
+    await page.getByRole("button", { name: "Upload media" }).first().click();
+    await expect(page.getByText("Unfinished import found")).toBeVisible();
+    await page.getByRole("button", { name: "Discard" }).click();
+    await expect(page.getByText("Unfinished import found")).toBeHidden();
+  });
+
   test("photo marker opens a popup with the demo photo", async ({ page }) => {
     await page.goto("/");
     // Without a Mapbox token (CI) the map shows its fallback and there are
