@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gpxTimeToTripDate, groupPointsByDay, type GpxTrackPoint } from "./gpx";
+import { firstBucketDate, gpxTimeToTripDate, groupPointsByDay, type GpxTrackPoint } from "./gpx";
 
 function point(time: string | null): GpxTrackPoint {
   return { lat: 67.9, lng: 13.0, ele: null, time };
@@ -42,5 +42,16 @@ describe("groupPointsByDay", () => {
     const timed = point("2026-05-28T08:00:00Z");
 
     expect(groupPointsByDay([untimed, timed])).toEqual([[untimed], [timed]]);
+  });
+});
+
+describe("firstBucketDate", () => {
+  it("skips untimed points and returns the first usable trip date", () => {
+    expect(firstBucketDate([point(null), point("not-a-date"), point("2026-05-28T08:00:00Z")])).toBe("2026-05-28");
+  });
+
+  it("returns null when no point has a usable time", () => {
+    expect(firstBucketDate([point(null), point(null)])).toBeNull();
+    expect(firstBucketDate([])).toBeNull();
   });
 });

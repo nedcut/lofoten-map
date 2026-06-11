@@ -17,6 +17,21 @@ export function mediaTypeForFile(file: File): MediaType {
   return detectMediaType(file) ?? "photo";
 }
 
+// Storage object names need an extension that matches the bytes actually
+// uploaded (post-conversion), so derive it from the MIME type and only fall
+// back to the original filename for types we do not rewrite.
+export function storageFileExtension(file: File): string {
+  if (file.type === "image/jpeg") return "jpg";
+  if (file.type === "image/png") return "png";
+  if (file.type === "image/webp") return "webp";
+  if (file.type === "video/quicktime") return "mov";
+  if (file.type === "video/mp4" || file.type === "video/x-m4v") return "mp4";
+  if (file.type === "video/webm") return "webm";
+  const dotIndex = file.name.lastIndexOf(".");
+  if (dotIndex <= 0) return "jpg";
+  return file.name.slice(dotIndex + 1).toLowerCase() || "jpg";
+}
+
 function videoThumbnail(file: File): Promise<File | null> {
   if (typeof document === "undefined") return Promise.resolve(null);
   return new Promise((resolve) => {

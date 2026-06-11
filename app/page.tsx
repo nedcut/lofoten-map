@@ -2,10 +2,8 @@
 
 import dynamic from "next/dynamic";
 import mapboxgl from "mapbox-gl";
-import { collectItemCoordinates } from "@/lib/geo";
-import length from "@turf/length";
+import { collectItemCoordinates, lineDistanceMeters, routeDistanceMeters, routeGeometry } from "@/lib/geo";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { LineString } from "geojson";
 import { AlertCircle, Loader2, LogIn, Mail, Play, ShieldCheck, Sparkles, UserRound, X } from "lucide-react";
 import { DaySidebar } from "@/components/DaySidebar";
 import { JourneyPlayback, type JourneyFilter } from "@/components/JourneyPlayback";
@@ -16,16 +14,17 @@ import { TripLayers, type MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
 import { deriveTripAccess } from "@/lib/access";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
-import { gpxTimeToTripDate, groupPointsByDay, parseGpx, simplifyToLineString } from "@/lib/gpx";
+import { firstBucketDate, groupPointsByDay, parseGpx, simplifyToLineString } from "@/lib/gpx";
 import { useTripAuth } from "@/lib/hooks/useTripAuth";
 import { useTripData } from "@/lib/hooks/useTripData";
 import { buildJourneyItems } from "@/lib/journey";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
 import { clearNoteDraft } from "@/lib/offline-drafts";
 import { prepareAvatarFile } from "@/lib/avatar-processing";
-import { prepareMediaFiles } from "@/lib/media-processing";
+import { prepareMediaFiles, storageFileExtension } from "@/lib/media-processing";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import { partitionDuplicatePhotos } from "@/lib/photo-dedup";
-import { AVATAR_BUCKET, PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
+import { AVATAR_BUCKET, IMMUTABLE_CACHE_SECONDS, PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
 import { applyTripUrlState, formatDayParam, formatItemToken, parseItemToken, readTripUrlState, resolveDayParam } from "@/lib/trip-url";
 import { cn } from "@/lib/utils";
 import type { Day, LngLat, MapClickMode, Note, RouteMode, RouteSegment } from "@/types/trip";
@@ -37,54 +36,6 @@ const ManualRoutePanel = dynamic(() => import("@/components/ManualRoutePanel").t
 const ProfilePanel = dynamic(() => import("@/components/ProfilePanel").then((mod) => mod.ProfilePanel));
 const UploadPhotoPanel = dynamic(() => import("@/components/UploadPhotoPanel").then((mod) => mod.UploadPhotoPanel));
 const UPLOAD_CONCURRENCY = 4;
-// Storage files are uuid-named and never rewritten, so browsers and the CDN
-// can cache them for a year instead of re-downloading every hour.
-const IMMUTABLE_CACHE_SECONDS = "31536000";
-
-
-async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
-  let index = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (index < items.length) {
-      const next = items[index++];
-      await worker(next);
-    }
-  });
-  await Promise.all(runners);
-}
-
-function routeGeometry(points: LngLat[]): LineString {
-  return { type: "LineString", coordinates: points.map((point) => [point.lng, point.lat]) };
-}
-
-function routeDistanceMeters(points: LngLat[]) {
-  if (points.length < 2) return 0;
-  const geometry = routeGeometry(points);
-  return Math.round(length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" }) * 1000);
-}
-
-function lineDistanceMeters(geometry: LineString) {
-  if (geometry.coordinates.length < 2) return 0;
-  return Math.round(length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" }) * 1000);
-}
-
-function firstBucketDate(points: { time: string | null }[]) {
-  for (const point of points) {
-    const date = gpxTimeToTripDate(point.time);
-    if (date) return date;
-  }
-  return null;
-}
-
-function fileExtension(file: File) {
-  if (file.type === "image/jpeg") return "jpg";
-  if (file.type === "image/png") return "png";
-  if (file.type === "image/webp") return "webp";
-  if (file.type === "video/quicktime") return "mov";
-  if (file.type === "video/mp4" || file.type === "video/x-m4v") return "mp4";
-  if (file.type === "video/webm") return "webm";
-  return file.name.split(".").pop()?.toLowerCase() || "jpg";
-}
 
 export default function Home() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
@@ -799,7 +750,7 @@ export default function Home() {
 
         await mapWithConcurrency(uploadInputs, UPLOAD_CONCURRENCY, async (input) => {
           const prepared = await prepareMediaFiles(input.file);
-          const extension = fileExtension(prepared.imageFile);
+          const extension = storageFileExtension(prepared.imageFile);
           const path = `${data.trip!.slug}/${crypto.randomUUID()}.${extension}`;
           const thumbnailPath = prepared.thumbnailFile ? `${data.trip!.slug}/thumbs/${crypto.randomUUID()}.jpg` : null;
           // The thumbnail never depends on the image upload, so both go up

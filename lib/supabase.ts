@@ -37,6 +37,9 @@ export function getSupabaseBrowserClient() {
 
 export const PHOTO_BUCKET = "trip-photos";
 export const AVATAR_BUCKET = "avatars";
+// Storage files are uuid-named and never rewritten, so browsers and the CDN
+// can cache them for a year instead of re-downloading every hour.
+export const IMMUTABLE_CACHE_SECONDS = "31536000";
 
 /**
  * Pure mapper: resolve each photo's `image_url` / `thumbnail_url` from a

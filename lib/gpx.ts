@@ -44,6 +44,16 @@ export function gpxTimeToTripDate(time: string | null): string | null {
   return year && month && day ? `${year}-${month}-${day}` : null;
 }
 
+// First point in the bucket that carries a usable timestamp decides the
+// trip date; exporters that drop <time> on some points are skipped over.
+export function firstBucketDate(points: { time: string | null }[]): string | null {
+  for (const point of points) {
+    const date = gpxTimeToTripDate(point.time);
+    if (date) return date;
+  }
+  return null;
+}
+
 /**
  * Parse a GPX 1.1 document into the slice of data this app cares about:
  * the track (merged across segments), and named waypoints.

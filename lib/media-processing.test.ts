@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectMediaType, mediaTypeForFile, prepareMediaFiles } from "./media-processing";
+import { detectMediaType, mediaTypeForFile, prepareMediaFiles, storageFileExtension } from "./media-processing";
 
 describe("detectMediaType", () => {
   it("distinguishes photos and videos", () => {
@@ -14,6 +14,20 @@ describe("detectMediaType", () => {
 describe("mediaTypeForFile", () => {
   it("defaults unknown files to photo", () => {
     expect(mediaTypeForFile(new File([], "notes.txt", { type: "text/plain" }))).toBe("photo");
+  });
+});
+
+describe("storageFileExtension", () => {
+  it("derives the extension from the MIME type for rewritten media", () => {
+    expect(storageFileExtension(new File([], "photo.heic", { type: "image/jpeg" }))).toBe("jpg");
+    expect(storageFileExtension(new File([], "shot.png", { type: "image/png" }))).toBe("png");
+    expect(storageFileExtension(new File([], "clip.mov", { type: "video/quicktime" }))).toBe("mov");
+    expect(storageFileExtension(new File([], "clip.m4v", { type: "video/x-m4v" }))).toBe("mp4");
+  });
+
+  it("falls back to the lowercased filename extension, then jpg", () => {
+    expect(storageFileExtension(new File([], "raw.CR2", { type: "application/octet-stream" }))).toBe("cr2");
+    expect(storageFileExtension(new File([], "noextension", { type: "" }))).toBe("jpg");
   });
 });
 

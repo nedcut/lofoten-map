@@ -1,8 +1,22 @@
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
 import length from "@turf/length";
-import type { Note, Photo, Place, RouteSegment } from "@/types/trip";
+import type { LngLat, Note, Photo, Place, RouteSegment } from "@/types/trip";
 
 export const LOFOTEN_CENTER: [number, number] = [13.0897, 67.9325];
+
+export function routeGeometry(points: LngLat[]): LineString {
+  return { type: "LineString", coordinates: points.map((point) => [point.lng, point.lat]) };
+}
+
+export function routeDistanceMeters(points: LngLat[]) {
+  if (points.length < 2) return 0;
+  return lineDistanceMeters(routeGeometry(points));
+}
+
+export function lineDistanceMeters(geometry: LineString) {
+  if (geometry.coordinates.length < 2) return 0;
+  return Math.round(length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" }) * 1000);
+}
 
 export type DayItems = {
   routes: RouteSegment[];
