@@ -21,9 +21,8 @@ import { buildJourneyItems } from "@/lib/journey";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
 import { clearNoteDraft } from "@/lib/offline-drafts";
 import { prepareAvatarFile } from "@/lib/avatar-processing";
-import { prepareMediaFiles, storageFileExtension } from "@/lib/media-processing";
-import { mapWithConcurrency } from "@/lib/concurrency";
-import { partitionDuplicatePhotos } from "@/lib/photo-dedup";
+import { prepareMediaFiles } from "@/lib/media-processing";
+import { uploadPhotoBatch } from "@/lib/photo-upload";
 import { AVATAR_BUCKET, IMMUTABLE_CACHE_SECONDS, PHOTO_BUCKET, getSupabaseBrowserClient } from "@/lib/supabase";
 import { applyTripUrlState, formatDayParam, formatItemToken, parseItemToken, readTripUrlState, resolveDayParam } from "@/lib/trip-url";
 import { cn } from "@/lib/utils";
@@ -719,128 +718,27 @@ export default function Home() {
           setError("Sign in before uploading media to Supabase.");
           return;
         }
-        const rows: Array<{
-          client_id: string;
-          trip_id: string;
-          day_id: string | null;
-          uploader_name: string;
-          content_hash: string;
-          media_type: "photo" | "video";
-          image_path: string;
-          thumbnail_path: string | null;
-          lat: number;
-          lng: number;
-          taken_at: string | null | undefined;
-          caption: string;
-          exif_found: boolean;
-        }> = [];
-        const failures: string[] = [];
-        const warnings: string[] = [];
-        const uploadedPaths: string[] = [];
-        const { uploads: uploadCandidates, duplicates } = partitionDuplicatePhotos(
-          inputs.map((input) => ({ input, contentHash: input.contentHash, mediaType: input.mediaType, takenAt: input.exif?.takenAt ?? null, coordinate: input.coordinate })),
-          data.photos,
-        );
-        for (const duplicate of duplicates) {
-          failures.push(`${duplicate.input.file.name}: duplicate media skipped`);
-          failedClientIds.push(duplicate.input.clientId);
-          markUploadComplete();
-        }
-        const uploadInputs = uploadCandidates.map((candidate) => candidate.input);
-
-        await mapWithConcurrency(uploadInputs, UPLOAD_CONCURRENCY, async (input) => {
-          const prepared = await prepareMediaFiles(input.file);
-          const extension = storageFileExtension(prepared.imageFile);
-          const path = `${data.trip!.slug}/${crypto.randomUUID()}.${extension}`;
-          const thumbnailPath = prepared.thumbnailFile ? `${data.trip!.slug}/thumbs/${crypto.randomUUID()}.jpg` : null;
-          // The thumbnail never depends on the image upload, so both go up
-          // together instead of back to back.
-          const [imageUpload, thumbnailUpload] = await Promise.all([
-            supabase.storage.from(PHOTO_BUCKET).upload(path, prepared.imageFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: false, contentType: prepared.imageFile.type || undefined }),
-            prepared.thumbnailFile && thumbnailPath
-              ? supabase.storage.from(PHOTO_BUCKET).upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: false, contentType: prepared.thumbnailFile.type })
-              : Promise.resolve(null),
-          ]);
-          if (imageUpload.error) {
-            if (thumbnailPath && thumbnailUpload && !thumbnailUpload.error) await supabase.storage.from(PHOTO_BUCKET).remove([thumbnailPath]);
-            failures.push(`${input.file.name}: ${imageUpload.error.message}`);
-            failedClientIds.push(input.clientId);
-            markUploadComplete();
-            return;
-          }
-          uploadedPaths.push(path);
-          let thumbnailStoragePath: string | null = null;
-          if (thumbnailUpload) {
-            if (thumbnailUpload.error) {
-              warnings.push(`${input.file.name}: thumbnail skipped`);
-            } else if (thumbnailPath) {
-              uploadedPaths.push(thumbnailPath);
-              thumbnailStoragePath = thumbnailPath;
-            }
-          }
-          rows.push({
-            client_id: input.clientId,
-            trip_id: data.trip!.id,
-            day_id: input.dayId,
-            uploader_name: uploaderName,
-            content_hash: input.contentHash,
-            media_type: input.mediaType,
-            image_path: path,
-            thumbnail_path: thumbnailStoragePath,
-            lat: input.coordinate.lat,
-            lng: input.coordinate.lng,
-            taken_at: input.exif?.takenAt,
-            caption: input.caption,
-            exif_found: input.exif?.exifFound ?? false,
-          });
-          markUploadComplete();
+        const outcome = await uploadPhotoBatch({
+          supabase,
+          trip: { id: data.trip.id, slug: data.trip.slug },
+          existingPhotos: data.photos,
+          uploaderName,
+          inputs,
+          concurrency: UPLOAD_CONCURRENCY,
+          onItemComplete: markUploadComplete,
         });
-
-        if (rows.length > 0) {
-          // Re-check hashes against the database rather than local state, so a
-          // photo someone else uploaded mid-batch is skipped instead of failing
-          // the whole insert on the unique index.
-          const { data: clashData } = await supabase.from("photos").select("content_hash").eq("trip_id", data.trip.id).in("content_hash", rows.map((row) => row.content_hash));
-          const clashes = new Set(((clashData ?? []) as Array<{ content_hash: string }>).map((row) => row.content_hash));
-          const clashedRows = rows.filter((row) => clashes.has(row.content_hash));
-          const freshRows = rows.filter((row) => !clashes.has(row.content_hash));
-          if (clashedRows.length > 0) {
-            await supabase.storage.from(PHOTO_BUCKET).remove(clashedRows.flatMap((row) => [row.image_path, row.thumbnail_path].filter((rowPath): rowPath is string => Boolean(rowPath))));
-            failures.push(`${clashedRows.length} media item${clashedRows.length === 1 ? "" : "s"} already uploaded by someone else, skipped`);
-            failedClientIds.push(...clashedRows.map((row) => row.client_id));
-          }
-          const insertRows = freshRows.map((row) => ({
-            trip_id: row.trip_id,
-            day_id: row.day_id,
-            uploader_name: row.uploader_name,
-            content_hash: row.content_hash,
-            media_type: row.media_type,
-            image_path: row.image_path,
-            thumbnail_path: row.thumbnail_path,
-            lat: row.lat,
-            lng: row.lng,
-            taken_at: row.taken_at,
-            caption: row.caption,
-            exif_found: row.exif_found,
-          }));
-          if (insertRows.length > 0) {
-            const { error: insertError } = await supabase.from("photos").insert(insertRows);
-            if (insertError) {
-              if (uploadedPaths.length > 0) await supabase.storage.from(PHOTO_BUCKET).remove(uploadedPaths);
-              setError(insertError.message);
-              failedClientIds.push(...freshRows.map((row) => row.client_id));
-            } else {
-              savedClientIds.push(...freshRows.map((row) => row.client_id));
-              await loadData();
-              didSave = true;
-            }
-          }
+        savedClientIds.push(...outcome.savedClientIds);
+        failedClientIds.push(...outcome.failedClientIds);
+        if (outcome.insertErrorMessage) setError(outcome.insertErrorMessage);
+        if (outcome.inserted) {
+          await loadData();
+          didSave = true;
         }
-        if (failures.length > 0) {
-          setError(`${failures.length} media item${failures.length === 1 ? "" : "s"} failed to upload. ${failures.slice(0, 2).join(" ")}`);
+        if (outcome.failures.length > 0) {
+          setError(`${outcome.failures.length} media item${outcome.failures.length === 1 ? "" : "s"} failed to upload. ${outcome.failures.slice(0, 2).join(" ")}`);
           didSave = false;
-        } else if (warnings.length > 0) {
-          setNotice(`${rows.length} media item${rows.length === 1 ? "" : "s"} uploaded. ${warnings.length} thumbnail${warnings.length === 1 ? "" : "s"} could not be created, but the originals are saved.`);
+        } else if (outcome.warnings.length > 0) {
+          setNotice(`${outcome.uploadedCount} media item${outcome.uploadedCount === 1 ? "" : "s"} uploaded. ${outcome.warnings.length} thumbnail${outcome.warnings.length === 1 ? "" : "s"} could not be created, but the originals are saved.`);
         }
       }
       return { savedClientIds, failedClientIds };
