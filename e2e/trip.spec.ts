@@ -31,6 +31,21 @@ test.describe("desktop", () => {
     await page.getByRole("button", { name: "Next day" }).first().click();
     await expect(page).toHaveURL(/day=/);
   });
+
+  test("photo marker opens a popup with the demo photo", async ({ page }) => {
+    await page.goto("/");
+    // Without a Mapbox token (CI) the map shows its fallback and there are
+    // no markers to test — only run where tiles actually render.
+    if (await page.getByRole("heading", { name: "Mapbox token needed" }).isVisible()) {
+      test.skip(true, "no Mapbox token; map fallback is shown");
+    }
+    // Filter to day 1 so its single photo cannot be clustered away.
+    await page.getByRole("button", { name: /Day 1: Reine arrival/ }).click();
+    const marker = page.getByRole("button", { name: "View Reine harbor at golden hour" });
+    await expect(marker).toBeVisible({ timeout: 15_000 });
+    await marker.click();
+    await expect(page.locator(".mapboxgl-popup")).toContainText("Reine harbor at golden hour");
+  });
 });
 
 test.describe("mobile", () => {
