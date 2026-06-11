@@ -3,6 +3,7 @@
 import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Link, Loader2, MapPinned, Pencil, Save, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
+import { friendlyPersonName } from "@/lib/display-name";
 import { formatDateOnly, formatDateTime } from "@/lib/utils";
 import { journeyItemTitle, type JourneyAttachedItem, type JourneyItem } from "@/lib/journey";
 import type { Day, Photo, RouteSegment } from "@/types/trip";
@@ -239,7 +240,7 @@ export function JourneyPlayback({
       {uploaders.length > 0 ? (
         <select value={uploaderFilter} onChange={(event) => onUploaderFilterChange(event.target.value)} className="hidden max-w-[10rem] rounded-full border border-white/15 bg-stone-950/45 px-3 py-2 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20 sm:block">
           <option value="">Everyone</option>
-          {uploaders.map((uploader) => <option key={uploader} value={uploader}>{uploader}</option>)}
+          {uploaders.map((uploader) => <option key={uploader} value={uploader}>{friendlyPersonName(uploader)}</option>)}
         </select>
       ) : null}
     </>
@@ -394,7 +395,7 @@ export function JourneyPlayback({
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-white/58">
               <span>{itemKindLabel(activeItem)}</span>
               <span>{date}</span>
-              {activeItem.kind === "photo" && activeItem.primary.uploader_name ? <span>by {activeItem.primary.uploader_name}</span> : null}
+              {activeItem.kind === "photo" && activeItem.primary.uploader_name ? <span>by {friendlyPersonName(activeItem.primary.uploader_name)}</span> : null}
               {!activeItem.coord ? <span>location unknown</span> : null}
             </div>
             {activeItem.kind === "photo" ? (

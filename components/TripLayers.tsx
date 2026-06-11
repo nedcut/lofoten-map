@@ -2,6 +2,7 @@
 
 import mapboxgl from "mapbox-gl";
 import { useEffect, useMemo, useRef } from "react";
+import { friendlyPersonName } from "@/lib/display-name";
 import { noteFeatureCollection, photoFeatureCollection, placeFeatureCollection, routeFeatureCollection } from "@/lib/geo";
 import { formatDateTime } from "@/lib/utils";
 import type { Note, Photo, Place, RouteSegment } from "@/types/trip";
@@ -202,9 +203,10 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
 
     function showPhotoPopup(photo: Photo) {
       if (photo.lng === null || photo.lat === null) return;
+      const uploader = friendlyPersonName(photo.uploader_name);
       const meta = [
         formatDateTime(photo.taken_at || photo.created_at),
-        photo.uploader_name ? `by ${photo.uploader_name}` : "",
+        uploader ? `by ${uploader}` : "",
       ].filter(Boolean).join(" · ");
       const imageUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
       const mediaLabel = photo.media_type === "video" ? "video" : "photo";
@@ -410,7 +412,10 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       if (!feature || !feature.geometry || feature.geometry.type !== "Point") return;
       const props = feature.properties ?? {};
       const coordinates = (feature.geometry.coordinates as [number, number]).slice() as [number, number];
-      const byline = (person: unknown) => (person ? `<span class="lofoten-popup-by">by ${escapeHtml(person)}</span>` : "");
+      const byline = (person: unknown) => {
+        const name = friendlyPersonName(typeof person === "string" ? person : null);
+        return name ? `<span class="lofoten-popup-by">by ${escapeHtml(name)}</span>` : "";
+      };
 
       let content: string;
       if (props.kind === "note") {

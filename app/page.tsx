@@ -15,6 +15,7 @@ import type { MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
 import { deriveTripAccess } from "@/lib/access";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
+import { friendlyPersonName } from "@/lib/display-name";
 import { firstBucketDate, groupPointsByDay, parseGpx, simplifyToLineString } from "@/lib/gpx";
 import { useTripAuth } from "@/lib/hooks/useTripAuth";
 import { useTripData } from "@/lib/hooks/useTripData";
@@ -678,7 +679,9 @@ export default function Home() {
     setError(null);
     setNotice(null);
     // Uploader is the signed-in user — no name field needed in the upload flow.
-    const uploaderName = currentMember?.display_name || user?.email || "Friend";
+    // friendlyPersonName keeps the stored byline from being a raw email when
+    // the member never set a display name (reads are public).
+    const uploaderName = currentMember?.display_name || friendlyPersonName(user?.email) || "Friend";
     let didSave = false;
     const savedClientIds: string[] = [];
     const failedClientIds: string[] = [];
