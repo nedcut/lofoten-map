@@ -1,16 +1,17 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import mapboxgl from "mapbox-gl";
-import { collectItemCoordinates, lineDistanceMeters, routeDistanceMeters, routeGeometry } from "@/lib/geo";
+// Types only — a value import of mapbox-gl here would pull the whole library
+// into the initial bundle and defeat MapView's dynamic() split.
+import type { Map as MapboxMap } from "mapbox-gl";
+import { collectItemCoordinates, coordinateBounds, lineDistanceMeters, routeDistanceMeters, routeGeometry } from "@/lib/geo";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, Loader2, LogIn, Mail, Play, ShieldCheck, Sparkles, UserRound, X } from "lucide-react";
 import { DaySidebar } from "@/components/DaySidebar";
-import { JourneyPlayback, type JourneyFilter } from "@/components/JourneyPlayback";
+import type { JourneyFilter } from "@/components/JourneyPlayback";
 import { MapLegend } from "@/components/MapLegend";
 import { MobileSheet } from "@/components/MobileSheet";
-import { RouteDraftLayer } from "@/components/RouteDraftLayer";
-import { TripLayers, type MapItemKind } from "@/components/TripLayers";
+import type { MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
 import { deriveTripAccess } from "@/lib/access";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
@@ -30,6 +31,11 @@ import type { Day, LngLat, MapClickMode, Note, RouteMode, RouteSegment } from "@
 import type { PhotoUploadItemInput, PhotoUploadProgress, PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
+// These also value-import mapbox-gl (markers, popups, the mini map), so they
+// must stay out of the static import graph for the same reason as MapView.
+const TripLayers = dynamic(() => import("@/components/TripLayers").then((mod) => mod.TripLayers), { ssr: false });
+const RouteDraftLayer = dynamic(() => import("@/components/RouteDraftLayer").then((mod) => mod.RouteDraftLayer), { ssr: false });
+const JourneyPlayback = dynamic(() => import("@/components/JourneyPlayback").then((mod) => mod.JourneyPlayback), { ssr: false });
 const AddNotePanel = dynamic(() => import("@/components/AddNotePanel").then((mod) => mod.AddNotePanel));
 const ManualRoutePanel = dynamic(() => import("@/components/ManualRoutePanel").then((mod) => mod.ManualRoutePanel));
 const ProfilePanel = dynamic(() => import("@/components/ProfilePanel").then((mod) => mod.ProfilePanel));
@@ -82,7 +88,7 @@ export default function Home() {
   const [clickMode, setClickMode] = useState<MapClickMode>("idle");
   const [pendingCoordinate, setPendingCoordinate] = useState<LngLat | null>(null);
   const [routeDraftPoints, setRouteDraftPoints] = useState<LngLat[]>([]);
-  const [map, setMap] = useState<mapboxgl.Map | null>(null);
+  const [map, setMap] = useState<MapboxMap | null>(null);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   const [panel, setPanel] = useState<"photo" | "note" | "route" | null>(null);
   const [editTargetRef, setEditTargetRef] = useState<{ kind: MapItemKind; id: string } | null>(null);
@@ -484,7 +490,7 @@ export default function Home() {
     setPendingCoordinate(coordinate);
   }, [clickMode]);
 
-  const handleMapReady = useCallback((nextMap: mapboxgl.Map) => {
+  const handleMapReady = useCallback((nextMap: MapboxMap) => {
     setMapUnavailable(false);
     setMap(nextMap);
   }, []);
@@ -519,16 +525,14 @@ export default function Home() {
       ? { top: 96, right: 48, bottom: 220, left: 48 }
       : { top: 80, right: 80, bottom: 80, left: 80 };
 
-    const bounds = coords.reduce(
-      (box, coord) => box.extend(coord),
-      new mapboxgl.LngLatBounds(coords[0], coords[0]),
-    );
+    const bounds = coordinateBounds(coords);
+    if (!bounds) return;
 
-    if (bounds.getNorthEast().distanceTo(bounds.getSouthWest()) < 1) {
-      map.easeTo({ center: bounds.getCenter(), zoom: 13.5, padding, duration: 800, essential: true });
+    if (bounds.diagonalMeters < 1) {
+      map.easeTo({ center: bounds.center, zoom: 13.5, padding, duration: 800, essential: true });
       return;
     }
-    map.fitBounds(bounds, { padding, maxZoom: 14, duration: 800, essential: true });
+    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800, essential: true });
   }, [map, selectedDayId]);
 
   function startPanel(next: "photo" | "note" | "route") {
@@ -601,10 +605,11 @@ export default function Home() {
       [outlier.suggested.lng, outlier.suggested.lat],
       ...outlier.neighbors.map((neighbor): [number, number] => [neighbor.lng, neighbor.lat]),
     ];
-    const bounds = coords.reduce((box, coord) => box.extend(coord), new mapboxgl.LngLatBounds(coords[0], coords[0]));
+    const bounds = coordinateBounds(coords);
+    if (!bounds) return;
     const isMobile = window.innerWidth < 768;
     const padding = isMobile ? { top: 96, right: 48, bottom: 220, left: 48 } : { top: 80, right: 80, bottom: 80, left: 80 };
-    map.fitBounds(bounds, { padding, maxZoom: 14, duration: 800, essential: true });
+    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800, essential: true });
   }
 
   // A photo marker was dragged to a new spot. Update local state immediately so

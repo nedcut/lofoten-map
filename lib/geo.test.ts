@@ -1,5 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { lineDistanceMeters, routeDistanceMeters, routeGeometry } from "./geo";
+import { coordinateBounds, lineDistanceMeters, routeDistanceMeters, routeGeometry } from "./geo";
+
+describe("coordinateBounds", () => {
+  it("returns null for an empty list", () => {
+    expect(coordinateBounds([])).toBeNull();
+  });
+
+  it("computes sw/ne corners and the midpoint center", () => {
+    const bounds = coordinateBounds([[13.1, 67.9], [13.0, 67.95], [13.05, 67.92]]);
+    expect(bounds).not.toBeNull();
+    expect(bounds!.sw).toEqual([13.0, 67.9]);
+    expect(bounds!.ne).toEqual([13.1, 67.95]);
+    expect(bounds!.center[0]).toBeCloseTo(13.05);
+    expect(bounds!.center[1]).toBeCloseTo(67.925);
+  });
+
+  it("reports a sub-meter diagonal for a lone point", () => {
+    const bounds = coordinateBounds([[13.0897, 67.9325], [13.0897, 67.9325]]);
+    expect(bounds!.diagonalMeters).toBeLessThan(1);
+  });
+
+  it("reports roughly 1km for a 0.009-degree latitude span", () => {
+    const bounds = coordinateBounds([[13.0, 67.9], [13.0, 67.909]]);
+    expect(bounds!.diagonalMeters).toBeGreaterThan(950);
+    expect(bounds!.diagonalMeters).toBeLessThan(1050);
+  });
+});
 
 describe("routeGeometry", () => {
   it("builds a LineString in [lng, lat] order", () => {

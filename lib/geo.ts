@@ -4,6 +4,35 @@ import type { LngLat, Note, Photo, Place, RouteSegment } from "@/types/trip";
 
 export const LOFOTEN_CENTER: [number, number] = [13.0897, 67.9325];
 
+export type CoordinateBounds = { sw: [number, number]; ne: [number, number]; center: [number, number]; diagonalMeters: number };
+
+/**
+ * Axis-aligned bounds for a set of [lng, lat] coordinates, in the shape
+ * map.fitBounds accepts ([sw, ne]). Replaces mapboxgl.LngLatBounds at call
+ * sites that must not import mapbox-gl eagerly: a static import anywhere in
+ * the page graph pulls the whole 1.7MB library into the initial bundle,
+ * defeating MapView's dynamic() split. diagonalMeters supports the
+ * "lone point can't be fit, ease instead" check.
+ */
+export function coordinateBounds(coords: [number, number][]): CoordinateBounds | null {
+  if (coords.length === 0) return null;
+  let [minLng, minLat] = coords[0];
+  let [maxLng, maxLat] = coords[0];
+  for (const [lng, lat] of coords) {
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  const diagonal: LineString = { type: "LineString", coordinates: [[minLng, minLat], [maxLng, maxLat]] };
+  return {
+    sw: [minLng, minLat],
+    ne: [maxLng, maxLat],
+    center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2],
+    diagonalMeters: length({ type: "Feature", geometry: diagonal, properties: {} }, { units: "kilometers" }) * 1000,
+  };
+}
+
 export function routeGeometry(points: LngLat[]): LineString {
   return { type: "LineString", coordinates: points.map((point) => [point.lng, point.lat]) };
 }
