@@ -10,13 +10,11 @@ passes over broad rewrites.
   change.
 - Re-check mobile flows on a real phone: public viewing, sign-in panel, photo
   import, map placement, and expanded bottom sheet scrolling.
-- Continue rendered QA passes with Playwright screenshots; desktop/mobile now
-  cover the WebGL-unavailable fallback path, but a real Mapbox-token map render
-  still needs visual verification.
 - Extend EXIF coverage around large batches and edge-case camera metadata.
-- Add real-browser or integration coverage for photo upload placement once a
-  browser test harness is in place; unit coverage now exercises canvas resize,
-  corrupt-file fallback, HEIC passthrough, and thumbnail generation.
+- Extend the Playwright e2e suite (npm run test:e2e, demo mode on :3100) beyond
+  the current shell/day-filter/marker-popup/draft-restore specs — e.g. the
+  note flow and the full upload placement walk-through; route auto-placement
+  is now unit-tested in lib/upload-queue.test.ts.
 - Verify the auto-join + admin-request flow against a real Supabase project as:
   guest, newly signed-in member, existing admin, and demoted member.
 - Add a thin integration smoke test around the admin-request RPCs once a test
@@ -28,8 +26,6 @@ passes over broad rewrites.
   building on the current auto-join + admin-request model.
 - Add KML route import only if a real route file shows up in that format; GPX
   import is done.
-- Add offline-friendly drafts for notes/photos so weak connectivity does not
-  lose work mid-trip.
 - Add richer day journal entries only if the core map/photo/note workflow stays
   simple.
 
