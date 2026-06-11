@@ -189,7 +189,7 @@ export function buildJourneyItems(data: TripData, options: BuildJourneyOptions =
 }
 
 export function journeyItemTitle(item: JourneyItem) {
-  if (item.kind === "photo") return item.primary.caption || (item.primary.media_type === "video" ? "Untitled video" : "Untitled photo");
+  if (item.kind === "photo") return item.primary.caption || (item.primary.media_type === "video" ? "Trip video" : "Trip photo");
   if (item.kind === "note") return item.primary.body;
   return item.primary.name;
 }

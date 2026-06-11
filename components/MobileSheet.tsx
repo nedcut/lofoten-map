@@ -24,14 +24,15 @@ function dayLabel(selectedDay: Day | null): string {
   return `Day ${selectedDay.day_number}${selectedDay.title ? `: ${selectedDay.title}` : ""}`;
 }
 
-// The prominent line: how much is on the map right now. Tweak to taste — e.g.
-// add routes, or change the empty-state copy.
+// The prominent line: how much is on the map right now. Nouns are kept short
+// so all three parts fit the peek width without truncating. Tweak to taste —
+// e.g. add routes, or change the empty-state copy.
 function countsLabel(counts: PeekCounts): string {
   const journalPins = counts.notes + counts.places;
   const parts = [];
   if (counts.routes) parts.push(pluralize(counts.routes, "route"));
-  if (counts.photos) parts.push(pluralize(counts.photos, "media item"));
-  if (journalPins) parts.push(pluralize(journalPins, "journal pin"));
+  if (counts.photos) parts.push(`${counts.photos} media`);
+  if (journalPins) parts.push(pluralize(journalPins, "pin"));
   return parts.length > 0 ? parts.join(" · ") : "Nothing on the map yet";
 }
 
@@ -126,8 +127,8 @@ export function MobileSheet(props: MobileSheetProps) {
             <div className="overflow-hidden">
               {expanded ? (
                 <div className="max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
-                  <SidebarHeader trip={props.trip} />
-                  <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} onStepDay={props.onStepDay} />
+                  <SidebarHeader trip={props.trip} compact />
+                  <DayList days={props.days} dayStats={props.dayStats} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} onStepDay={props.onStepDay} />
                   {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
                   {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
                   {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}

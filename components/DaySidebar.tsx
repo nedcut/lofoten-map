@@ -7,9 +7,14 @@ import type { AdminRequest, AdminRequestStatus, Day, Trip, TripMember } from "@/
 
 export type LayerVisibility = { photos: boolean; notes: boolean; routes: boolean };
 
+// Per-day totals shown on the day cards so picking a day is informed: how much
+// media it holds, how many journal pins, and how far its routes run.
+export type DayStats = { media: number; journal: number; distanceMeters: number };
+
 export type SidebarProps = {
   trip: Trip | null;
   days: Day[];
+  dayStats?: Map<string, DayStats>;
   selectedDayId: string | null;
   onSelectDay: (dayId: string | null) => void;
   onStepDay: (direction: 1 | -1) => void;
@@ -44,11 +49,32 @@ export type AdminRequestProps = {
   onRequestAdmin: () => Promise<void>;
 };
 
-export function SidebarHeader({ trip }: { trip: Trip | null }) {
+// Badge text: the full date range when known ("May 27 – Jun 3, 2026"),
+// falling back to the year, then a generic label.
+function tripDatesLabel(trip: Trip | null): string {
+  if (!trip?.start_date) return "Trip";
+  const startYear = trip.start_date.slice(0, 4);
+  if (!trip.end_date) return startYear;
+  const endYear = trip.end_date.slice(0, 4);
+  if (startYear !== endYear) return `${formatDateOnly(trip.start_date)}, ${startYear} – ${formatDateOnly(trip.end_date)}, ${endYear}`;
+  return `${formatDateOnly(trip.start_date)} – ${formatDateOnly(trip.end_date)}, ${startYear}`;
+}
+
+export function SidebarHeader({ trip, compact = false }: { trip: Trip | null; compact?: boolean }) {
+  // Compact: the mobile sheet already shows the trip title in the app header
+  // chip, so repeating the full hero block there just pushes the day list down.
+  if (compact) {
+    return (
+      <div className="space-y-0.5">
+        <h1 className="font-serif text-xl font-semibold tracking-tight text-stone-950">{trip?.title ?? "Trip Logbook"}</h1>
+        <p className="text-sm leading-6 text-stone-600">{trip?.description ?? "Shared route planning, photos, and trail notes."}</p>
+      </div>
+    );
+  }
   return (
     <div className="space-y-2">
       <div className="inline-flex items-center gap-2 rounded-full border border-teal-700/20 bg-teal-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-teal-900">
-        <Mountain className="h-3.5 w-3.5" /> {trip?.start_date ? trip.start_date.slice(0, 4) : "Trip"}
+        <Mountain className="h-3.5 w-3.5" /> {tripDatesLabel(trip)}
       </div>
       <h1 className="font-serif text-[2.6rem] font-semibold leading-[0.95] tracking-tight text-stone-950">{trip?.title ?? "Trip Logbook"}</h1>
       <p className="max-w-[28rem] text-sm leading-6 text-stone-600">{trip?.description ?? "Shared route planning, photos, and trail notes."}</p>
@@ -89,7 +115,19 @@ export function QuickActions({ onStartPhotoUpload, onStartAddNote, onStartRouteD
   );
 }
 
-export function DayList({ days, selectedDayId, onSelectDay, onStepDay }: Pick<SidebarProps, "days" | "selectedDayId" | "onSelectDay" | "onStepDay">) {
+// "29 media · 2 pins · 7.4 km" — only the parts a day actually has.
+function dayStatsLabel(stats: DayStats | undefined): string | null {
+  if (!stats) return null;
+  const km = stats.distanceMeters / 1000;
+  const parts = [
+    stats.media ? `${stats.media} media` : null,
+    stats.journal ? `${stats.journal} pin${stats.journal === 1 ? "" : "s"}` : null,
+    km >= 0.1 ? `${km.toFixed(km < 10 ? 1 : 0)} km` : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+export function DayList({ days, dayStats, selectedDayId, onSelectDay, onStepDay }: Pick<SidebarProps, "days" | "dayStats" | "selectedDayId" | "onSelectDay" | "onStepDay">) {
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2 text-sm font-bold text-stone-900">
@@ -124,6 +162,9 @@ export function DayList({ days, selectedDayId, onSelectDay, onStepDay }: Pick<Si
               {day.date ? <span className="shrink-0 rounded-full bg-teal-700/10 px-2 py-0.5 text-xs font-bold text-teal-800">{formatDateOnly(day.date)}</span> : null}
             </div>
             <div className="mt-1 text-xs leading-5 text-stone-500">{day.summary ?? "Route planning and shared memories."}</div>
+            {dayStatsLabel(dayStats?.get(day.id)) ? (
+              <div className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-teal-800/70">{dayStatsLabel(dayStats?.get(day.id))}</div>
+            ) : null}
           </button>
         ))}
       </div>
@@ -247,7 +288,7 @@ export function DaySidebar(props: SidebarProps) {
     <aside className="flex h-full max-h-[78dvh] min-h-0 flex-col gap-4 overflow-y-auto rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.94)] p-4 text-stone-950 shadow-[0_24px_80px_rgba(46,61,54,0.2)] backdrop-blur-xl md:max-h-none md:w-96 md:p-5">
       <SidebarHeader trip={props.trip} />
       <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} onStartRouteDraw={props.onStartRouteDraw} />
-      <DayList days={props.days} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} />
+      <DayList days={props.days} dayStats={props.dayStats} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} />
       {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
       {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
       {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}

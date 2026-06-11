@@ -204,8 +204,13 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
     function showPhotoPopup(photo: Photo) {
       if (photo.lng === null || photo.lat === null) return;
       const uploader = friendlyPersonName(photo.uploader_name);
+      // Uncaptioned photos take their date as the title ("Untitled photo" told
+      // the viewer nothing); the date only repeats in the meta line when a
+      // caption occupies the title slot.
+      const dateLabel = formatDateTime(photo.taken_at || photo.created_at);
+      const title = photo.caption || dateLabel;
       const meta = [
-        formatDateTime(photo.taken_at || photo.created_at),
+        photo.caption ? dateLabel : "",
         uploader ? `by ${uploader}` : "",
       ].filter(Boolean).join(" · ");
       const imageUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
@@ -215,7 +220,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
         : photo.media_type === "video"
           ? `<div class="lofoten-popup-image lofoten-popup-video-fallback">Video</div>`
           : "";
-      const content = `<div class="lofoten-popup-card lofoten-popup-card-photo">${image}<div class="lofoten-popup-body"><span class="lofoten-popup-tag lofoten-popup-tag-photo">${mediaLabel}</span><div class="lofoten-popup-title">${escapeHtml(photo.caption || `Untitled ${mediaLabel}`)}</div><div class="lofoten-popup-meta">${escapeHtml(meta)}</div></div></div>`;
+      const content = `<div class="lofoten-popup-card lofoten-popup-card-photo">${image}<div class="lofoten-popup-body"><span class="lofoten-popup-tag lofoten-popup-tag-photo">${mediaLabel}</span><div class="lofoten-popup-title">${escapeHtml(title)}</div>${meta ? `<div class="lofoten-popup-meta">${escapeHtml(meta)}</div>` : ""}</div></div>`;
       const popup = new mapboxgl.Popup({ offset: 34, className: "lofoten-popup", maxWidth: "17rem" })
         .setLngLat([photo.lng, photo.lat])
         .setHTML(content)
