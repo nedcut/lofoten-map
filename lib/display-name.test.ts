@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { friendlyPersonName } from "./display-name";
+import { friendlyPersonName, personFilterOptions } from "./display-name";
 
 describe("friendlyPersonName", () => {
   it("passes plain names through trimmed", () => {
@@ -30,5 +30,20 @@ describe("friendlyPersonName", () => {
 
   it("falls back to Friend for an empty local part", () => {
     expect(friendlyPersonName("...@example.com")).toBe("Friend");
+  });
+});
+
+describe("personFilterOptions", () => {
+  it("uses opaque ids while retaining the stored value for event handling", () => {
+    expect(personFilterOptions(["ned.cutler@example.com", "Maja"])).toEqual([
+      { id: "person-1", label: "Maja", value: "Maja" },
+      { id: "person-2", label: "Ned Cutler", value: "ned.cutler@example.com" },
+    ]);
+  });
+
+  it("trims, removes blanks, and deduplicates stored values", () => {
+    expect(personFilterOptions([" Maja ", "Maja", "", null])).toEqual([
+      { id: "person-1", label: "Maja", value: "Maja" },
+    ]);
   });
 });

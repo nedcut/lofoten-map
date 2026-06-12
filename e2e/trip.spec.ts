@@ -1,13 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 // All specs run against demo mode (bundled sample data, no Supabase), so they
-// assert on the app shell and day filtering rather than live data. Map-canvas
-// behavior is deliberately untested here: CI has no Mapbox token, where the
-// app shows its token-missing fallback instead of tiles.
+// assert on the app shell and data flows rather than live Supabase data.
+// Map-canvas behavior is deliberately out of scope because CI has no token.
 
-test.describe("desktop", () => {
-  test.skip(({ isMobile }) => isMobile, "desktop sidebar is hidden on mobile");
-
+test.describe("desktop", { tag: "@desktop" }, () => {
   test("loads the trip shell with demo days", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Lofoten 2026" })).toBeVisible();
@@ -34,34 +31,32 @@ test.describe("desktop", () => {
 
   test("photo import queue survives a reload as a restorable draft", async ({ page }) => {
     await page.goto("/");
-    if (await page.getByRole("heading", { name: "Mapbox token needed" }).isVisible()) {
-      test.skip(true, "no Mapbox token; map actions are disabled");
-    }
+    await expect(page.getByRole("heading", { name: "Mapbox token needed" })).toBeVisible();
     // Opening the panel auto-clicks the hidden input in a useEffect, but
-    // headless CI can block that user-gesture. Bypass by calling
-    // setInputFiles directly on the hidden <input name="media" type="file">.
+    // mapless mode intentionally leaves the visible chooser card in place.
     await page.getByRole("button", { name: "Upload media" }).first().click();
     // 1x1 PNG; no GPS, so the item parks at needs-location and is persistable.
     const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
     await page.locator('input[name="media"][type="file"]').setInputFiles({ name: "draft-photo.png", mimeType: "image/png", buffer: pixel });
-    await expect(page.getByText("Tap map to place").first()).toBeVisible();
-    // Wait for the debounced IndexedDB write to actually land (a fixed sleep
-    // flakes under parallel-worker CPU load), then simulate a lost session.
-    await expect.poll(() => page.evaluate(() => new Promise((resolve) => {
-      const request = indexedDB.open("lofoten-logbook-drafts");
-      request.onsuccess = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains("photo-queues")) {
-          db.close();
-          resolve(0);
-          return;
-        }
-        const count = db.transaction("photo-queues", "readonly").objectStore("photo-queues").count();
-        count.onsuccess = () => { db.close(); resolve(count.result); };
-        count.onerror = () => { db.close(); resolve(0); };
-      };
-      request.onerror = () => resolve(0);
-    })), { timeout: 10_000 }).toBeGreaterThan(0);
+    await expect(page.getByText("The map is unavailable. Unplaced media is saved on this device and can be finished later.").first()).toBeVisible();
+    // Wait for the debounced IndexedDB write itself rather than guessing how
+    // long it will take under parallel CI load.
+    await expect.poll(() => page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("lofoten-logbook-drafts", 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      try {
+        return await new Promise<number>((resolve, reject) => {
+          const request = db.transaction("photo-queues", "readonly").objectStore("photo-queues").get("lofoten-2026");
+          request.onsuccess = () => resolve(request.result?.items?.length ?? 0);
+          request.onerror = () => reject(request.error);
+        });
+      } finally {
+        db.close();
+      }
+    })).toBe(1);
     await page.reload();
     await page.getByRole("button", { name: "Upload media" }).first().click();
     await expect(page.getByText("Unfinished import found")).toBeVisible();
@@ -69,25 +64,20 @@ test.describe("desktop", () => {
     await expect(page.getByText("Unfinished import found")).toBeHidden();
   });
 
-  test("photo marker opens a popup with the demo photo", async ({ page }) => {
+  test("journey mode renders the seeded demo photo pipeline", async ({ page }) => {
     await page.goto("/");
-    // Without a Mapbox token (CI) the map shows its fallback and there are
-    // no markers to test — only run where tiles actually render.
-    if (await page.getByRole("heading", { name: "Mapbox token needed" }).isVisible()) {
-      test.skip(true, "no Mapbox token; map fallback is shown");
-    }
-    // Filter to day 1 so its single photo cannot be clustered away.
     await page.getByRole("button", { name: /Day 1: Reine arrival/ }).click();
-    const marker = page.getByRole("button", { name: "View Reine harbor at golden hour" });
-    await expect(marker).toBeVisible({ timeout: 15_000 });
-    await marker.click();
-    await expect(page.locator(".mapboxgl-popup")).toContainText("Reine harbor at golden hour");
+    await page.getByRole("button", { name: "Open Journey Mode" }).click();
+    await expect(page.getByText("Reine harbor at golden hour")).toBeVisible();
+    await expect(page.getByRole("img", { name: "Reine harbor at golden hour" })).toBeVisible();
+    const uploaderFilter = page.getByRole("combobox", { name: "Filter journey by uploader" });
+    await expect(uploaderFilter.getByRole("option", { name: "Maja" })).toHaveAttribute("value", "person-1");
+    await uploaderFilter.selectOption({ label: "Maja" });
+    await expect(page.getByText("Reine harbor at golden hour")).toBeVisible();
   });
 });
 
-test.describe("mobile", () => {
-  test.skip(({ isMobile }) => !isMobile, "mobile sheet only renders on small viewports");
-
+test.describe("mobile", { tag: "@mobile" }, () => {
   test("shows the bottom sheet instead of the sidebar", async ({ page }) => {
     await page.goto("/");
     // The desktop sidebar is also in the DOM (just display:none), so match

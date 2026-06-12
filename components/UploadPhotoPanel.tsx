@@ -52,6 +52,7 @@ type Props = {
   existingPhotos: Photo[];
   // Keys the offline draft of the import queue in IndexedDB.
   tripSlug: string;
+  mapAvailable: boolean;
   defaultDayId: string | null;
   pendingCoordinate: LngLat | null;
   isSaving: boolean;
@@ -71,7 +72,7 @@ const VIDEO_FINGERPRINT_CONCURRENCY = 1;
 // workspace over the live map. A small picker card exists only as a fallback
 // for a cancelled dialog (where supported we just close instead), a browser
 // that blocks the programmatic open, or an unfinished draft to restore.
-export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, defaultDayId, pendingCoordinate, isSaving, onCancel, onCoordinatePreview, onSave }: Props) {
+export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAvailable, defaultDayId, pendingCoordinate, isSaving, onCancel, onCoordinatePreview, onSave }: Props) {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<PhotoUploadProgress | null>(null);
@@ -129,10 +130,12 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, defau
     input.addEventListener("cancel", handlePickerCancel);
     if (!autoPickedRef.current) {
       autoPickedRef.current = true;
-      input.click();
+      // With no map, keep the visible chooser card open instead of launching
+      // a native dialog over a workspace that cannot place new coordinates.
+      if (mapAvailable) input.click();
     }
     return () => input.removeEventListener("cancel", handlePickerCancel);
-  }, [onCancel]);
+  }, [mapAvailable, onCancel]);
 
   // Persist the analyzed queue (debounced) so a crash or reload mid-import
   // does not lose the selected batch. Skips the initial empty state so an
@@ -192,6 +195,10 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, defau
   useEffect(() => {
     selectedIdsRef.current = selectedIds;
   }, [selectedIds]);
+
+  useEffect(() => {
+    if (!mapAvailable) setSelectedIds(new Set());
+  }, [mapAvailable]);
 
   // Drop selections that no longer exist in the queue (removed or cleared).
   useEffect(() => {
@@ -463,6 +470,7 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, defau
       <PlacementWorkspace
         items={items}
         days={days}
+        mapAvailable={mapAvailable}
         activeItemId={activeItem?.id ?? null}
         selectedIds={selectedIds}
         isSaving={isSaving}

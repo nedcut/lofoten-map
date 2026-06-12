@@ -521,7 +521,9 @@ export default function Home() {
     setClickMode("idle");
     setPendingCoordinate(null);
     setRouteDraftPoints([]);
-    setPanel(null);
+    // Media selection and draft recovery work without Mapbox; only workflows
+    // that require map clicks must close when availability changes.
+    setPanel((current) => current === "photo" ? current : null);
   }, []);
 
   // Keep the latest filtered items in a ref so the framing effect below can read
@@ -556,7 +558,7 @@ export default function Home() {
   }, [map, selectedDayId]);
 
   function startPanel(next: "photo" | "note" | "route") {
-    if (!mapActionsEnabled) return;
+    if (!mapActionsEnabled && next !== "photo") return;
     setPanel(next);
     setPendingCoordinate(null);
     if (next === "route") {
@@ -564,7 +566,7 @@ export default function Home() {
       setClickMode("draw-route");
     } else {
       setRouteDraftPoints([]);
-      setClickMode(next === "photo" ? "place-photo" : "add-note");
+      setClickMode(next === "photo" && mapActionsEnabled ? "place-photo" : next === "note" ? "add-note" : "idle");
     }
   }
 
@@ -1175,7 +1177,7 @@ export default function Home() {
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
+        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
             {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
@@ -1184,14 +1186,14 @@ export default function Home() {
           </MapView>
         </div>
       </div>
-      {!panel ? <MobileSheet trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute && mapActionsEnabled ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
+      {!panel ? <MobileSheet trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
       {supabase && !authLoading && !user && authPanelOpen ? <AuthPanel message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
       {supabase && user && currentMember && profilesAvailable && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
       {panel === "note" ? <AddNotePanel tripSlug={tripSlug} days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
-      {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} existingPhotos={data.photos} tripSlug={tripSlug} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
+      {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} existingPhotos={data.photos} tripSlug={tripSlug} mapAvailable={mapActionsEnabled} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
       {editTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminDataSaving} onClose={() => { setEditTargetRef(null); applyTripUrlState(window.location.href, { item: null }); }} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
       {journeyOpen ? (

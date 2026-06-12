@@ -14,9 +14,9 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
+    { name: "desktop", grep: /@desktop/, use: { ...devices["Desktop Chrome"] } },
     // Pixel 7 keeps the mobile project on chromium, so CI installs one browser.
-    { name: "mobile", use: { ...devices["Pixel 7"] } },
+    { name: "mobile", grep: /@mobile/, use: { ...devices["Pixel 7"] } },
   ],
   webServer: {
     command: "npm run e2e:serve",
