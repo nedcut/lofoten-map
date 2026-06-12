@@ -37,13 +37,31 @@ test.describe("desktop", () => {
     if (await page.getByRole("heading", { name: "Mapbox token needed" }).isVisible()) {
       test.skip(true, "no Mapbox token; map actions are disabled");
     }
+    // Opening the panel auto-clicks the hidden input in a useEffect, but
+    // headless CI can block that user-gesture. Bypass by calling
+    // setInputFiles directly on the hidden <input name="media" type="file">.
     await page.getByRole("button", { name: "Upload media" }).first().click();
     // 1x1 PNG; no GPS, so the item parks at needs-location and is persistable.
     const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
-    await page.locator("input[type=file]").first().setInputFiles({ name: "draft-photo.png", mimeType: "image/png", buffer: pixel });
+    await page.locator('input[name="media"][type="file"]').setInputFiles({ name: "draft-photo.png", mimeType: "image/png", buffer: pixel });
     await expect(page.getByText("Tap map to place").first()).toBeVisible();
-    // Wait past the debounced IndexedDB write, then simulate a lost session.
-    await page.waitForTimeout(1200);
+    // Wait for the debounced IndexedDB write to actually land (a fixed sleep
+    // flakes under parallel-worker CPU load), then simulate a lost session.
+    await expect.poll(() => page.evaluate(() => new Promise((resolve) => {
+      const request = indexedDB.open("lofoten-logbook-drafts");
+      request.onsuccess = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains("photo-queues")) {
+          db.close();
+          resolve(0);
+          return;
+        }
+        const count = db.transaction("photo-queues", "readonly").objectStore("photo-queues").count();
+        count.onsuccess = () => { db.close(); resolve(count.result); };
+        count.onerror = () => { db.close(); resolve(0); };
+      };
+      request.onerror = () => resolve(0);
+    })), { timeout: 10_000 }).toBeGreaterThan(0);
     await page.reload();
     await page.getByRole("button", { name: "Upload media" }).first().click();
     await expect(page.getByText("Unfinished import found")).toBeVisible();
