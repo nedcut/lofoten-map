@@ -37,14 +37,13 @@ test.describe("desktop", () => {
     if (await page.getByRole("heading", { name: "Mapbox token needed" }).isVisible()) {
       test.skip(true, "no Mapbox token; map actions are disabled");
     }
-    // Opening the panel auto-opens the OS file chooser; feed it through the
-    // filechooser event (an unhandled chooser would be auto-dismissed, which
-    // the panel treats as a cancel and closes itself).
-    const chooserPromise = page.waitForEvent("filechooser");
+    // Opening the panel auto-clicks the hidden input in a useEffect, but
+    // headless CI can block that user-gesture. Bypass by calling
+    // setInputFiles directly on the hidden <input name="media" type="file">.
     await page.getByRole("button", { name: "Upload media" }).first().click();
     // 1x1 PNG; no GPS, so the item parks at needs-location and is persistable.
     const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
-    await (await chooserPromise).setFiles({ name: "draft-photo.png", mimeType: "image/png", buffer: pixel });
+    await page.locator('input[name="media"][type="file"]').setInputFiles({ name: "draft-photo.png", mimeType: "image/png", buffer: pixel });
     await expect(page.getByText("Tap map to place").first()).toBeVisible();
     // Wait for the debounced IndexedDB write to actually land (a fixed sleep
     // flakes under parallel-worker CPU load), then simulate a lost session.
