@@ -549,18 +549,24 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       features: [{ type: "Feature", geometry: { type: "LineString", coordinates: [[photo.lng, photo.lat], [suggested.lng, suggested.lat]] }, properties: {} }],
     };
     const emptyLine: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
-    if (!getSource(map, "outlier-preview")) {
+    const syncLine = () => {
+      if (!canUseStyle(map)) return;
       try {
-        map.addSource("outlier-preview", { type: "geojson", data: lineData });
-        map.addLayer({ id: "outlier-preview-line", type: "line", source: "outlier-preview", layout: { "line-cap": "round" }, paint: { "line-color": "#0f766e", "line-width": 2.5, "line-dasharray": [1.2, 1.8], "line-opacity": 0.85 } });
+        const source = getSource(map, "outlier-preview") as mapboxgl.GeoJSONSource | undefined;
+        if (source) source.setData(lineData);
+        else map.addSource("outlier-preview", { type: "geojson", data: lineData });
+        if (!hasLayer(map, "outlier-preview-line")) {
+          map.addLayer({ id: "outlier-preview-line", type: "line", source: "outlier-preview", layout: { "line-cap": "round" }, paint: { "line-color": "#0f766e", "line-width": 2.5, "line-dasharray": [1.2, 1.8], "line-opacity": 0.85 } });
+        }
       } catch {
-        // Style not ready yet; the markers still show, the line joins later.
+        // A style load can still be between phases; the next style.load retries.
       }
-    } else {
-      (getSource(map, "outlier-preview") as mapboxgl.GeoJSONSource).setData(lineData);
-    }
+    };
+    syncLine();
+    map.on("style.load", syncLine);
 
     return () => {
+      map.off("style.load", syncLine);
       for (const marker of markers) marker.remove();
       (getSource(map, "outlier-preview") as mapboxgl.GeoJSONSource | undefined)?.setData(emptyLine);
     };

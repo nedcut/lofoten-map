@@ -37,6 +37,7 @@ function storedSizeIndex() {
 type Props = {
   items: QueueItem[];
   days: Day[];
+  mapAvailable: boolean;
   activeItemId: string | null;
   selectedIds: ReadonlySet<string>;
   isSaving: boolean;
@@ -69,7 +70,7 @@ function statusDotClass(item: QueueItem) {
   return "bg-stone-300";
 }
 
-export function PlacementWorkspace({ items, days, activeItemId, selectedIds, isSaving, uploadProgress, onSelectItem, onToggleSelected, onSelectAllUnplaced, onClearSelection, onUpload, onClose, onAddFiles, onRemoveItem, onCaptionChange, onDayChange, onAllDaysChange, onClearQueue }: Props) {
+export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, selectedIds, isSaving, uploadProgress, onSelectItem, onToggleSelected, onSelectAllUnplaced, onClearSelection, onUpload, onClose, onAddFiles, onRemoveItem, onCaptionChange, onDayChange, onAllDaysChange, onClearQueue }: Props) {
   // One object URL per queue item so the filmstrip and preview can render the
   // local files. URLs are created once per item and revoked when the item
   // leaves the queue or the workspace unmounts.
@@ -147,16 +148,20 @@ export function PlacementWorkspace({ items, days, activeItemId, selectedIds, isS
           ? (direction === 1 ? 0 : items.length - 1)
           : (currentIndex + direction + items.length) % items.length;
         onSelectItem(items[nextIndex].id);
-      } else if (event.key === " " && tag !== "BUTTON" && activeItem && activeItem.status !== "invalid" && activeItem.status !== "reading") {
+      } else if (mapAvailable && event.key === " " && tag !== "BUTTON" && activeItem && activeItem.status !== "invalid" && activeItem.status !== "reading") {
         event.preventDefault();
         onToggleSelected(activeItem.id);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [items, activeItemId, activeItem, onSelectItem, onToggleSelected]);
+  }, [items, activeItemId, activeItem, mapAvailable, onSelectItem, onToggleSelected]);
 
-  const hint = placingSelection
+  const hint = !mapAvailable
+    ? unplaced.length > 0
+      ? "The map is unavailable. Unplaced media is saved on this device and can be finished later."
+      : "The map is unavailable, but media with locations can still be uploaded."
+    : placingSelection
     ? `Tap the map once to place all ${selectedIds.size} selected`
     : reading.length > 0
       ? `Preparing ${reading.length} on your device...`
@@ -179,7 +184,7 @@ export function PlacementWorkspace({ items, days, activeItemId, selectedIds, isS
     </button>
   );
 
-  const selectionBar = placingSelection ? (
+  const selectionBar = !mapAvailable ? null : placingSelection ? (
     <div className="flex items-center gap-2 rounded-lg border border-teal-700/30 bg-teal-50 px-3 py-2 text-xs font-bold text-teal-950">
       <MapPin className="h-3.5 w-3.5 shrink-0" />
       <span className="flex-1">Next tap places {selectedIds.size} photo{selectedIds.size === 1 ? "" : "s"}</span>
@@ -274,7 +279,7 @@ export function PlacementWorkspace({ items, days, activeItemId, selectedIds, isS
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain p-2">
           {items.map((item) => (
             <div key={item.id} className={cn("flex items-center gap-2 rounded-lg px-2 py-1.5 transition", activeItemId === item.id ? "bg-teal-50 ring-1 ring-teal-700/30" : "hover:bg-stone-100")}>
-              <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => onToggleSelected(item.id)} disabled={item.status === "invalid" || item.status === "reading"} className="h-4 w-4 shrink-0 accent-teal-700 disabled:opacity-30" aria-label={`Select ${item.file.name} for group placement`} />
+              <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => onToggleSelected(item.id)} disabled={!mapAvailable || item.status === "invalid" || item.status === "reading"} className="h-4 w-4 shrink-0 accent-teal-700 disabled:opacity-30" aria-label={`Select ${item.file.name} for group placement`} />
               <button type="button" onClick={() => onSelectItem(item.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                 <span className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-stone-100">
                   {previewUrls.get(item.id) ? (
@@ -342,7 +347,7 @@ export function PlacementWorkspace({ items, days, activeItemId, selectedIds, isS
                     : <img src={previewUrls.get(item.id)} alt="" loading="lazy" className="h-full w-full object-cover" />
                 ) : <span className="flex h-full items-center justify-center text-stone-400"><Camera className="h-4 w-4" /></span>}
               </button>
-              {item.status !== "invalid" && item.status !== "reading" ? (
+              {mapAvailable && item.status !== "invalid" && item.status !== "reading" ? (
                 <button type="button" onClick={() => onToggleSelected(item.id)} className={cn("absolute left-1 top-1 flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-black transition", selectedIds.has(item.id) ? "border-teal-700 bg-teal-700 text-white" : "border-stone-300 bg-white/90 text-transparent")} aria-label={`${selectedIds.has(item.id) ? "Deselect" : "Select"} ${item.file.name} for group placement`} aria-pressed={selectedIds.has(item.id)}>
                   ✓
                 </button>

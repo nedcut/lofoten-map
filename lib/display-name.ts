@@ -5,6 +5,12 @@
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+export type PersonFilterOption = {
+  id: string;
+  label: string;
+  value: string;
+};
+
 /**
  * Returns a person name safe to show publicly. Non-email values pass through
  * trimmed; emails collapse to their prettified local part, e.g.
@@ -21,4 +27,20 @@ export function friendlyPersonName(value: string | null | undefined): string | n
     .filter(Boolean);
   if (words.length === 0) return "Friend";
   return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
+/**
+ * Builds public-facing select options without placing stored names or legacy
+ * email values in DOM attributes. The opaque id is only translated back to the
+ * stored value inside the select change handler.
+ */
+export function personFilterOptions(values: Array<string | null | undefined>): PersonFilterOption[] {
+  const uniqueValues = Array.from(new Set(values.flatMap((value) => {
+    const trimmed = value?.trim();
+    return trimmed ? [trimmed] : [];
+  })));
+  return uniqueValues
+    .map((value) => ({ value, label: friendlyPersonName(value) ?? "Friend" }))
+    .sort((a, b) => a.label.localeCompare(b.label) || a.value.localeCompare(b.value))
+    .map((option, index) => ({ ...option, id: `person-${index + 1}` }));
 }

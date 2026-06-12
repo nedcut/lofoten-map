@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Link, Loader2, MapPinned, Pencil, Save, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
-import { friendlyPersonName } from "@/lib/display-name";
+import { friendlyPersonName, personFilterOptions } from "@/lib/display-name";
 import { formatDateOnly, formatDateTime } from "@/lib/utils";
 import { journeyItemTitle, type JourneyAttachedItem, type JourneyItem } from "@/lib/journey";
 import type { Day, Photo, RouteSegment } from "@/types/trip";
@@ -112,10 +112,11 @@ export function JourneyPlayback({
   const videoFallbackTimerRef = useRef<number | null>(null);
   const isPlayingRef = useRef(isPlaying);
   const activeIndexRef = useRef(activeIndex);
-  const uploaders = useMemo(() => {
-    const values = allItems.flatMap((item) => item.kind === "photo" && item.primary.uploader_name ? [item.primary.uploader_name] : []);
-    return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
-  }, [allItems]);
+  const uploaderOptions = useMemo(
+    () => personFilterOptions(allItems.map((item) => item.kind === "photo" ? item.primary.uploader_name : null)),
+    [allItems],
+  );
+  const selectedUploaderId = uploaderOptions.find((option) => option.value === uploaderFilter)?.id ?? "";
 
   useEffect(() => {
     if (!activeItem || activeItem.kind !== "photo") {
@@ -237,10 +238,15 @@ export function JourneyPlayback({
         <option value="photos">Media</option>
         <option value="journal">Journal</option>
       </select>
-      {uploaders.length > 0 ? (
-        <select value={uploaderFilter} onChange={(event) => onUploaderFilterChange(event.target.value)} className="hidden max-w-[10rem] rounded-full border border-white/15 bg-stone-950/45 px-3 py-2 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20 sm:block">
+      {uploaderOptions.length > 0 ? (
+        <select
+          value={selectedUploaderId}
+          onChange={(event) => onUploaderFilterChange(uploaderOptions.find((option) => option.id === event.target.value)?.value ?? "")}
+          aria-label="Filter journey by uploader"
+          className="hidden max-w-[10rem] rounded-full border border-white/15 bg-stone-950/45 px-3 py-2 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20 sm:block"
+        >
           <option value="">Everyone</option>
-          {uploaders.map((uploader) => <option key={uploader} value={uploader}>{friendlyPersonName(uploader)}</option>)}
+          {uploaderOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
         </select>
       ) : null}
     </>
