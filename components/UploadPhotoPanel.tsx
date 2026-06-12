@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Trash2, Upload, Video, X } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, FileImage, Images, Loader2, MapPin, RotateCcw, Trash2, Upload, Video, X } from "lucide-react";
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { mapWithConcurrency } from "@/lib/concurrency";
@@ -8,6 +8,8 @@ import { extractPhotoExif, type ExtractedExif } from "@/lib/exif";
 import { fileContentHash } from "@/lib/file-hash";
 import { detectMediaType } from "@/lib/media-processing";
 import { clearPhotoDraft, readPhotoDraft, writePhotoDraft, type PhotoDraft } from "@/lib/photo-draft-store";
+import { collectTimeAnchors, timeInterpolateItems } from "@/lib/photo-interpolate";
+import { PlacementWorkspace } from "@/components/PlacementWorkspace";
 import {
   coordinateKey,
   dayLabel,
@@ -16,6 +18,7 @@ import {
   formatBytes,
   locationLabel,
   mediaLabel,
+  nextPlacementTarget,
   routePlaceNoGpsItems,
   routePlaceQueueItems,
   stepFlow,
@@ -24,7 +27,7 @@ import {
   type Step,
 } from "@/lib/upload-queue";
 import { cn } from "@/lib/utils";
-import type { Day, LngLat, RouteSegment } from "@/types/trip";
+import type { Day, LngLat, Photo, RouteSegment } from "@/types/trip";
 
 export type PhotoUploadItemInput = {
   clientId: string;
@@ -50,6 +53,9 @@ export type PhotoUploadProgress = {
 type Props = {
   days: Day[];
   routes: RouteSegment[];
+  // Photos already on the trip; their GPS+timestamp pairs anchor the
+  // time-interpolation of GPS-less photos in a new batch.
+  existingPhotos: Photo[];
   // Keys the offline draft of the import queue in IndexedDB.
   tripSlug: string;
   defaultDayId: string | null;
@@ -73,10 +79,9 @@ const ALL_DAYS_VALUE = "__all";
 const STEP_TITLES: Record<Step, string> = {
   select: "Add photos",
   review: "Review",
-  place: "Place on map",
 };
 
-export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pendingCoordinate, isSaving, onCancel, onCoordinatePreview, onSave }: Props) {
+export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, defaultDayId, pendingCoordinate, isSaving, onCancel, onCoordinatePreview, onSave }: Props) {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   // Lets the map-tap effect target the active photo without depending on
@@ -87,12 +92,17 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
   const [step, setStep] = useState<Step>("select");
   const [uploadProgress, setUploadProgress] = useState<PhotoUploadProgress | null>(null);
   const [showAllQueueItems, setShowAllQueueItems] = useState(false);
-  // When placing, the overlay collapses to a slim bar so the live map underneath
-  // is tappable; the existing pendingCoordinate feedback loop assigns the pin.
-  // "bulk" walks through every unplaced photo in turn; "single" stays on one
-  // chosen photo so its pin can be nudged with repeated map taps.
-  const [placeMode, setPlaceMode] = useState<"bulk" | "single" | null>(null);
-  const minimized = placeMode !== null;
+  // When placing, the panel hands the screen to the PlacementWorkspace (sidebar
+  // on desktop, filmstrip on mobile) so the live map stays tappable; the
+  // existing pendingCoordinate feedback loop assigns pins, and placement
+  // auto-advances through the unplaced queue in taken-time order.
+  const [placing, setPlacing] = useState(false);
+  // Checkbox selection for placing several photos with a single map tap.
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  // The map-tap effect must depend only on pendingCoordinate, so the queue and
+  // selection it acts on are read through refs (same pattern as activeItemIdRef).
+  const itemsRef = useRef(items);
+  const selectedIdsRef = useRef(selectedIds);
   const previewCoordinateKeyRef = useRef<string | null>(null);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
   // A queue saved by a previous session (tab closed or crashed mid-import),
@@ -100,6 +110,8 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
   const [restorableDraft, setRestorableDraft] = useState<PhotoDraft | null>(null);
   const hadItemsRef = useRef(false);
   const draftTimerRef = useRef<number | null>(null);
+  const cameraRollInputRef = useRef<HTMLInputElement | null>(null);
+  const autoPickedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +122,15 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
       cancelled = true;
     };
   }, [tripSlug]);
+
+  // Opening the panel jumps straight to the OS file picker — the "Add photos"
+  // popup only ever shows as a fallback (picker cancelled, an unfinished draft
+  // to restore, or a browser that blocks the programmatic open).
+  useEffect(() => {
+    if (autoPickedRef.current) return;
+    autoPickedRef.current = true;
+    cameraRollInputRef.current?.click();
+  }, []);
 
   // Persist the analyzed queue (debounced) so a crash or reload mid-import
   // does not lose the selected batch. Skips the initial empty state so an
@@ -171,10 +192,6 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
   const preparedCount = counts.total - counts.reading;
   const prepareProgressPercent = counts.total > 0 ? Math.round((preparedCount / counts.total) * 100) : 0;
 
-  const placementItems = useMemo(() => items.filter((item) => item.status === "needs-location"), [items]);
-  const placedCount = counts.ready;
-  const placementTotal = placedCount + counts.needsLocation;
-
   const dayBuckets = useMemo(() => {
     const buckets = new Map<string, number>();
     for (const item of items) {
@@ -185,7 +202,7 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
     return Array.from(buckets.entries()).map(([key, count]) => ({ dayId: key || null, count }));
   }, [items]);
 
-  const steps = stepFlow(placementTotal > 0);
+  const steps = stepFlow();
   const stepIndex = Math.max(0, steps.indexOf(step));
 
   useEffect(() => {
@@ -214,22 +231,52 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
     activeItemIdRef.current = activeItemId;
   }, [activeItemId]);
 
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  useEffect(() => {
+    selectedIdsRef.current = selectedIds;
+  }, [selectedIds]);
+
+  // Drop selections that no longer exist in the queue (removed or cleared).
+  useEffect(() => {
+    setSelectedIds((current) => {
+      if (current.size === 0) return current;
+      const alive = new Set(Array.from(current).filter((id) => items.some((item) => item.id === id)));
+      return alive.size === current.size ? current : alive;
+    });
+  }, [items]);
+
   // A genuine map tap (key differs from our echo) assigns the location to the
   // active photo. This must depend ONLY on pendingCoordinate — if it also reacted
   // to activeItemId, simply selecting a photo would write a stale pending pin onto
   // it, flipping it to "ready" and making it vanish from the needs-location list.
   useEffect(() => {
     if (!pendingCoordinate) return;
-    const targetId = activeItemIdRef.current;
-    if (!targetId) return;
     const nextKey = coordinateKey(pendingCoordinate);
     if (previewCoordinateKeyRef.current === nextKey) {
       previewCoordinateKeyRef.current = null;
       return;
     }
-    setItems((current) => current.map((item) => item.id === targetId && item.status !== "invalid" && item.status !== "reading"
-      ? { ...item, coordinate: pendingCoordinate, locationSource: "manual", status: "ready", message: "Location set from the map." }
-      : item));
+    // A selection means one tap places the whole group; otherwise the tap
+    // places (or nudges) just the active photo.
+    const current = itemsRef.current;
+    const placeableIds = new Set(current.filter((item) => item.status !== "invalid" && item.status !== "reading").map((item) => item.id));
+    const selected = Array.from(selectedIdsRef.current).filter((id) => placeableIds.has(id));
+    const targetIds = new Set(selected.length > 0 ? selected : [activeItemIdRef.current].filter((id): id is string => id !== null && placeableIds.has(id)));
+    if (targetIds.size === 0) return;
+    // Nudging an already-placed photo should not advance; placing one should.
+    const placedSomethingNew = current.some((item) => targetIds.has(item.id) && item.status === "needs-location");
+    const updated = current.map((item) => targetIds.has(item.id) && placeableIds.has(item.id)
+      ? { ...item, coordinate: pendingCoordinate, locationSource: "manual" as const, status: "ready" as const, message: "Location set from the map." }
+      : item);
+    setItems(updated);
+    if (selected.length > 0) setSelectedIds(new Set());
+    if (placedSomethingNew) {
+      const nextId = nextPlacementTarget(updated, targetIds);
+      if (nextId) setActiveItemId(nextId);
+    }
   }, [pendingCoordinate]);
 
   // Keep the active selection valid as the filtered list changes.
@@ -242,27 +289,13 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
     setActiveItemId((visibleItems[0] ?? items[0]).id);
   }, [activeItemId, items, visibleItems]);
 
-  // In bulk placement, advance to the next photo needing a pin once the current
-  // one is placed; collapse the bar and jump to upload when the queue is cleared.
-  // Single placement intentionally stays put so the user can nudge the same pin.
-  useEffect(() => {
-    if (placeMode !== "bulk") return;
-    if (activeItem && activeItem.status === "needs-location") return;
-    const next = items.find((item) => item.status === "needs-location");
-    if (next) {
-      setActiveItemId(next.id);
-    } else {
-      setPlaceMode(null);
-      setStep("review");
-    }
-  }, [placeMode, activeItem, items]);
-
   // Reset to the picker whenever the queue empties (clear, or all removed).
   useEffect(() => {
     if (items.length === 0 && step !== "select") {
       setStep("select");
       setQueueFilter("all");
       setBatchOverrideDayId(BATCH_OVERRIDE_IDLE);
+      setPlacing(false);
     }
   }, [items.length, step]);
 
@@ -325,7 +358,7 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
       extracted.set(item.id, exif);
     });
 
-    const analyzed = routePlaceNoGpsItems(fingerprinted.map((item, order) => {
+    const rawAnalyzed = fingerprinted.map((item, order) => {
       const exif = extracted.get(item.id);
       if (!exif) {
         return { id: item.id, order, dayId: item.dayId, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid" as const, message: `We could not read this ${mediaLabel(item.mediaType)}.` };
@@ -344,7 +377,20 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
         status: coordinate ? "ready" as const : "needs-location" as const,
         message: exif.message,
       };
-    }), routes);
+    });
+    // Time-interpolation runs before the route fallback: a position derived
+    // from real GPS anchors beats an even spread along the day's route.
+    const anchors = collectTimeAnchors(rawAnalyzed, existingPhotos);
+    const interpolated = timeInterpolateItems(rawAnalyzed, anchors);
+    for (const item of interpolated) {
+      if (item.dayId || item.locationSource !== "time" || !item.coordinate) continue;
+      const routeDayId = findDayIdForCoordinate(routes, item.coordinate);
+      if (routeDayId) {
+        item.dayId = routeDayId;
+        item.dayMatchSource = "route";
+      }
+    }
+    const analyzed = routePlaceNoGpsItems(interpolated, routes);
     const analyzedById = new Map(analyzed.map((item) => [item.id, item]));
 
     setItems((current) => current.map((currentItem) => {
@@ -361,6 +407,15 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
         message: analyzedItem.message,
       };
     }));
+
+    // Placing is the default view for a fresh batch: when analysis leaves
+    // photos without a location, hand off to the workspace immediately
+    // instead of parking on the review list.
+    const firstUnplacedId = nextPlacementTarget(analyzed, new Set());
+    if (firstUnplacedId) {
+      setActiveItemId(firstUnplacedId);
+      setPlacing(true);
+    }
   }
 
   function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
@@ -452,63 +507,58 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
     setActiveItemId(null);
     setQueueFilter("all");
     setBatchOverrideDayId(BATCH_OVERRIDE_IDLE);
-    setPlaceMode(null);
+    setPlacing(false);
+    setSelectedIds(new Set());
     onCoordinatePreview(null);
   }
 
+  function toggleSelected(itemId: string) {
+    // Selecting a photo also focuses it, so the corner preview shows what
+    // was just added to the group.
+    if (!selectedIds.has(itemId)) setActiveItemId(itemId);
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
   function goToReview() {
-    setPlaceMode(null);
+    setPlacing(false);
     setStep("review");
   }
 
-  // Collapse the overlay onto a target photo so the map underneath can be tapped.
-  // "single" nudges one chosen photo; "bulk" walks the whole unplaced queue.
-  function startPlacing(itemId?: string, mode: "bulk" | "single" = "bulk") {
-    const target = (itemId ? items.find((item) => item.id === itemId) : null)
-      ?? items.find((item) => item.id === activeItemId && item.status === "needs-location")
-      ?? placementItems[0];
-    if (!target) {
-      setStep("review");
-      return;
-    }
-    setActiveItemId(target.id);
-    setPlaceMode(mode);
+  // Hand off to the placement workspace, focused on an explicit photo, the
+  // first of the current selection, or the next unplaced photo by time.
+  function startPlacing(itemId?: string) {
+    const targetId = itemId
+      ?? items.find((item) => selectedIds.has(item.id))?.id
+      ?? nextPlacementTarget(items, new Set())
+      ?? activeItemId;
+    if (targetId) setActiveItemId(targetId);
+    setPlacing(true);
   }
 
-  // -------- Minimized placement bar (map is fully interactive behind it) --------
-  if (minimized) {
+  // -------- Placement workspace (map is fully interactive behind it) --------
+  if (placing) {
     return (
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
-        <div className="pointer-events-auto mx-auto flex max-w-xl items-center gap-3 rounded-2xl border border-teal-700/30 bg-[rgba(255,253,246,0.98)] p-3 shadow-[0_20px_60px_rgba(46,61,54,0.3)] backdrop-blur-xl">
-          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100">
-            {activePreviewUrl ? (
-              activeItem?.mediaType === "video"
-                ? <video src={activePreviewUrl} muted playsInline className="h-full w-full object-cover" />
-                // eslint-disable-next-line @next/next/no-img-element -- Object URLs from local files cannot be optimized by next/image.
-                : <img src={activePreviewUrl} alt="" className="h-full w-full object-cover" />
-            ) : <div className="flex h-full items-center justify-center text-stone-400"><Camera className="h-4 w-4" /></div>}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-[0.1em] text-teal-800">
-              <MapPin className="h-3.5 w-3.5" /> {placeMode === "single" ? "Tap the map to move this pin" : "Tap the map to place"}
-            </div>
-            <div className="mt-0.5 truncate text-sm font-bold text-stone-950">{activeItem?.file.name}</div>
-            <div className="text-[11px] text-stone-500">{placeMode === "single"
-              ? (activeItem?.coordinate ? `${activeItem.coordinate.lat.toFixed(4)}, ${activeItem.coordinate.lng.toFixed(4)} · tap to adjust` : "No location yet")
-              : `${placedCount} of ${placementTotal} placed · ${counts.needsLocation} to go`}</div>
-          </div>
-          <div className="flex shrink-0 flex-col gap-1.5">
-            <button type="button" onClick={goToReview} className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-bold text-stone-700 transition hover:bg-stone-50">{placeMode === "single" ? "Done" : "Back to list"}</button>
-            {placeMode === "bulk" && placementItems.length > 1 ? (
-              <button type="button" onClick={() => { const next = placementItems.find((item) => item.id !== activeItemId); if (next) setActiveItemId(next.id); }} className="rounded-lg px-3 py-1.5 text-xs font-bold text-stone-500 transition hover:bg-stone-100">Skip this one</button>
-            ) : null}
-          </div>
-        </div>
-      </div>
+      <PlacementWorkspace
+        items={items}
+        days={days}
+        activeItemId={activeItem?.id ?? null}
+        selectedIds={selectedIds}
+        isSaving={isSaving}
+        uploadProgress={uploadProgress}
+        onSelectItem={setActiveItemId}
+        onToggleSelected={toggleSelected}
+        onSelectAllUnplaced={() => setSelectedIds(new Set(items.filter((item) => item.status === "needs-location").map((item) => item.id)))}
+        onClearSelection={() => setSelectedIds(new Set())}
+        onDone={goToReview}
+        onUpload={() => void submit()}
+      />
     );
   }
-
-  const placementDone = placementTotal > 0 && counts.needsLocation === 0;
 
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex flex-col bg-[rgba(255,253,246,0.98)] md:items-center md:justify-center md:bg-stone-950/40 md:p-6 md:backdrop-blur-sm">
@@ -553,7 +603,7 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
                     <Images className="h-7 w-7" />
                     <span className="text-base font-black">Choose from camera roll</span>
                     <span className="text-xs text-teal-900/70">iPhone, Android, HEIC, JPG, MOV, MP4</span>
-                    <input name="media" type="file" accept="image/*,video/*,.heic,.heif,.mov,.m4v" multiple className="hidden" onChange={handleFileInputChange} />
+                    <input ref={cameraRollInputRef} name="media" type="file" accept="image/*,video/*,.heic,.heif,.mov,.m4v" multiple className="hidden" onChange={handleFileInputChange} />
                   </label>
                   <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-700 transition hover:bg-stone-50">
                     <FileImage className="h-4 w-4" /> Browse exported camera files
@@ -642,7 +692,7 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
                         <span>{activeItem.message}{activeItem.exif?.takenAt ? <> Taken {new Date(activeItem.exif.takenAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}.</> : null}</span>
                       </div>
                       {activeItem.status === "needs-location" || activeItem.coordinate ? (
-                        <button type="button" onClick={() => startPlacing(activeItem.id, "single")} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-teal-700/30 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-900 transition hover:bg-teal-100">
+                        <button type="button" onClick={() => startPlacing(activeItem.id)} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-teal-700/30 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-900 transition hover:bg-teal-100">
                           <MapPin className="h-3.5 w-3.5" /> {activeItem.coordinate ? "Move pin on map" : "Place on map"}
                         </button>
                       ) : null}
@@ -673,6 +723,20 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
                   </select>
                 </label>
 
+                {selectedIds.size > 0 ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-teal-700/30 bg-teal-50 px-3 py-2">
+                    <span className="flex-1 text-xs font-bold text-teal-950">{selectedIds.size} selected</span>
+                    <button type="button" onClick={() => setSelectedIds(new Set())} className="rounded-md px-2.5 py-1.5 text-xs font-bold text-stone-500 transition hover:bg-stone-100">Clear</button>
+                    <button type="button" onClick={() => startPlacing()} className="flex items-center gap-1 rounded-md bg-teal-700 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-teal-800">
+                      <MapPin className="h-3.5 w-3.5" /> Place together
+                    </button>
+                  </div>
+                ) : counts.needsLocation > 1 ? (
+                  <button type="button" onClick={() => setSelectedIds(new Set(items.filter((item) => item.status === "needs-location").map((item) => item.id)))} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-teal-700/35 bg-teal-50/50 px-3 py-2 text-xs font-bold text-teal-900 transition hover:bg-teal-50">
+                    Select all {counts.needsLocation} unplaced for a single-tap placement
+                  </button>
+                ) : null}
+
                 <div className="rounded-lg border border-stone-200 bg-white/80 p-2">
                   {visibleItems.length === 0 ? (
                     <div className="flex min-h-20 items-center justify-center rounded-md bg-stone-50 px-3 text-center text-xs leading-5 text-stone-500">No photos in this view.</div>
@@ -680,16 +744,27 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
                     <div className="space-y-1">
                       {displayedItems.map((item) => {
                         const index = items.findIndex((candidate) => candidate.id === item.id);
+                        const selectable = item.status !== "invalid" && item.status !== "reading";
                         return (
-                          <button type="button" key={item.id} onClick={() => setActiveItemId(item.id)} className={cn("grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left transition", activeItemId === item.id ? "bg-teal-50 ring-1 ring-teal-700/30" : "hover:bg-stone-100")}>
-                            <span className="text-xs font-bold text-stone-400">{index + 1}</span>
-                            <span className="min-w-0">
-                              <span className="block truncate text-xs font-bold text-stone-900">{item.file.name}</span>
-                              <span className="block truncate text-[11px] text-stone-500">{locationLabel(item)}</span>
-                              <span className="block truncate text-[11px] font-semibold text-teal-800">{dayLabel(days, item.dayId)}{item.dayMatchSource ? ` · ${item.dayMatchSource} matched` : ""}</span>
-                            </span>
-                            {item.status === "invalid" ? <AlertTriangle className="h-4 w-4 text-rose-500" /> : <span className={cn("h-2.5 w-2.5 rounded-full", item.status === "ready" ? "bg-emerald-500" : item.status === "needs-location" ? "bg-amber-500" : "bg-stone-300")} />}
-                          </button>
+                          <div key={item.id} className="flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(item.id)}
+                              onChange={() => toggleSelected(item.id)}
+                              disabled={!selectable}
+                              className="h-4 w-4 shrink-0 accent-teal-700 disabled:opacity-30"
+                              aria-label={`Select ${item.file.name} for group placement`}
+                            />
+                            <button type="button" onClick={() => setActiveItemId(item.id)} className={cn("grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left transition", activeItemId === item.id ? "bg-teal-50 ring-1 ring-teal-700/30" : "hover:bg-stone-100")}>
+                              <span className="text-xs font-bold text-stone-400">{index + 1}</span>
+                              <span className="min-w-0">
+                                <span className="block truncate text-xs font-bold text-stone-900">{item.file.name}</span>
+                                <span className="block truncate text-[11px] text-stone-500">{locationLabel(item)}</span>
+                                <span className="block truncate text-[11px] font-semibold text-teal-800">{dayLabel(days, item.dayId)}{item.dayMatchSource ? ` · ${item.dayMatchSource} matched` : ""}</span>
+                              </span>
+                              {item.status === "invalid" ? <AlertTriangle className="h-4 w-4 text-rose-500" /> : <span className={cn("h-2.5 w-2.5 rounded-full", item.status === "ready" ? "bg-emerald-500" : item.status === "needs-location" ? "bg-amber-500" : "bg-stone-300")} />}
+                            </button>
+                          </div>
                         );
                       })}
                       {hiddenVisibleCount > 0 ? (
@@ -712,37 +787,6 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
               </div>
             ) : null}
 
-            {step === "place" ? (
-              <div className="space-y-3">
-                <p className="text-sm leading-6 text-stone-600">
-                  {placementDone
-                    ? "Every photo has a location. You can fine-tune any pin or continue to upload."
-                    : `${counts.needsLocation} photo${counts.needsLocation === 1 ? "" : "s"} still need a spot on the map. Pick one and tap where it belongs — we keep the map visible while you place it.`}
-                </p>
-
-                {placementItems.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-8 text-center text-emerald-900">
-                    <CheckCircle2 className="h-7 w-7" />
-                    <span className="text-sm font-bold">All photos are placed.</span>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    {placementItems.map((item) => (
-                      <div key={item.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2">
-                        <span className="h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
-                        <span className="min-w-0">
-                          <span className="block truncate text-xs font-bold text-stone-900">{item.file.name}</span>
-                          <span className="block truncate text-[11px] text-stone-500">{dayLabel(days, item.dayId)}</span>
-                        </span>
-                        <button type="button" onClick={() => startPlacing(item.id)} className="flex items-center gap-1 rounded-md bg-teal-700 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-teal-800">
-                          <MapPin className="h-3.5 w-3.5" /> Place
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
           </div>
 
           {/* Sticky footer with the per-step primary action. */}
@@ -752,18 +796,10 @@ export function UploadPhotoPanel({ days, routes, tripSlug, defaultDayId, pending
                 <>
                   <button type="button" onClick={clearQueue} disabled={isSaving} className="rounded-lg border border-stone-300 bg-white px-3 py-3 text-stone-600 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45" aria-label="Clear queue"><RotateCcw className="h-4 w-4" /></button>
                   {counts.needsLocation > 0 ? (
-                    <button type="button" onClick={() => setStep("place")} className="flex items-center gap-1.5 rounded-lg border border-teal-700/30 bg-teal-50 px-3 py-3 text-sm font-bold text-teal-900 transition hover:bg-teal-100"><MapPin className="h-4 w-4" /> Place {counts.needsLocation}</button>
+                    <button type="button" onClick={() => startPlacing()} className="flex items-center gap-1.5 rounded-lg border border-teal-700/30 bg-teal-50 px-3 py-3 text-sm font-bold text-teal-900 transition hover:bg-teal-100"><MapPin className="h-4 w-4" /> Place {counts.needsLocation}</button>
                   ) : null}
                   <button type="submit" disabled={counts.ready === 0 || counts.reading > 0 || isSaving} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
                     {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> {uploadProgress ? `Uploading ${uploadProgress.completed} of ${uploadProgress.total}` : "Uploading..."}</> : counts.reading > 0 ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading {counts.reading}</> : <><Upload className="h-4 w-4" /> Upload {counts.ready > 1 ? `${counts.ready} photos` : "photo"}</>}
-                  </button>
-                </>
-              ) : null}
-              {step === "place" ? (
-                <>
-                  <button type="button" onClick={goToReview} className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm font-bold text-stone-600 transition hover:bg-stone-50"><ArrowLeft className="h-4 w-4" /> Review</button>
-                  <button type="submit" disabled={counts.ready === 0 || isSaving} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#e7a13d] px-4 py-3 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
-                    {isSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> {uploadProgress ? `Uploading ${uploadProgress.completed} of ${uploadProgress.total}` : "Uploading..."}</> : <><Upload className="h-4 w-4" /> Upload {counts.ready > 1 ? `${counts.ready} photos` : "photo"}</>}
                   </button>
                 </>
               ) : null}

@@ -11,10 +11,10 @@ import type { Day, LngLat, RouteSegment } from "@/types/trip";
 // photos along the day's route, and the labels derived from queue state.
 // Kept out of UploadPhotoPanel so the placement rules are unit-testable.
 
-// The import flow is a small linear state machine. "place" is conditional — it is
-// only shown when some photos lack a location. Uploading is the primary action on
-// both Review and Place, so there is no separate final step.
-export type Step = "select" | "review" | "place";
+// The import flow is a small linear state machine. Placing photos on the map
+// is not a step but a mode: the panel hands off to the placement workspace
+// (sidebar/filmstrip over the live map) and returns to "review" when done.
+export type Step = "select" | "review";
 
 export type QueueStatus = "reading" | "ready" | "needs-location" | "invalid";
 export type QueueFilter = "all" | "review" | "needs-location" | "invalid";
@@ -27,7 +27,7 @@ export type QueueItem = {
   caption: string;
   dayId: string | null;
   dayMatchSource: "date" | "route" | null;
-  locationSource: "gps" | "route" | "manual" | null;
+  locationSource: "gps" | "route" | "manual" | "time" | null;
   exif: ExtractedExif | null;
   coordinate: LngLat | null;
   status: QueueStatus;
@@ -174,6 +174,7 @@ export function dayLabel(days: Day[], dayId: string | null) {
 export function locationLabel(item: QueueItem) {
   if (item.status === "ready" && item.locationSource === "gps") return "GPS ready";
   if (item.status === "ready" && item.locationSource === "route") return "Placed on route";
+  if (item.status === "ready" && item.locationSource === "time") return "Placed by photo time";
   if (item.status === "ready" && item.locationSource === "manual") return "Placed manually";
   if (item.status === "ready") return "Ready to upload";
   if (item.status === "needs-location") return "Tap map to place";
@@ -181,7 +182,41 @@ export function locationLabel(item: QueueItem) {
   return item.message;
 }
 
-// Steps shown in the progress header. Place is hidden unless something needs a pin.
-export function stepFlow(hasPlacement: boolean): Step[] {
-  return hasPlacement ? ["select", "review", "place"] : ["select", "review"];
+// Steps shown in the progress header.
+export function stepFlow(): Step[] {
+  return ["select", "review"];
+}
+
+type PlacementCandidate = Pick<QueueItem, "id" | "status" | "exif">;
+
+function takenAtMs(item: PlacementCandidate): number {
+  const value = item.exif?.takenAt;
+  if (!value) return Number.NaN;
+  return new Date(value).getTime();
+}
+
+// After a placement lands, decide which photo to walk to next so back-to-back
+// groups flow without returning to the review list. Photos are visited in
+// taken-time order: the next unplaced photo at or after the just-placed
+// group's latest timestamp, wrapping to the earliest remaining one. Undated
+// photos sort after dated ones, in queue order.
+export function nextPlacementTarget(items: PlacementCandidate[], justPlacedIds: ReadonlySet<string>): string | null {
+  const remaining = items.filter((item) => item.status === "needs-location" && !justPlacedIds.has(item.id));
+  if (remaining.length === 0) return null;
+  const sorted = remaining
+    .map((item, index) => ({ item, index, timeMs: takenAtMs(item) }))
+    .sort((a, b) => {
+      const aDated = Number.isFinite(a.timeMs);
+      const bDated = Number.isFinite(b.timeMs);
+      if (aDated && bDated && a.timeMs !== b.timeMs) return a.timeMs - b.timeMs;
+      if (aDated !== bDated) return aDated ? -1 : 1;
+      return a.index - b.index;
+    });
+  const placedTimes = items.filter((item) => justPlacedIds.has(item.id)).map(takenAtMs).filter(Number.isFinite);
+  if (placedTimes.length > 0) {
+    const pivot = Math.max(...placedTimes);
+    const after = sorted.find((entry) => Number.isFinite(entry.timeMs) && entry.timeMs >= pivot);
+    if (after) return after.item.id;
+  }
+  return sorted[0].item.id;
 }

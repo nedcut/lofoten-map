@@ -19,9 +19,16 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
   const containerRef = useRef<HTMLDivElement | null>(null);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
+  // The marker outlives any single render, so its dragend handler reads the
+  // latest pick callback through a ref instead of re-binding on every change.
+  const onCoordinatePickRef = useRef(onCoordinatePick);
   const [tokenMissing, setTokenMissing] = useState(false);
   const [mapUnavailable, setMapUnavailable] = useState<string | null>(null);
   const clickPrompt = clickMode === "draw-route" ? "Tap the map to add route points" : "Tap the map to set the location";
+
+  useEffect(() => {
+    onCoordinatePickRef.current = onCoordinatePick;
+  }, [onCoordinatePick]);
 
   useEffect(() => {
     return () => {
@@ -105,7 +112,12 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
       return;
     }
     if (!markerRef.current) {
-      markerRef.current = new mapboxgl.Marker({ color: "#0f766e" }).setLngLat([pendingCoordinate.lng, pendingCoordinate.lat]).addTo(map);
+      const marker = new mapboxgl.Marker({ color: "#0f766e", draggable: true }).setLngLat([pendingCoordinate.lng, pendingCoordinate.lat]).addTo(map);
+      marker.on("dragend", () => {
+        const lngLat = marker.getLngLat();
+        onCoordinatePickRef.current({ lng: lngLat.lng, lat: lngLat.lat });
+      });
+      markerRef.current = marker;
     } else {
       markerRef.current.setLngLat([pendingCoordinate.lng, pendingCoordinate.lat]);
     }

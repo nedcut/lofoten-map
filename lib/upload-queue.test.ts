@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coordinateAlongRoute, findDayIdForCoordinate, findDayIdForExifDate, formatBytes, routePlaceQueueItems, stepFlow, type QueueItem } from "./upload-queue";
+import { coordinateAlongRoute, findDayIdForCoordinate, findDayIdForExifDate, formatBytes, nextPlacementTarget, routePlaceQueueItems, stepFlow, type QueueItem } from "./upload-queue";
 import type { ExtractedExif } from "./exif";
 import type { Day, RouteSegment } from "@/types/trip";
 
@@ -112,9 +112,38 @@ describe("coordinateAlongRoute", () => {
 });
 
 describe("stepFlow", () => {
-  it("includes the place step only when something needs a pin", () => {
-    expect(stepFlow(true)).toEqual(["select", "review", "place"]);
-    expect(stepFlow(false)).toEqual(["select", "review"]);
+  it("has no place step — placement is a mode, not a step", () => {
+    expect(stepFlow()).toEqual(["select", "review"]);
+  });
+});
+
+describe("nextPlacementTarget", () => {
+  it("walks to the unplaced photo taken right after the placed group", () => {
+    const placedA = queueItem({ id: "a", status: "ready", exif: exif({ takenAt: "2026-07-12T10:00:00Z" }) });
+    const placedB = queueItem({ id: "b", status: "ready", exif: exif({ takenAt: "2026-07-12T10:10:00Z" }) });
+    const earlier = queueItem({ id: "earlier", exif: exif({ takenAt: "2026-07-12T08:00:00Z" }) });
+    const next = queueItem({ id: "next", exif: exif({ takenAt: "2026-07-12T11:00:00Z" }) });
+    expect(nextPlacementTarget([next, earlier, placedA, placedB], new Set(["a", "b"]))).toBe("next");
+  });
+
+  it("wraps to the earliest remaining photo when nothing comes later", () => {
+    const placed = queueItem({ id: "placed", status: "ready", exif: exif({ takenAt: "2026-07-12T20:00:00Z" }) });
+    const morning = queueItem({ id: "morning", exif: exif({ takenAt: "2026-07-12T08:00:00Z" }) });
+    const noon = queueItem({ id: "noon", exif: exif({ takenAt: "2026-07-12T12:00:00Z" }) });
+    expect(nextPlacementTarget([noon, morning, placed], new Set(["placed"]))).toBe("morning");
+  });
+
+  it("sorts undated photos after dated ones, in queue order", () => {
+    const undatedFirst = queueItem({ id: "undated-1", exif: exif() });
+    const undatedSecond = queueItem({ id: "undated-2", exif: exif() });
+    const dated = queueItem({ id: "dated", exif: exif({ takenAt: "2026-07-12T09:00:00Z" }) });
+    expect(nextPlacementTarget([undatedFirst, undatedSecond, dated], new Set())).toBe("dated");
+    expect(nextPlacementTarget([undatedFirst, undatedSecond], new Set())).toBe("undated-1");
+  });
+
+  it("returns null when every photo is placed", () => {
+    const placed = queueItem({ id: "placed", status: "ready" });
+    expect(nextPlacementTarget([placed], new Set(["placed"]))).toBeNull();
   });
 });
 
