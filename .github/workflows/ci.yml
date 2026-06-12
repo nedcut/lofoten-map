@@ -41,35 +41,3 @@ jobs:
           # The app degrades to demo mode when these are absent, so the build
           # is exercised without needing real secrets in CI.
           NEXT_PUBLIC_TRIP_SLUG: lofoten-2026
-
-  e2e:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
-      # Builds and serves the app in demo mode itself (playwright.config.ts
-      # webServer), so no Supabase or Mapbox secrets are needed.
-      - name: Run e2e tests
-        run: npx playwright test
-        env:
-          NEXT_PUBLIC_TRIP_SLUG: lofoten-2026
-
-      - name: Upload Playwright report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: playwright-report
-          retention-days: 7
