@@ -11,13 +11,7 @@ import type { Day, LngLat, RouteSegment } from "@/types/trip";
 // photos along the day's route, and the labels derived from queue state.
 // Kept out of UploadPhotoPanel so the placement rules are unit-testable.
 
-// The import flow is a small linear state machine. Placing photos on the map
-// is not a step but a mode: the panel hands off to the placement workspace
-// (sidebar/filmstrip over the live map) and returns to "review" when done.
-export type Step = "select" | "review";
-
 export type QueueStatus = "reading" | "ready" | "needs-location" | "invalid";
-export type QueueFilter = "all" | "review" | "needs-location" | "invalid";
 
 export type QueueItem = {
   id: string;
@@ -180,11 +174,6 @@ export function locationLabel(item: QueueItem) {
   if (item.status === "needs-location") return "Tap map to place";
   if (item.status === "reading") return "Reading metadata";
   return item.message;
-}
-
-// Steps shown in the progress header.
-export function stepFlow(): Step[] {
-  return ["select", "review"];
 }
 
 type PlacementCandidate = Pick<QueueItem, "id" | "status" | "exif">;

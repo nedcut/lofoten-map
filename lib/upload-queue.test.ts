@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coordinateAlongRoute, findDayIdForCoordinate, findDayIdForExifDate, formatBytes, nextPlacementTarget, routePlaceQueueItems, stepFlow, type QueueItem } from "./upload-queue";
+import { coordinateAlongRoute, findDayIdForCoordinate, findDayIdForExifDate, formatBytes, nextPlacementTarget, routePlaceQueueItems, type QueueItem } from "./upload-queue";
 import type { ExtractedExif } from "./exif";
 import type { Day, RouteSegment } from "@/types/trip";
 
@@ -108,12 +108,6 @@ describe("coordinateAlongRoute", () => {
     const nearEnd = coordinateAlongRoute(route, 1)!;
     expect(nearStart.lat).toBeGreaterThan(67.9);
     expect(nearEnd.lat).toBeLessThan(67.918);
-  });
-});
-
-describe("stepFlow", () => {
-  it("has no place step — placement is a mode, not a step", () => {
-    expect(stepFlow()).toEqual(["select", "review"]);
   });
 });
 
