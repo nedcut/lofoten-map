@@ -118,6 +118,7 @@ export function JourneyPlayback({
   );
   const selectedUploaderId = uploaderOptions.find((option) => option.value === uploaderFilter)?.id ?? "";
 
+  /* eslint-disable react-hooks/set-state-in-effect -- resets the caption editor to mirror the active item (external selection); intentional sync, not a render cascade. */
   useEffect(() => {
     if (!activeItem || activeItem.kind !== "photo") {
       setCaptionDraft("");
@@ -127,6 +128,7 @@ export function JourneyPlayback({
     setCaptionDraft(activeItem.primary.caption ?? "");
     setEditingCaption(false);
   }, [activeItem]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
