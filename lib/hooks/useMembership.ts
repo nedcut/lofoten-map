@@ -78,7 +78,7 @@ export function useMembership({ supabase, trip, loadData }: Options) {
         () => supabase!.rpc("resolve_admin_request", { request_id: requestId, approve }),
         approve ? "Request approved." : "Request denied.",
       ),
-    [runMemberOperation, supabase],
+    [runMemberOperation, supabase, trip],
   );
 
   return { status, grantMember, requestAdmin, setMemberRole, resolveAdminRequest };
