@@ -40,6 +40,7 @@ export function useProfile({ supabase, user, currentMember, trip, loadData, onEr
         // Default to whatever avatar the member already has; only the two write
         // paths below (new upload / explicit removal) change it.
         let avatarPath: string | null = currentMember?.avatar_path ?? null;
+        let newlyUploadedPath: string | null = null;
         if (input.avatarFile) {
           const prepared = await prepareAvatarFile(input.avatarFile);
           const path = `${user.id}/${crypto.randomUUID()}.jpg`;
@@ -50,11 +51,9 @@ export function useProfile({ supabase, user, currentMember, trip, loadData, onEr
             onError(`Could not upload your photo. ${uploadError.message}`);
             return;
           }
-          // Best-effort cleanup of the previous avatar so the bucket stays tidy.
-          if (currentMember?.avatar_path) await supabase.storage.from(AVATAR_BUCKET).remove([currentMember.avatar_path]);
           avatarPath = path;
+          newlyUploadedPath = path;
         } else if (input.removeAvatar) {
-          if (currentMember?.avatar_path) await supabase.storage.from(AVATAR_BUCKET).remove([currentMember.avatar_path]);
           avatarPath = null;
         }
 
@@ -64,8 +63,16 @@ export function useProfile({ supabase, user, currentMember, trip, loadData, onEr
           new_avatar_path: avatarPath,
         });
         if (rpcError) {
+          // Roll back the newly uploaded file — the DB was never updated to point at it.
+          if (newlyUploadedPath) await supabase.storage.from(AVATAR_BUCKET).remove([newlyUploadedPath]);
           onError(`Could not save your profile. ${rpcError.message}`);
           return;
+        }
+
+        // RPC succeeded — safe to clean up the previous avatar now.
+        const previousPath = currentMember?.avatar_path ?? null;
+        if (previousPath && (newlyUploadedPath || input.removeAvatar)) {
+          await supabase.storage.from(AVATAR_BUCKET).remove([previousPath]);
         }
         await loadData();
         onNotice("Profile updated.");
