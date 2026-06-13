@@ -21,6 +21,7 @@ export function ProfilePanel({ displayName, avatarUrl, email, isSaving, onClose,
 
   // Revoke the object URL we created for the chosen file when it changes or the
   // panel unmounts, so we don't leak blob URLs.
+  /* eslint-disable react-hooks/set-state-in-effect -- syncs a derived blob-URL preview to the chosen file (browser object-URL lifecycle); intentional. */
   useEffect(() => {
     if (!avatarFile) {
       setLocalPreview(null);
@@ -30,6 +31,7 @@ export function ProfilePanel({ displayName, avatarUrl, email, isSaving, onClose,
     setLocalPreview(url);
     return () => URL.revokeObjectURL(url);
   }, [avatarFile]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function pickFile(file: File | null) {
     if (!file) return;

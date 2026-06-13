@@ -198,6 +198,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     };
   }, []);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- one-shot sync from Mapbox availability (token/WebGL/init failure, an external system) during mount; intentional. */
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -254,6 +255,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     // the easeTo effect below, so we must not tear the map down per navigation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     const map = mapRef.current;

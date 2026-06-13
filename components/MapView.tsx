@@ -36,6 +36,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
     };
   }, []);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- one-shot sync from Mapbox availability (token/WebGL/init failure, an external system) during mount; intentional. */
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const markUnavailable = (message?: string) => {
@@ -87,6 +88,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
       mapRef.current = null;
     };
   }, [onMapReady, onMapUnavailable]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     const map = mapRef.current;

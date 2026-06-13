@@ -87,12 +87,14 @@ export function LocationCheckList({ outliers, isSaving, onMove, onDismiss, onPre
   // Clear the overlay when the section closes (LazyDetails unmounts children).
   useEffect(() => () => previewRef.current(null), []);
   // ...and when the pinned outlier resolves (moved or list recomputed).
+  /* eslint-disable react-hooks/set-state-in-effect -- clears the pin once the pinned outlier resolves away (derived cleanup); intentional. */
   useEffect(() => {
     if (pinnedId && !pinned) {
       setPinnedId(null);
       previewRef.current(null);
     }
   }, [pinned, pinnedId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return (
     <>

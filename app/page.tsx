@@ -447,11 +447,13 @@ export default function Home() {
     setEditTargetRef(exists ? { kind: itemRef.kind, id: itemRef.id } : null);
   }, [allJourneyItems, data.days, data.notes, data.photos, data.places, data.routeSegments]);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- one-shot sync of selection state from the URL (external system) after the first data load; intentional. */
   useEffect(() => {
     if (deepLinkChecked || loading) return;
     applyDeepLinkFromUrl(window.location.href);
     setDeepLinkChecked(true);
   }, [applyDeepLinkFromUrl, deepLinkChecked, loading]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     const handler = () => applyDeepLinkFromUrl(window.location.href);
@@ -487,6 +489,7 @@ export default function Home() {
     // viewer open so its filter controls stay reachable. Only close when the
     // item is genuinely gone (e.g. deleted via realtime) with nothing left.
     if (journeyItems[0]) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reconciles the active journey item when filters/realtime drop it from the list; intentional.
       openJourneyAt(journeyItems[0].id, "replace");
     } else if (!allJourneyItems.some((item) => item.id === activeJourneyId)) {
       closeJourney();

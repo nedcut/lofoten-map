@@ -99,6 +99,7 @@ export function useTripData({ supabase, user, authLoading, tripSlug, initialData
   useEffect(() => {
     if (!supabase) return;
     if (authLoading) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- canonical data-fetch effect: loads trip data when auth/session changes (external system).
     loadData();
   }, [authLoading, loadData, supabase, user]);
 

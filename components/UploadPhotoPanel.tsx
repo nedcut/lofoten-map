@@ -197,11 +197,13 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
   }, [selectedIds]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears selection when the map becomes unavailable (prop-driven); intentional sync.
     if (!mapAvailable) setSelectedIds(new Set());
   }, [mapAvailable]);
 
   // Drop selections that no longer exist in the queue (removed or cleared).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prunes selection to ids still in the queue (derived from items); functional update, intentional.
     setSelectedIds((current) => {
       if (current.size === 0) return current;
       const alive = new Set(Array.from(current).filter((id) => items.some((item) => item.id === id)));
@@ -241,6 +243,7 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
   }, [pendingCoordinate]);
 
   // Keep the active selection valid as the queue changes.
+  /* eslint-disable react-hooks/set-state-in-effect -- keeps the active item pointing at a row that still exists (derived from items); intentional. */
   useEffect(() => {
     if (items.length === 0) {
       if (activeItemId !== null) setActiveItemId(null);
@@ -249,6 +252,7 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
     if (activeItemId && items.some((item) => item.id === activeItemId)) return;
     setActiveItemId(items[0].id);
   }, [activeItemId, items]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   async function handleFiles(files: FileList | null) {
     const selected = Array.from(files ?? []);
