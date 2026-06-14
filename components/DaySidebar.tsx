@@ -1,15 +1,27 @@
 "use client";
 
-import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, Mountain, PenLine, Route, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, Mountain, PenLine, Play, Route, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { AdminDataPanel, type AdminDataProps } from "@/components/AdminDataPanel";
+import { JourneyHeroCard } from "@/components/JourneyHeroCard";
 import { cn, formatDateOnly } from "@/lib/utils";
-import type { AdminRequest, AdminRequestStatus, Day, Trip, TripMember } from "@/types/trip";
+import type { AdminRequest, AdminRequestStatus, Day, Photo, Trip, TripMember } from "@/types/trip";
 
 export type LayerVisibility = { photos: boolean; notes: boolean; routes: boolean };
 
 // Per-day totals shown on the day cards so picking a day is informed: how much
 // media it holds, how many journal pins, and how far its routes run.
 export type DayStats = { media: number; journal: number; distanceMeters: number };
+
+// Everything the Journey hero and per-day play buttons need. Optional so the
+// sidebar still renders before journey data is ready (or when there's none).
+export type JourneyEntry = {
+  photos: Photo[];
+  momentCount: number;
+  dayCount: number;
+  onPlay: () => void;
+  onPlayDay: (dayId: string) => void;
+  disabled?: boolean;
+};
 
 export type SidebarProps = {
   trip: Trip | null;
@@ -24,6 +36,7 @@ export type SidebarProps = {
   onStartPhotoUpload?: () => void;
   onStartAddNote?: () => void;
   onStartRouteDraw?: () => void;
+  journey?: JourneyEntry | null;
   adminData?: AdminDataProps | null;
   memberAdmin?: MemberAdminProps | null;
   adminRequest?: AdminRequestProps | null;
@@ -127,7 +140,7 @@ function dayStatsLabel(stats: DayStats | undefined): string | null {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-export function DayList({ days, dayStats, selectedDayId, onSelectDay, onStepDay }: Pick<SidebarProps, "days" | "dayStats" | "selectedDayId" | "onSelectDay" | "onStepDay">) {
+export function DayList({ days, dayStats, selectedDayId, onSelectDay, onStepDay, onPlayDay }: Pick<SidebarProps, "days" | "dayStats" | "selectedDayId" | "onSelectDay" | "onStepDay"> & { onPlayDay?: (dayId: string) => void }) {
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2 text-sm font-bold text-stone-900">
@@ -148,25 +161,44 @@ export function DayList({ days, dayStats, selectedDayId, onSelectDay, onStepDay 
           <div className="font-bold text-stone-950">All days</div>
           <div className="text-xs text-stone-500">Show the whole adventure</div>
         </button>
-        {days.map((day) => (
-          <button
-            key={day.id}
-            onClick={() => onSelectDay(day.id)}
-            className={cn(
-              "group w-full rounded-xl border px-4 py-3 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20",
-              selectedDayId === day.id ? "border-teal-700/35 bg-teal-50 shadow-sm" : "border-stone-200 bg-white/75 hover:border-stone-300 hover:bg-white",
-            )}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-bold text-stone-950">Day {day.day_number}: {day.title ?? "Open trail"}</span>
-              {day.date ? <span className="shrink-0 rounded-full bg-teal-700/10 px-2 py-0.5 text-xs font-bold text-teal-800">{formatDateOnly(day.date)}</span> : null}
+        {days.map((day) => {
+          const stats = dayStats?.get(day.id);
+          // Only days with something to show get a play button — an empty day
+          // would just drop the viewer onto someone else's moment.
+          const canPlay = Boolean(onPlayDay) && Boolean(stats && (stats.media > 0 || stats.journal > 0));
+          return (
+            <div key={day.id} className="group relative">
+              <button
+                onClick={() => onSelectDay(day.id)}
+                className={cn(
+                  "w-full rounded-xl border px-4 py-3 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20",
+                  canPlay && "pr-14",
+                  selectedDayId === day.id ? "border-teal-700/35 bg-teal-50 shadow-sm" : "border-stone-200 bg-white/75 hover:border-stone-300 hover:bg-white",
+                )}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-bold text-stone-950">Day {day.day_number}: {day.title ?? "Open trail"}</span>
+                  {day.date ? <span className="shrink-0 rounded-full bg-teal-700/10 px-2 py-0.5 text-xs font-bold text-teal-800">{formatDateOnly(day.date)}</span> : null}
+                </div>
+                <div className="mt-1 text-xs leading-5 text-stone-500">{day.summary ?? "Route planning and shared memories."}</div>
+                {dayStatsLabel(stats) ? (
+                  <div className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-teal-800/70">{dayStatsLabel(stats)}</div>
+                ) : null}
+              </button>
+              {canPlay ? (
+                <button
+                  type="button"
+                  onClick={() => onPlayDay?.(day.id)}
+                  aria-label={`Relive Day ${day.day_number}`}
+                  title={`Relive Day ${day.day_number}`}
+                  className="absolute right-2.5 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-stone-200 bg-white text-[#b8761a] shadow-sm transition hover:-translate-y-1/2 hover:scale-105 hover:border-[#e7a13d]/60 hover:bg-[#fdf1dc] hover:text-[#8a5414] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/30 active:scale-95"
+                >
+                  <Play className="h-4 w-4 fill-current" />
+                </button>
+              ) : null}
             </div>
-            <div className="mt-1 text-xs leading-5 text-stone-500">{day.summary ?? "Route planning and shared memories."}</div>
-            {dayStatsLabel(dayStats?.get(day.id)) ? (
-              <div className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-teal-800/70">{dayStatsLabel(dayStats?.get(day.id))}</div>
-            ) : null}
-          </button>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -287,8 +319,17 @@ export function DaySidebar(props: SidebarProps) {
   return (
     <aside className="flex h-full max-h-[78dvh] min-h-0 flex-col gap-4 overflow-y-auto rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.94)] p-4 text-stone-950 shadow-[0_24px_80px_rgba(46,61,54,0.2)] backdrop-blur-xl md:max-h-none md:w-96 md:p-5">
       <SidebarHeader trip={props.trip} />
+      {props.journey ? (
+        <JourneyHeroCard
+          photos={props.journey.photos}
+          momentCount={props.journey.momentCount}
+          dayCount={props.journey.dayCount}
+          onPlay={props.journey.onPlay}
+          disabled={props.journey.disabled}
+        />
+      ) : null}
       <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} onStartRouteDraw={props.onStartRouteDraw} />
-      <DayList days={props.days} dayStats={props.dayStats} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} />
+      <DayList days={props.days} dayStats={props.dayStats} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} />
       {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
       {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
       {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}

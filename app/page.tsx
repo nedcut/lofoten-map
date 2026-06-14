@@ -309,6 +309,26 @@ export default function Home() {
     openJourneyAt((lastFocused ?? dayStart ?? journeyItems[0]).id);
   }, [journeyItems, lastFocusedPhotoId, openJourneyAt, selectedDayId]);
 
+  // "Play this day" from a day card: clear any active filters so the day's first
+  // moment is guaranteed to be in the sequence, then drop into playback there.
+  const playDayJourney = useCallback((dayId: string) => {
+    setJourneyFilter("all");
+    setJourneyUploaderFilter("");
+    const first = allJourneyItems.find((item) => item.dayId === dayId);
+    if (first) openJourneyAt(first.id, "push");
+  }, [allJourneyItems, openJourneyAt]);
+
+  // Bundle for the sidebar/mobile Journey hero + per-day play buttons. The hero
+  // samples data.photos for its preview; counts drive its subtitle copy.
+  const journeyEntry = useMemo(() => ({
+    photos: data.photos,
+    momentCount: allJourneyItems.length,
+    dayCount: data.days.length,
+    onPlay: startJourney,
+    onPlayDay: playDayJourney,
+    disabled: allJourneyItems.length === 0,
+  }), [data.photos, data.days.length, allJourneyItems.length, startJourney, playDayJourney]);
+
   // Step the map-view day filter forward/backward through ["All days", day 1,
   // day 2, ...], clamped at both ends so repeated presses don't wrap around.
   const stepDay = useCallback((direction: 1 | -1) => {
@@ -750,10 +770,10 @@ export default function Home() {
           <button
             onClick={startJourney}
             disabled={journeyItems.length === 0}
-            aria-label="Open Journey Mode"
-            className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[#e7a13d] px-3 py-2 text-xs font-black text-stone-950 shadow-lg transition hover:bg-[#f0ae4b] hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Relive the journey"
+            className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Play className="h-3.5 w-3.5 fill-current" /> <span className="hidden sm:inline">Journey</span>
+            <Play className="h-3.5 w-3.5 fill-current text-[#d0872f]" /> <span className="hidden sm:inline">Relive</span>
           </button>
           {supabase && user && currentMember && profilesAvailable ? (
             <button onClick={() => setProfilePanelOpen(true)} aria-label="Edit your profile" className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] py-1 pl-1 pr-3 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">
@@ -773,7 +793,7 @@ export default function Home() {
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
+        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
             {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
@@ -782,7 +802,7 @@ export default function Home() {
           </MapView>
         </div>
       </div>
-      {!panel ? <MobileSheet trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
+      {!panel ? <MobileSheet trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
