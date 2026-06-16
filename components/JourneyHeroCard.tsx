@@ -44,14 +44,28 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, onPlay, disable
     [photos],
   );
 
-  // Shuffle is deferred to mount: doing it during render would desync the SSR
-  // markup on hydration, and mounting once per visit is exactly the "reshuffle
-  // each visit" behaviour we want.
+  const candidateSignature = candidates.map((photo) => `${photo.id}:${previewUrl(photo)}`).join("|");
+
+  // Shuffle is deferred out of render: doing it during render would desync the
+  // SSR markup on hydration. Once seeded, preserve the chosen order across data
+  // refreshes so unrelated trip updates don't reshuffle the preview mid-session.
   const [preview, setPreview] = useState<Photo[]>([]);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- deferring the random shuffle to mount keeps SSR markup stable through hydration; intentional.
-    setPreview(shuffle(candidates).slice(0, PREVIEW_COUNT));
-  }, [candidates]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- deferring the random shuffle keeps SSR markup stable through hydration; intentional.
+    setPreview((current) => {
+      if (candidates.length === 0) return current.length === 0 ? current : [];
+
+      const byId = new Map(candidates.map((photo) => [photo.id, photo]));
+      const kept = current
+        .map((photo) => byId.get(photo.id))
+        .filter((photo): photo is Photo => Boolean(photo));
+      if (kept.length >= Math.min(PREVIEW_COUNT, candidates.length)) return kept.slice(0, PREVIEW_COUNT);
+
+      const keptIds = new Set(kept.map((photo) => photo.id));
+      const additions = shuffle(candidates.filter((photo) => !keptIds.has(photo.id)));
+      return [...kept, ...additions].slice(0, PREVIEW_COUNT);
+    });
+  }, [candidateSignature, candidates]);
 
   // The crossfade only runs once the card is actually on screen, so an unseen
   // hero (collapsed mobile sheet, scrolled-away sidebar) costs nothing.
@@ -76,6 +90,11 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, onPlay, disable
   // Advance the active slide on a timer while visible. Reduced-motion users get
   // a single static frame: the interval simply never starts.
   const [active, setActive] = useState(0);
+  useEffect(() => {
+    if (preview.length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clamps the active slide after realtime preview removals; intentional.
+    setActive((current) => (current < preview.length ? current : 0));
+  }, [preview.length]);
   useEffect(() => {
     if (!visible || preview.length < 2) return;
     if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
