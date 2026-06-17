@@ -1,10 +1,31 @@
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
-import length from "@turf/length";
 import type { LngLat, Note, Photo, Place, RouteSegment } from "@/types/trip";
 
 export const LOFOTEN_CENTER: [number, number] = [13.0897, 67.9325];
 
 export type CoordinateBounds = { sw: [number, number]; ne: [number, number]; center: [number, number]; diagonalMeters: number };
+
+const EARTH_RADIUS_METERS = 6_371_000;
+
+function segmentDistanceMeters(from: [number, number], to: [number, number]) {
+  const [fromLng, fromLat] = from;
+  const [toLng, toLat] = to;
+  const fromPhi = fromLat * Math.PI / 180;
+  const toPhi = toLat * Math.PI / 180;
+  const deltaPhi = (toLat - fromLat) * Math.PI / 180;
+  const deltaLambda = (toLng - fromLng) * Math.PI / 180;
+  const haversine = Math.sin(deltaPhi / 2) ** 2
+    + Math.cos(fromPhi) * Math.cos(toPhi) * Math.sin(deltaLambda / 2) ** 2;
+  return 2 * EARTH_RADIUS_METERS * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function geometryDistanceMeters(geometry: LineString) {
+  let meters = 0;
+  for (let index = 1; index < geometry.coordinates.length; index += 1) {
+    meters += segmentDistanceMeters(geometry.coordinates[index - 1] as [number, number], geometry.coordinates[index] as [number, number]);
+  }
+  return meters;
+}
 
 /**
  * Axis-aligned bounds for a set of [lng, lat] coordinates, in the shape
@@ -24,12 +45,11 @@ export function coordinateBounds(coords: [number, number][]): CoordinateBounds |
     if (lat < minLat) minLat = lat;
     if (lat > maxLat) maxLat = lat;
   }
-  const diagonal: LineString = { type: "LineString", coordinates: [[minLng, minLat], [maxLng, maxLat]] };
   return {
     sw: [minLng, minLat],
     ne: [maxLng, maxLat],
     center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2],
-    diagonalMeters: length({ type: "Feature", geometry: diagonal, properties: {} }, { units: "kilometers" }) * 1000,
+    diagonalMeters: segmentDistanceMeters([minLng, minLat], [maxLng, maxLat]),
   };
 }
 
@@ -44,7 +64,7 @@ export function routeDistanceMeters(points: LngLat[]) {
 
 export function lineDistanceMeters(geometry: LineString) {
   if (geometry.coordinates.length < 2) return 0;
-  return Math.round(length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" }) * 1000);
+  return Math.round(geometryDistanceMeters(geometry));
 }
 
 export type DayItems = {
@@ -79,7 +99,7 @@ export function routeFeatureCollection(routes: RouteSegment[]): FeatureCollectio
       const geometry = (route.geometry_geojson.type === "Feature" ? route.geometry_geojson.geometry : route.geometry_geojson) as LineString;
       const distanceKm = route.distance_meters
         ? route.distance_meters / 1000
-        : length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" });
+        : geometryDistanceMeters(geometry) / 1000;
       const feature: Feature<LineString> = {
         type: "Feature",
         geometry,
