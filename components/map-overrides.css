@@ -131,6 +131,12 @@
   }
 }
 
+/* The ring stays visible (it marks the photo being edited) but holds still for
+   users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .lofoten-photo-highlight-ring { animation: none; }
+}
+
 /* Location-check preview: the flagged photo's time-neighbors and the
    suggested corrected spot. */
 .lofoten-outlier-neighbor {
