@@ -1,6 +1,9 @@
 "use client";
 
 import mapboxgl from "mapbox-gl";
+// Loaded here rather than in globals.css so the vendored stylesheet ships with
+// this lazily-imported (ssr:false) map chunk, keeping it off the critical path.
+import "mapbox-gl/dist/mapbox-gl.css";
 import { MapPin } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LOFOTEN_CENTER } from "@/lib/geo";

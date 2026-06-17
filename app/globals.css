@@ -1,5 +1,7 @@
 @import "tailwindcss";
-@import "mapbox-gl/dist/mapbox-gl.css";
+/* mapbox-gl's stylesheet is imported inside components/MapView.tsx instead of
+   here, so its ~40KB ships in the lazy map chunk rather than the render-blocking
+   critical CSS that every visitor downloads before first paint. */
 
 @theme inline {
   --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

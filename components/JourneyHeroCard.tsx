@@ -130,6 +130,7 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, onPlay, disable
           src={previewUrl(photo) ?? undefined}
           alt=""
           aria-hidden
+          decoding="async"
           className={cn(
             "pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-[1200ms] ease-in-out motion-reduce:transition-none",
             index === active ? "opacity-100" : "opacity-0",
