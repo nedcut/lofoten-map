@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 import { useRef, useState } from "react";
 import { AdminDataPanel } from "@/components/AdminDataPanel";
 import { AdminRequestPanel, DayList, LayersPanel, MemberAdminPanel, QuickActions, SidebarHeader, type SidebarProps } from "@/components/DaySidebar";
+import { JourneyHeroCard } from "@/components/JourneyHeroCard";
 import { cn } from "@/lib/utils";
 import type { Day } from "@/types/trip";
 
@@ -117,8 +118,19 @@ export function MobileSheet(props: MobileSheetProps) {
             </button>
           </div>
 
-          {/* Quick actions stay reachable even when collapsed. */}
-          <div className="px-4 pb-3">
+          {/* Journey hero + quick actions stay reachable even when collapsed, so
+              the trip's marquee feature is visible without expanding the sheet. */}
+          <div className="space-y-3 px-4 pb-3">
+            {props.journey ? (
+              <JourneyHeroCard
+                photos={props.journey.photos}
+                momentCount={props.journey.momentCount}
+                dayCount={props.journey.dayCount}
+                onPlay={props.journey.onPlay}
+                disabled={props.journey.disabled}
+                compact
+              />
+            ) : null}
             <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} onStartRouteDraw={props.onStartRouteDraw} />
           </div>
 
@@ -128,7 +140,7 @@ export function MobileSheet(props: MobileSheetProps) {
               {expanded ? (
                 <div className="max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
                   <SidebarHeader trip={props.trip} compact />
-                  <DayList days={props.days} dayStats={props.dayStats} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} onStepDay={props.onStepDay} />
+                  <DayList days={props.days} dayStats={props.dayStats} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} />
                   {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
                   {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
                   {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}

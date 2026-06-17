@@ -155,6 +155,21 @@ body {
   }
 }
 
+/* Slow drift on the active Journey hero slide — ambient motion that hints the
+   trip can be played. Disabled for reduced-motion users. */
+.journey-hero-kenburns {
+  animation: journey-hero-kenburns 7s ease-out forwards;
+}
+
+@keyframes journey-hero-kenburns {
+  from { transform: scale(1.08); }
+  to { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journey-hero-kenburns { animation: none; }
+}
+
 /* Location-check preview: the flagged photo's time-neighbors and the
    suggested corrected spot. */
 .lofoten-outlier-neighbor {
