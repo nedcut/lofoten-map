@@ -5,7 +5,8 @@ import type { Dispatch, SetStateAction } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { Day, LngLat, Note, RouteMode, RouteSegment, TripData } from "@/types/trip";
 import { PHOTO_BUCKET } from "@/lib/supabase";
-import { firstBucketDate, groupPointsByDay, parseGpx, simplifyToLineString } from "@/lib/gpx";
+// @/lib/gpx is loaded lazily inside importGpx (below) so its @turf/simplify
+// dependency stays out of the initial bundle — GPX import is a rare admin action.
 import { lineDistanceMeters } from "@/lib/geo";
 import {
   addDay,
@@ -147,6 +148,8 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
         reportError("Sign in before importing GPX files to Supabase.");
         return;
       }
+
+      const { firstBucketDate, groupPointsByDay, parseGpx, simplifyToLineString } = await import("@/lib/gpx");
 
       await runAdminOperation(async () => {
         const parsed = parseGpx(await file.text());

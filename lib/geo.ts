@@ -1,10 +1,33 @@
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
-import length from "@turf/length";
 import type { LngLat, Note, Photo, Place, RouteSegment } from "@/types/trip";
 
 export const LOFOTEN_CENTER: [number, number] = [13.0897, 67.9325];
 
 export type CoordinateBounds = { sw: [number, number]; ne: [number, number]; center: [number, number]; diagonalMeters: number };
+
+// Great-circle (haversine) distance, inlined so route/bounds math doesn't pull
+// @turf/length (and its @turf/distance/helpers/meta deps) into the page graph —
+// geo.ts is the only Turf consumer reachable from the initial bundle, so this
+// drops Turf from first load entirely. Uses Turf's mean Earth radius so the
+// displayed distances stay identical to the previous implementation.
+const EARTH_RADIUS_METERS = 6_371_008.8;
+
+function segmentDistanceMeters([fromLng, fromLat]: [number, number], [toLng, toLat]: [number, number]): number {
+  const fromPhi = (fromLat * Math.PI) / 180;
+  const toPhi = (toLat * Math.PI) / 180;
+  const deltaPhi = ((toLat - fromLat) * Math.PI) / 180;
+  const deltaLambda = ((toLng - fromLng) * Math.PI) / 180;
+  const a = Math.sin(deltaPhi / 2) ** 2 + Math.cos(fromPhi) * Math.cos(toPhi) * Math.sin(deltaLambda / 2) ** 2;
+  return 2 * EARTH_RADIUS_METERS * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function geometryDistanceMeters(geometry: LineString): number {
+  let meters = 0;
+  for (let i = 1; i < geometry.coordinates.length; i += 1) {
+    meters += segmentDistanceMeters(geometry.coordinates[i - 1] as [number, number], geometry.coordinates[i] as [number, number]);
+  }
+  return meters;
+}
 
 /**
  * Axis-aligned bounds for a set of [lng, lat] coordinates, in the shape
@@ -24,13 +47,19 @@ export function coordinateBounds(coords: [number, number][]): CoordinateBounds |
     if (lat < minLat) minLat = lat;
     if (lat > maxLat) maxLat = lat;
   }
-  const diagonal: LineString = { type: "LineString", coordinates: [[minLng, minLat], [maxLng, maxLat]] };
   return {
     sw: [minLng, minLat],
     ne: [maxLng, maxLat],
     center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2],
-    diagonalMeters: length({ type: "Feature", geometry: diagonal, properties: {} }, { units: "kilometers" }) * 1000,
+    diagonalMeters: segmentDistanceMeters([minLng, minLat], [maxLng, maxLat]),
   };
+}
+
+// Great-circle distance between two points in kilometers. Mirrors @turf/distance
+// (same Earth radius) so callers like photo-outlier detection can reach it
+// without importing the Turf-heavy journey-leg module into the page graph.
+export function distanceKm(a: LngLat, b: LngLat): number {
+  return segmentDistanceMeters([a.lng, a.lat], [b.lng, b.lat]) / 1000;
 }
 
 export function routeGeometry(points: LngLat[]): LineString {
@@ -44,7 +73,7 @@ export function routeDistanceMeters(points: LngLat[]) {
 
 export function lineDistanceMeters(geometry: LineString) {
   if (geometry.coordinates.length < 2) return 0;
-  return Math.round(length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" }) * 1000);
+  return Math.round(geometryDistanceMeters(geometry));
 }
 
 export type DayItems = {
@@ -77,9 +106,9 @@ export function routeFeatureCollection(routes: RouteSegment[]): FeatureCollectio
     type: "FeatureCollection",
     features: routes.map((route) => {
       const geometry = (route.geometry_geojson.type === "Feature" ? route.geometry_geojson.geometry : route.geometry_geojson) as LineString;
-      const distanceKm = route.distance_meters
+      const routeDistanceKm = route.distance_meters
         ? route.distance_meters / 1000
-        : length({ type: "Feature", geometry, properties: {} }, { units: "kilometers" });
+        : geometryDistanceMeters(geometry) / 1000;
       const feature: Feature<LineString> = {
         type: "Feature",
         geometry,
@@ -88,7 +117,7 @@ export function routeFeatureCollection(routes: RouteSegment[]): FeatureCollectio
           name: route.name ?? "Route segment",
           day_id: route.day_id,
           mode: route.mode,
-          distance_km: distanceKm,
+          distance_km: routeDistanceKm,
         },
       };
       return feature;
