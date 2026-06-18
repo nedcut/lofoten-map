@@ -1,4 +1,4 @@
-import { distanceKm } from "./journey-leg";
+import { distanceKm } from "./geo";
 import type { LngLat, Photo } from "@/types/trip";
 
 // A photo whose position disagrees with where the photos taken around the

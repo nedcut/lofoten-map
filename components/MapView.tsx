@@ -1,6 +1,12 @@
 "use client";
 
 import mapboxgl from "mapbox-gl";
+// Loaded here rather than in globals.css so the vendored stylesheet and our map
+// overrides ship with this lazily-imported (ssr:false) map chunk, keeping them
+// off the render-blocking critical path. The overrides import must follow the
+// vendor sheet so its cascade wins.
+import "mapbox-gl/dist/mapbox-gl.css";
+import "./map-overrides.css";
 import { MapPin } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LOFOTEN_CENTER } from "@/lib/geo";

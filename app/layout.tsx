@@ -14,9 +14,34 @@ export const viewport: Viewport = {
   themeColor: "#e7efe8",
 };
 
+// Origin of the Supabase project (storage + realtime). Derived from the public
+// env var so a preconnect can warm the TLS handshake before the first photo or
+// data request fires.
+const supabaseOrigin = (() => {
+  try {
+    return process.env.NEXT_PUBLIC_SUPABASE_URL ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin : null;
+  } catch {
+    return null;
+  }
+})();
+
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        {/* Warm the connections the map and gallery need on first paint: Mapbox
+            style/tiles/telemetry and Supabase storage. preconnect opens the
+            TCP+TLS early; dns-prefetch is the cheaper fallback for older browsers. */}
+        <link rel="preconnect" href="https://api.mapbox.com" crossOrigin="" />
+        <link rel="preconnect" href="https://events.mapbox.com" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://api.mapbox.com" />
+        {supabaseOrigin ? (
+          <>
+            <link rel="preconnect" href={supabaseOrigin} crossOrigin="" />
+            <link rel="dns-prefetch" href={supabaseOrigin} />
+          </>
+        ) : null}
+      </head>
       <body>{children}</body>
     </html>
   );

@@ -1,0 +1,328 @@
+/* Map-specific style overrides for Mapbox controls, popups and the custom photo
+   markers. Imported by components/MapView.tsx (after mapbox-gl's own stylesheet)
+   rather than from globals.css, so these rules ship in the lazy map chunk and
+   stay off the render-blocking critical path. Every selector here targets DOM
+   that only exists once the map has mounted. */
+
+.mapboxgl-popup-content,
+.lofoten-popup .mapboxgl-popup-content {
+  border-radius: 14px !important;
+  background: rgba(255, 253, 246, 0.98) !important;
+  color: #1c1917 !important;
+  border: 1px solid rgba(214, 204, 188, 0.9);
+  box-shadow: 0 24px 60px rgba(46, 61, 54, 0.22) !important;
+  padding: 0 !important;
+  overflow: hidden;
+}
+.mapboxgl-popup-tip,
+.lofoten-popup .mapboxgl-popup-tip { border-top-color: rgba(255, 253, 246, 0.98) !important; }
+.mapboxgl-popup-close-button,
+.lofoten-popup .mapboxgl-popup-close-button {
+  border-radius: 999px;
+  color: #57534e !important;
+  font-size: 20px;
+  line-height: 1;
+  margin: 8px;
+  padding: 5px 8px;
+}
+.mapboxgl-popup-close-button:hover,
+.mapboxgl-popup-close-button:focus,
+.lofoten-popup .mapboxgl-popup-close-button:hover,
+.lofoten-popup .mapboxgl-popup-close-button:focus {
+  background: rgba(28, 25, 23, 0.06) !important;
+  color: #1c1917 !important;
+  outline: 2px solid rgba(15, 118, 110, 0.35);
+  outline-offset: 2px;
+}
+.mapboxgl-ctrl-group {
+  border-radius: 10px !important;
+  overflow: hidden;
+  background: rgba(255, 253, 246, 0.94) !important;
+  box-shadow: 0 12px 30px rgba(46, 61, 54, 0.18) !important;
+}
+.mapboxgl-ctrl button { color: #1c1917 !important; }
+
+.lofoten-photo-marker {
+  width: 48px;
+  height: 48px;
+  cursor: pointer;
+  overflow: visible;
+  border: 3px solid #fffdf6;
+  border-radius: 12px;
+  background: #e7a13d;
+  padding: 0;
+  box-shadow:
+    0 2px 5px rgba(28, 25, 23, 0.22),
+    0 10px 22px rgba(46, 61, 54, 0.22);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.lofoten-photo-marker::before,
+.lofoten-photo-marker::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 2px;
+  border: 2px solid #fffdf6;
+  border-radius: 11px;
+  background: #d6ccb8;
+  box-shadow: 0 4px 10px rgba(28, 25, 23, 0.16);
+}
+
+.lofoten-photo-marker:not(.lofoten-photo-marker-cluster)::before,
+.lofoten-photo-marker:not(.lofoten-photo-marker-cluster)::after {
+  display: none;
+}
+
+.lofoten-photo-marker-cluster {
+  width: 56px;
+  height: 56px;
+}
+
+.lofoten-photo-marker-cluster::before {
+  transform: translate(5px, -4px) rotate(7deg);
+}
+
+.lofoten-photo-marker-cluster::after {
+  transform: translate(-5px, 4px) rotate(-5deg);
+}
+
+.lofoten-photo-marker img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 9px;
+  object-fit: cover;
+  background: #dbe7df;
+}
+
+/* Pulsing ring around the photo currently open in the editor. The outer div is
+   positioned by Mapbox (inline transform), so the animation lives on a child. */
+.lofoten-photo-highlight {
+  width: 76px;
+  height: 76px;
+  cursor: grab;
+}
+
+.lofoten-photo-highlight:active {
+  cursor: grabbing;
+}
+
+.lofoten-photo-highlight-ring {
+  position: absolute;
+  inset: 0;
+  border: 3px solid #e7a13d;
+  border-radius: 18px;
+  box-shadow:
+    0 0 0 7px rgba(231, 161, 61, 0.28),
+    0 0 34px rgba(231, 161, 61, 0.55);
+  animation: lofoten-highlight-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes lofoten-highlight-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.14);
+    opacity: 0.65;
+  }
+}
+
+/* The ring stays visible (it marks the photo being edited) but holds still for
+   users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .lofoten-photo-highlight-ring { animation: none; }
+}
+
+/* Location-check preview: the flagged photo's time-neighbors and the
+   suggested corrected spot. */
+.lofoten-outlier-neighbor {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  border: 2.5px solid #fffdf6;
+  background: #0f766e;
+  box-shadow: 0 2px 8px rgba(28, 25, 23, 0.35);
+  pointer-events: none;
+}
+
+.lofoten-outlier-center {
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  border: 3px dashed #0f766e;
+  background: rgba(15, 118, 110, 0.14);
+  pointer-events: none;
+}
+
+.lofoten-photo-marker-fallback {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  color: #fffdf6;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.lofoten-photo-marker-count {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  min-width: 25px;
+  height: 25px;
+  padding: 0 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fffdf6;
+  border-radius: 999px;
+  background: #0f766e;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 4px 10px rgba(28, 25, 23, 0.24);
+}
+
+.lofoten-photo-marker:hover,
+.lofoten-photo-marker:focus-visible {
+  z-index: 2;
+  box-shadow:
+    0 3px 7px rgba(28, 25, 23, 0.24),
+    0 14px 28px rgba(46, 61, 54, 0.28);
+}
+
+.lofoten-photo-marker:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, 0.55);
+  outline-offset: 4px;
+}
+
+.map-unavailable .mapboxgl-ctrl,
+.map-unavailable .mapboxgl-ctrl-bottom-left,
+.map-unavailable .mapboxgl-ctrl-bottom-right,
+.map-unavailable-active .mapboxgl-control-container,
+.map-unavailable-active .mapboxgl-ctrl,
+.map-unavailable-active .mapboxgl-ctrl-bottom-left,
+.map-unavailable-active .mapboxgl-ctrl-bottom-right {
+  display: none !important;
+}
+
+@media (max-width: 767px) {
+  .mapboxgl-ctrl-bottom-left,
+  .mapboxgl-ctrl-bottom-right {
+    bottom: calc(11.75rem + env(safe-area-inset-bottom)) !important;
+  }
+
+  .mapboxgl-ctrl-bottom-left .mapboxgl-ctrl {
+    margin-left: 0.75rem !important;
+  }
+
+  .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl {
+    margin-right: 0.75rem !important;
+  }
+}
+
+.lofoten-popup-card {
+  width: 16rem;
+  background: rgba(255, 253, 246, 0.98);
+  color: #1c1917;
+}
+
+.lofoten-popup-image {
+  display: block;
+  height: 9rem;
+  width: 100%;
+  object-fit: cover;
+}
+
+.lofoten-popup-video-fallback {
+  align-items: center;
+  background: #f5f5f4;
+  color: #78716c;
+  display: flex;
+  font-size: 0.85rem;
+  font-weight: 800;
+  justify-content: center;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lofoten-popup-body {
+  padding: 0.85rem;
+}
+
+.lofoten-popup-title {
+  color: #1c1917;
+  font-size: 0.92rem;
+  font-weight: 800;
+  line-height: 1.35;
+  padding-right: 1.5rem;
+}
+
+.lofoten-popup-meta {
+  color: #78716c;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  margin-top: 0.35rem;
+}
+
+.lofoten-popup-by { font-weight: 600; color: #57534e; }
+
+.lofoten-popup-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(214, 204, 188, 0.7);
+}
+.lofoten-popup-action {
+  flex: 1;
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 204, 188, 0.9);
+  background: #fffdf6;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #1c1917;
+  transition: background 0.15s ease;
+}
+.lofoten-popup-action:hover { background: rgba(28, 25, 23, 0.05); }
+.lofoten-popup-action:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.4);
+  outline-offset: 1px;
+}
+.lofoten-popup-action-danger {
+  border-color: #f6c9cf;
+  background: #fef2f3;
+  color: #b4232f;
+}
+.lofoten-popup-action-danger:hover { background: #fde4e6; }
+.lofoten-popup-action-journey {
+  border-color: rgba(231, 161, 61, 0.6);
+  background: #fdf1dc;
+  color: #8a5414;
+}
+.lofoten-popup-action-journey:hover { background: #fbe6c2; }
+
+.lofoten-popup-tag {
+  display: inline-block;
+  margin-bottom: 0.4rem;
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.lofoten-popup-tag-photo { background: #fbe7c6; color: #8a5212; }
+.lofoten-popup-tag-note { background: #f6ead0; color: #7c4a14; }
+.lofoten-popup-tag-place { background: #d7ecdf; color: #0f5f55; }
+.lofoten-popup-tag-route { background: #d7ecdf; color: #0f5f55; }
