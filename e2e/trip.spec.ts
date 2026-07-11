@@ -67,7 +67,7 @@ test.describe("desktop", { tag: "@desktop" }, () => {
   test("journey mode renders the seeded demo photo pipeline", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: /Day 1: Reine arrival/ }).click();
-    await page.getByRole("button", { name: "Open Journey Mode" }).click();
+    await page.getByRole("button", { name: "Relive the journey" }).first().click();
     await expect(page.getByText("Reine harbor at golden hour")).toBeVisible();
     await expect(page.getByRole("img", { name: "Reine harbor at golden hour" })).toBeVisible();
     const uploaderFilter = page.getByRole("combobox", { name: "Filter journey by uploader" });
