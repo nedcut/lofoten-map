@@ -98,8 +98,8 @@ export function coordinateKey(coordinate: LngLat) {
   return `${coordinate.lat.toFixed(7)},${coordinate.lng.toFixed(7)}`;
 }
 
-export function routePlaceNoGpsItems(items: AnalyzedItem[], routes: RouteSegment[]) {
-  const byDay = new Map<string, AnalyzedItem[]>();
+export function routePlaceNoGpsItems<T extends AnalyzedItem>(items: T[], routes: RouteSegment[]): T[] {
+  const byDay = new Map<string, T[]>();
   for (const item of items) {
     if (item.status === "invalid" || item.status === "reading" || item.coordinate || !item.dayId) continue;
     if (!routeForDay(routes, item.dayId)) continue;
