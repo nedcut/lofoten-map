@@ -153,6 +153,7 @@ export function DayList({ days, dayStats, selectedDayId, onSelectDay, onStepDay,
       <div className="space-y-2">
         <button
           onClick={() => onSelectDay(null)}
+          aria-pressed={selectedDayId === null}
           className={cn(
             "w-full rounded-xl border px-4 py-3 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20",
             selectedDayId === null ? "border-teal-700/35 bg-teal-50 shadow-sm" : "border-stone-200 bg-white/75 hover:border-stone-300 hover:bg-white",
@@ -170,6 +171,7 @@ export function DayList({ days, dayStats, selectedDayId, onSelectDay, onStepDay,
             <div key={day.id} className="group relative">
               <button
                 onClick={() => onSelectDay(day.id)}
+                aria-pressed={selectedDayId === day.id}
                 className={cn(
                   "w-full rounded-xl border px-4 py-3 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20",
                   canPlay && "pr-14",

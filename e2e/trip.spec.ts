@@ -15,12 +15,16 @@ test.describe("desktop", { tag: "@desktop" }, () => {
 
   test("selecting a day filters and round-trips through the URL", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: /Day 2: Kjerkfjorden hike/ }).click();
+    const dayTwo = page.getByRole("button", { name: /Day 2: Kjerkfjorden hike/ }).first();
+    const allDays = page.getByRole("button", { name: /All days/ }).first();
+    await dayTwo.click();
     await expect(page).toHaveURL(/day=/);
+    await expect(dayTwo).toHaveAttribute("aria-pressed", "true");
+    await expect(allDays).toHaveAttribute("aria-pressed", "false");
 
     // A reload of the shared URL must restore the same selection.
     await page.reload();
-    await expect(page.getByRole("button", { name: /Day 2: Kjerkfjorden hike/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Day 2: Kjerkfjorden hike/ }).first()).toHaveAttribute("aria-pressed", "true");
   });
 
   test("day stepper walks from All days into day 1", async ({ page }) => {
