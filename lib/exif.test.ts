@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { coordinateFromExif, parseExifDate } from "./exif";
+import { coordinateFromExif, correctCameraClock, parseExifDate } from "./exif";
 
 describe("coordinateFromExif", () => {
   it("returns a direct decimal coordinate unchanged for N/E refs", () => {
@@ -59,16 +59,51 @@ describe("coordinateFromExif", () => {
 
 describe("parseExifDate", () => {
   it("returns nulls for empty / missing input", () => {
-    expect(parseExifDate(undefined)).toEqual({ takenAt: null, takenDate: null });
-    expect(parseExifDate("")).toEqual({ takenAt: null, takenDate: null });
+    expect(parseExifDate(undefined)).toEqual({ takenAt: null, takenDate: null, timeZoneSource: null });
+    expect(parseExifDate("")).toEqual({ takenAt: null, takenDate: null, timeZoneSource: null });
   });
 
   it("parses the canonical EXIF datetime format (colon-separated date)", () => {
     const result = parseExifDate("2026:06:08 14:30:00");
     expect(result.takenDate).toBe("2026-06-08");
-    expect(result.takenAt).not.toBeNull();
-    // takenAt is a valid ISO 8601 instant
-    expect(new Date(result.takenAt as string).toISOString()).toBe(result.takenAt);
+    expect(result.takenAt).toBe("2026-06-08T12:30:00.000Z");
+  });
+
+  it("honors an explicit iPhone EXIF timezone offset", () => {
+    expect(parseExifDate("2026:06:08 14:30:00", "+02:00").takenAt).toBe("2026-06-08T12:30:00.000Z");
+    expect(parseExifDate("2026:06:08 14:30:00", "-04:00").takenAt).toBe("2026-06-08T18:30:00.000Z");
+    expect(parseExifDate("2026:06:08 14:30:00", "+02:00").timeZoneSource).toBe("embedded");
+  });
+
+  it("honors an offset even when the datetime has no seconds", () => {
+    const result = parseExifDate("2026:06:08 14:30", "+02:00");
+    expect(result.takenAt).toBe("2026-06-08T12:30:00.000Z");
+    expect(result.timeZoneSource).toBe("embedded");
+  });
+
+  it("accepts colon-less offsets as written by some cameras", () => {
+    expect(parseExifDate("2026:06:08 14:30:00", "+0200").takenAt).toBe("2026-06-08T12:30:00.000Z");
+  });
+
+  it("treats a zone designator inside the datetime value as embedded", () => {
+    const zulu = parseExifDate("2026-06-08T14:30:00Z");
+    expect(zulu.takenAt).toBe("2026-06-08T14:30:00.000Z");
+    expect(zulu.timeZoneSource).toBe("embedded");
+    const offset = parseExifDate("2026-06-08T14:30:00+02:00");
+    expect(offset.takenAt).toBe("2026-06-08T12:30:00.000Z");
+    expect(offset.timeZoneSource).toBe("embedded");
+  });
+
+  it("marks offset-less timestamps as trip-local (adjustable)", () => {
+    expect(parseExifDate("2026:06:08 14:30:00").timeZoneSource).toBe("trip-local");
+  });
+
+  it("rejects an impossible datetime even when it carries an offset", () => {
+    expect(parseExifDate("2026:02:30 10:00:00", "+01:00").takenAt).toBeNull();
+  });
+
+  it("treats offset-less camera timestamps as Lofoten local time, including winter DST", () => {
+    expect(parseExifDate("2026:01:08 14:30:00").takenAt).toBe("2026-01-08T13:30:00.000Z");
   });
 
   it("parses datetime without seconds", () => {
@@ -107,5 +142,39 @@ describe("parseExifDate", () => {
 
   it("trims surrounding whitespace", () => {
     expect(parseExifDate("  2026:06:08 14:30:00  ").takenDate).toBe("2026-06-08");
+  });
+});
+
+describe("correctCameraClock", () => {
+  const base = {
+    lat: 68,
+    lng: 14,
+    takenAt: "2026-06-08T12:30:00.000Z",
+    takenDate: "2026-06-08",
+    exifFound: true,
+    message: "",
+  };
+
+  it("adjusts a timezone-less camera clock and tracks the applied correction", () => {
+    expect(correctCameraClock({ ...base, timeZoneSource: "trip-local", clockCorrectionHours: 0 }, 7)).toMatchObject({
+      takenAt: "2026-06-08T19:30:00.000Z",
+      takenDate: "2026-06-08",
+      clockCorrectionHours: 7,
+    });
+  });
+
+  it("replaces rather than compounds a previous correction", () => {
+    const corrected = correctCameraClock({ ...base, timeZoneSource: "trip-local", clockCorrectionHours: 0 }, 7);
+    expect(correctCameraClock(corrected, 2).takenAt).toBe("2026-06-08T14:30:00.000Z");
+  });
+
+  it("never changes a timestamp with an embedded timezone", () => {
+    const iphone = { ...base, timeZoneSource: "embedded" as const, clockCorrectionHours: 0 };
+    expect(correctCameraClock(iphone, 7)).toBe(iphone);
+  });
+
+  it("updates the trip date when a correction crosses midnight", () => {
+    const late = { ...base, takenAt: "2026-06-08T21:30:00.000Z", timeZoneSource: "trip-local" as const, clockCorrectionHours: 0 };
+    expect(correctCameraClock(late, 2).takenDate).toBe("2026-06-09");
   });
 });

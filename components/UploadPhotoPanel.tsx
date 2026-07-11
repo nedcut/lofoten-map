@@ -5,7 +5,7 @@ import type { ChangeEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { PlacementWorkspace } from "@/components/PlacementWorkspace";
 import { mapWithConcurrency } from "@/lib/concurrency";
-import { extractPhotoExif, type ExtractedExif } from "@/lib/exif";
+import { correctCameraClock, extractPhotoExif, type ExtractedExif } from "@/lib/exif";
 import { fileContentHash } from "@/lib/file-hash";
 import { detectMediaType } from "@/lib/media-processing";
 import { clearPhotoDraft, readPhotoDraft, writePhotoDraft, type PhotoDraft } from "@/lib/photo-draft-store";
@@ -19,6 +19,7 @@ import {
   nextPlacementTarget,
   routePlaceNoGpsItems,
   routePlaceQueueItems,
+  type AnalyzedItem,
   type QueueItem,
 } from "@/lib/upload-queue";
 import type { Day, LngLat, Photo, RouteSegment } from "@/types/trip";
@@ -76,6 +77,7 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
   const [items, setItems] = useState<QueueItem[]>([]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<PhotoUploadProgress | null>(null);
+  const [cameraClockCorrectionHours, setCameraClockCorrectionHours] = useState(0);
   // Checkbox/filmstrip selection for placing several photos with a single map tap.
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   // The map-tap effect must depend only on pendingCoordinate, so the queue,
@@ -161,6 +163,9 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
   function restoreDraft() {
     if (!restorableDraft) return;
     setItems(restorableDraft.items);
+    // The select must reflect the correction already baked into the restored
+    // timestamps, not reset to "No change" while the items keep theirs.
+    setCameraClockCorrectionHours(restorableDraft.items.find((item) => item.exif?.clockCorrectionHours)?.exif?.clockCorrectionHours ?? 0);
     setActiveItemId(nextPlacementTarget(restorableDraft.items, new Set()) ?? restorableDraft.items[0]?.id ?? null);
     setRestorableDraft(null);
   }
@@ -254,6 +259,53 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
   }, [activeItemId, items]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  function finishAutomaticPlacement<T extends AnalyzedItem>(rawItems: T[]): T[] {
+    const anchors = collectTimeAnchors(rawItems, existingPhotos);
+    const interpolated = timeInterpolateItems(rawItems, anchors);
+    for (const item of interpolated) {
+      if (item.dayId || item.locationSource !== "time" || !item.coordinate) continue;
+      const routeDayId = findDayIdForCoordinate(routes, item.coordinate);
+      if (routeDayId) {
+        item.dayId = routeDayId;
+        item.dayMatchSource = "route";
+      }
+    }
+    return routePlaceNoGpsItems(interpolated as T[], routes);
+  }
+
+  function changeCameraClockCorrection(hours: number) {
+    setCameraClockCorrectionHours(hours);
+    setItems((current) => {
+      const raw = current.map((item, order) => {
+        const exif = item.exif ? correctCameraClock(item.exif, hours) : null;
+        if (!exif || item.status === "invalid" || item.status === "reading") {
+          return { ...item, exif, order };
+        }
+
+        // GPS and manual pins remain trustworthy. Placements inferred from the
+        // old time are cleared and rebuilt below using the corrected instant.
+        const preserveCoordinate = item.locationSource === "gps" || item.locationSource === "manual";
+        const coordinate = preserveCoordinate ? item.coordinate : null;
+        const matchedDayId = findDayIdForExifDate(days, exif);
+        const routeDayId = matchedDayId ? null : findDayIdForCoordinate(routes, coordinate);
+        const dayWasAutomatic = item.dayMatchSource !== null;
+        const dayId = dayWasAutomatic ? matchedDayId ?? routeDayId : item.dayId;
+        return {
+          ...item,
+          order,
+          exif,
+          coordinate,
+          dayId,
+          dayMatchSource: dayWasAutomatic ? (matchedDayId ? "date" as const : routeDayId ? "route" as const : null) : null,
+          locationSource: preserveCoordinate ? item.locationSource : null,
+          status: coordinate ? "ready" as const : "needs-location" as const,
+          message: coordinate ? item.message : "Time corrected. Recomputing placement from the updated capture time.",
+        };
+      });
+      return finishAutomaticPlacement(raw);
+    });
+  }
+
   async function handleFiles(files: FileList | null) {
     const selected = Array.from(files ?? []);
     if (selected.length === 0) return;
@@ -311,7 +363,8 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
     });
 
     const rawAnalyzed = fingerprinted.map((item, order) => {
-      const exif = extracted.get(item.id);
+      const extractedExif = extracted.get(item.id);
+      const exif = extractedExif ? correctCameraClock(extractedExif, cameraClockCorrectionHours) : null;
       if (!exif) {
         return { id: item.id, order, dayId: item.dayId, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid" as const, message: `We could not read this ${mediaLabel(item.mediaType)}.` };
       }
@@ -332,17 +385,7 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
     });
     // Time-interpolation runs before the route fallback: a position derived
     // from real GPS anchors beats an even spread along the day's route.
-    const anchors = collectTimeAnchors(rawAnalyzed, existingPhotos);
-    const interpolated = timeInterpolateItems(rawAnalyzed, anchors);
-    for (const item of interpolated) {
-      if (item.dayId || item.locationSource !== "time" || !item.coordinate) continue;
-      const routeDayId = findDayIdForCoordinate(routes, item.coordinate);
-      if (routeDayId) {
-        item.dayId = routeDayId;
-        item.dayMatchSource = "route";
-      }
-    }
-    const analyzed = routePlaceNoGpsItems(interpolated, routes);
+    const analyzed = finishAutomaticPlacement(rawAnalyzed);
     const analyzedById = new Map(analyzed.map((item) => [item.id, item]));
 
     setItems((current) => current.map((currentItem) => {
@@ -451,6 +494,7 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
 
   function clearQueue() {
     setItems([]);
+    setCameraClockCorrectionHours(0);
     setUploadProgress(null);
     setActiveItemId(null);
     setSelectedIds(new Set());
@@ -479,6 +523,8 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
         selectedIds={selectedIds}
         isSaving={isSaving}
         uploadProgress={uploadProgress}
+        cameraClockCorrectionHours={cameraClockCorrectionHours}
+        adjustableTimestampCount={items.filter((item) => item.exif?.timeZoneSource === "trip-local" && item.exif.takenAt).length}
         onSelectItem={setActiveItemId}
         onToggleSelected={toggleSelected}
         onSelectAllUnplaced={() => setSelectedIds(new Set(items.filter((item) => item.status === "needs-location").map((item) => item.id)))}
@@ -491,6 +537,7 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
         onDayChange={setItemDay}
         onAllDaysChange={setAllDays}
         onClearQueue={clearQueue}
+        onCameraClockCorrectionChange={changeCameraClockCorrection}
       />
     );
   }

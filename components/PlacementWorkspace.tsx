@@ -42,6 +42,8 @@ type Props = {
   selectedIds: ReadonlySet<string>;
   isSaving: boolean;
   uploadProgress: PhotoUploadProgress | null;
+  cameraClockCorrectionHours: number;
+  adjustableTimestampCount: number;
   onSelectItem: (id: string) => void;
   onToggleSelected: (id: string) => void;
   onSelectAllUnplaced: () => void;
@@ -54,6 +56,7 @@ type Props = {
   onDayChange: (id: string, dayId: string) => void;
   onAllDaysChange: (dayId: string) => void;
   onClearQueue: () => void;
+  onCameraClockCorrectionChange: (hours: number) => void;
 };
 
 function takenLabel(item: QueueItem) {
@@ -70,7 +73,7 @@ function statusDotClass(item: QueueItem) {
   return "bg-stone-300";
 }
 
-export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, selectedIds, isSaving, uploadProgress, onSelectItem, onToggleSelected, onSelectAllUnplaced, onClearSelection, onUpload, onClose, onAddFiles, onRemoveItem, onCaptionChange, onDayChange, onAllDaysChange, onClearQueue }: Props) {
+export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, selectedIds, isSaving, uploadProgress, cameraClockCorrectionHours, adjustableTimestampCount, onSelectItem, onToggleSelected, onSelectAllUnplaced, onClearSelection, onUpload, onClose, onAddFiles, onRemoveItem, onCaptionChange, onDayChange, onAllDaysChange, onClearQueue, onCameraClockCorrectionChange }: Props) {
   // One object URL per queue item so the filmstrip and preview can render the
   // local files. URLs are created once per item and revoked when the item
   // leaves the queue or the workspace unmounts.
@@ -196,6 +199,26 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
     </button>
   ) : null;
 
+  const cameraClockControl = adjustableTimestampCount === 0 ? null : (
+    <label className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-700">
+      <span>
+        <span className="block font-bold text-stone-900">Camera clock correction</span>
+        <span className="block text-[11px] leading-4 text-stone-500">Applies to {adjustableTimestampCount} item{adjustableTimestampCount === 1 ? "" : "s"} without embedded timezone data.</span>
+      </span>
+      <select
+        value={cameraClockCorrectionHours}
+        onChange={(event) => onCameraClockCorrectionChange(Number(event.target.value))}
+        disabled={isSaving || reading.length > 0}
+        aria-label="Camera clock correction"
+        className="rounded-md border border-stone-300 bg-white px-2 py-1.5 text-sm font-semibold text-stone-900 outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15 disabled:opacity-50"
+      >
+        {Array.from({ length: 29 }, (_, index) => index - 14).map((hours) => (
+          <option key={hours} value={hours}>{hours === 0 ? "No change" : `${hours > 0 ? "+" : ""}${hours} hr`}</option>
+        ))}
+      </select>
+    </label>
+  );
+
   // Caption + day editor for the active photo; shared between the desktop
   // sidebar and the mobile bar.
   const activeEditor = activeItem ? (
@@ -300,6 +323,7 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
         </div>
         <div className="space-y-2 border-t border-stone-200/70 p-3">
           {selectionBar}
+          {cameraClockControl}
           <label className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 text-xs font-semibold text-stone-600">
             <span>Set day for all</span>
             <select value="" onChange={(event) => { if (event.target.value !== "__idle") onAllDaysChange(event.target.value === "__all" ? "" : event.target.value); }} className="rounded-md border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-900 outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">
@@ -361,6 +385,7 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
           </label>
         </div>
         {selectionBar ? <div className="mt-2">{selectionBar}</div> : null}
+        {cameraClockControl ? <div className="mt-2">{cameraClockControl}</div> : null}
         {activeEditor ? <div className="mt-2">{activeEditor}</div> : null}
       </div>
     </div>
