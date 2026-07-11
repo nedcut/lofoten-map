@@ -49,6 +49,21 @@ describe("deriveTripAccess", () => {
     expect(access.showAdminRequestControls).toBe(false);
   });
 
+  it("keeps a signed-in but uninvited visitor in view-only mode", () => {
+    const access = deriveTripAccess({
+      supabaseEnabled: true,
+      userId: "visitor-1",
+      members: [member({ user_id: "friend-1" })],
+      adminRequests: [],
+    });
+    expect(access.currentUserId).toBe("visitor-1");
+    expect(access.currentMember).toBeNull();
+    expect(access.canContribute).toBe(false);
+    expect(access.isAdmin).toBe(false);
+    expect(access.showMemberAdminControls).toBe(false);
+    expect(access.showAdminRequestControls).toBe(false);
+  });
+
   it("lets signed-in members contribute and request admin access", () => {
     const current = member({ user_id: "user-1", role: "member" });
     const access = deriveTripAccess({ supabaseEnabled: true, userId: "user-1", members: [current], adminRequests: [] });

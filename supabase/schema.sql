@@ -274,39 +274,10 @@ $$;
 
 grant execute on function public.grant_trip_member_by_email(text, text, text) to authenticated;
 
--- Self-service join: a signed-in user adds themselves to the trip as a plain
--- member if they are not already on it. Idempotent, so the client can call it on
--- every sign-in without worrying about duplicates.
-create or replace function public.ensure_trip_membership(target_trip_slug text)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  found_trip_id uuid;
-  found_display_name text;
-begin
-  if auth.uid() is null then
-    raise exception 'Must be signed in' using errcode = '42501';
-  end if;
-
-  select id into found_trip_id from public.trips where slug = target_trip_slug;
-  if found_trip_id is null then
-    raise exception 'Trip not found';
-  end if;
-
-  select coalesce(raw_user_meta_data ->> 'full_name', email)
-  into found_display_name
-  from auth.users where id = auth.uid();
-
-  insert into public.trip_members (trip_id, user_id, role, display_name)
-  values (found_trip_id, auth.uid(), 'member', found_display_name)
-  on conflict (trip_id, user_id) do nothing;
-end;
-$$;
-
-grant execute on function public.ensure_trip_membership(text) to authenticated;
+-- Contributions are invite-only. Remove the legacy self-enrollment RPC when
+-- this schema is re-applied to an older project; admins add members through
+-- grant_trip_member_by_email instead.
+drop function if exists public.ensure_trip_membership(text);
 
 -- Self-service profile edit. trip_members is otherwise admin-write-only, so
 -- members reach their own row through this security-definer RPC.

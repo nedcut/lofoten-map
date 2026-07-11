@@ -38,7 +38,6 @@ export function useTripData({ supabase, user, authLoading, tripSlug, initialData
           : "The trip is not set up yet. Ask an admin to finish creating it, then refresh.");
         return;
       }
-      if (user) await supabase.rpc("ensure_trip_membership", { target_trip_slug: tripSlug });
       const adminRequestsQuery = user
         ? supabase.from("admin_requests").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false })
         : Promise.resolve({ data: [], error: null });

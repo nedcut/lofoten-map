@@ -766,7 +766,7 @@ export default function Home() {
           <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#d0872f]" /> <span className="truncate">{tripTitle}</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{supabase ? (user ? `Signed in ${user.email ?? ""}` : "Viewing as guest") : "Local demo mode"}</div>
+          <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{supabase ? (user ? (currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only") : "Viewing as guest") : "Local demo mode"}</div>
           <button
             onClick={startJourney}
             disabled={journeyItems.length === 0}

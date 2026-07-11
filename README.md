@@ -2,8 +2,8 @@
 
 A collaborative, real-time trip map and journal. Anyone can explore a trip with
 no account — filter days, browse route segments, and open notes and photos
-pinned to the map. Signed-in friends auto-join as members to drop their own
-notes and geotagged photos, and edits stream to everyone live.
+pinned to the map. Invited friends can sign in to drop their own notes and
+geotagged photos, and edits stream to everyone live.
 
 <p>
   <a href="https://lofoten-map-kappa.vercel.app"><strong>▶ Live demo</strong></a>
@@ -39,7 +39,7 @@ The interesting problems this project solves:
 - **Real authorization, not a toy.** Postgres row-level security enforces
   *public reads, member contributions, and owner-or-admin writes* at the
   database — the client can't bypass it. Members self-serve admin requests that
-  existing admins approve in-app.
+  existing admins approve in-app. Signing in alone never grants edit access.
 - **Live collaboration.** Supabase Realtime streams inserts/updates for photos,
   notes, places, and routes, so a second browser sees changes appear instantly.
 - **Zero-config demo mode.** With no backend keys set, the app boots from
@@ -177,9 +177,10 @@ Keep the Supabase variables empty to stay in demo mode. To enable shared mode:
 5. Edit `supabase/grant-member.sql` with your email and run it to make your
    first account an admin.
 6. Reload — you should see the seeded trip and admin controls.
-7. Friends can view the trip without signing in. When they sign in, the app
-   auto-joins them as members so they can contribute notes/photos and request
-   admin access in-app.
+7. Friends can view the trip without signing in. To contribute, a friend first
+   signs in once so Supabase creates their Auth account; an admin then adds that
+   email from the in-app Members panel. Their next reload enables notes/photos
+   and admin-access requests.
 
 ### What the schema sets up
 
@@ -190,6 +191,9 @@ collaborative tables, and RLS policies:
 
 - **Reads are public** — `select` is granted to `anon` with `using (true)`, so
   anyone can view the trip without an account.
+- **Contribution is invite-only** — signing in does not create a membership.
+  An existing admin must add the account email from the Members panel after the
+  person has signed in once (or use `grant-member.sql` for initial setup).
 - **Notes and photos** can be created by any signed-in member; each row is
   updatable and deletable by its owner or a trip admin.
 - **Trips, days, routes, places, and membership** are admin-scoped.
@@ -274,7 +278,9 @@ automatically, and CI validates a production build on every PR.
    - Signed-out visitors see the seeded trip (reads are public); the "Sign in"
      button opens the optional sign-in panel.
    - Your admin account shows contribute/admin controls; a guest does not.
-   - A newly signed-in friend can contribute notes/photos and request admin.
+   - A newly signed-in, uninvited account remains view-only.
+   - After an admin adds that account's email in Members and it reloads, the
+     friend can contribute notes/photos and request admin access.
    - A note saves and survives reload.
    - A small photo uploads, renders on the map, and survives reload.
    - An admin can approve/deny admin requests and adjust member roles.
