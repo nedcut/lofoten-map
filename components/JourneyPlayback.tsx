@@ -1,12 +1,14 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Link, Loader2, MapPinned, Pencil, Save, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Loader2, MapPinned, Pencil, RotateCcw, Save, Share2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
 import { friendlyPersonName, personFilterOptions } from "@/lib/display-name";
 import { formatDateOnly, formatDateTime } from "@/lib/utils";
 import { journeyItemTitle, type JourneyAttachedItem, type JourneyItem } from "@/lib/journey";
-import type { Day, Photo, RouteSegment } from "@/types/trip";
+import { syncJourneyVideo, videoFallbackDurationMs } from "@/lib/journey-video";
+import { shareJourneyLink, type ShareResult } from "@/lib/share";
+import type { Day, Photo, RouteSegment, Trip } from "@/types/trip";
 
 export type JourneyFilter = "all" | "photos" | "journal";
 
@@ -20,6 +22,8 @@ type PhotoUpdate = {
 };
 
 type Props = {
+  trip: Trip | null;
+  showIntro: boolean;
   items: JourneyItem[];
   allItems: JourneyItem[];
   activeIndex: number;
@@ -80,6 +84,8 @@ function attachedText(attached: JourneyAttachedItem) {
 }
 
 export function JourneyPlayback({
+  trip,
+  showIntro,
   items,
   allItems,
   activeIndex,
@@ -101,15 +107,21 @@ export function JourneyPlayback({
   onEditPhoto,
 }: Props) {
   const activeItem = items[activeIndex] ?? items[0];
+  const videoUrl = activeItem?.kind === "photo" && activeItem.primary.media_type === "video" ? activeItem.primary.image_url : null;
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [interactionHold, setInteractionHold] = useState(false);
   const [captionDraft, setCaptionDraft] = useState("");
   const [editingCaption, setEditingCaption] = useState(false);
+  const [introOpen, setIntroOpen] = useState(showIntro);
+  const [complete, setComplete] = useState(false);
+  const [shareStatus, setShareStatus] = useState<ShareResult | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const resumeTimerRef = useRef<number | null>(null);
   const autoplayTimerRef = useRef<number | null>(null);
   const videoFallbackTimerRef = useRef<number | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const modalRef = useRef<HTMLDivElement | null>(null);
   const isPlayingRef = useRef(isPlaying);
   const activeIndexRef = useRef(activeIndex);
   const uploaderOptions = useMemo(
@@ -150,9 +162,44 @@ export function JourneyPlayback({
     if (videoFallbackTimerRef.current) window.clearTimeout(videoFallbackTimerRef.current);
   }, [activeIndex]);
 
+  // `autoPlay` only affects mounting. Keep the active video synchronized when
+  // the shared play/pause control changes after mount, and schedule a timed
+  // advance if the browser rejects programmatic playback.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !videoUrl) return;
+    if (videoFallbackTimerRef.current) window.clearTimeout(videoFallbackTimerRef.current);
+    syncJourneyVideo(video, isPlaying, () => {
+      videoFallbackTimerRef.current = window.setTimeout(() => {
+        videoFallbackTimerRef.current = null;
+        if (!isPlayingRef.current) return;
+        if (activeIndexRef.current >= items.length - 1) { setIsPlaying(false); setComplete(true); }
+        else onNext();
+      }, Math.max(videoFallbackDurationMs(video.duration, speed), 3000));
+    });
+  }, [activeIndex, isPlaying, items.length, onNext, speed, videoUrl]);
+
+  // Intro and completion are true modal states: focus enters the dialog, Tab
+  // stays within it, and the playback controls behind it cannot receive focus.
+  useEffect(() => {
+    if (!introOpen && !complete) return;
+    const dialog = modalRef.current;
+    const controls = dialog?.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
+    controls?.[0]?.focus();
+    const trap = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || !controls?.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", trap);
+    return () => document.removeEventListener("keydown", trap);
+  }, [complete, introOpen]);
+
   function advanceVideoInSlideshow() {
     if (!isPlayingRef.current) return;
-    if (activeIndexRef.current >= items.length - 1) setIsPlaying(false);
+    if (activeIndexRef.current >= items.length - 1) { setIsPlaying(false); setComplete(true); }
     else onNext();
   }
 
@@ -171,14 +218,14 @@ export function JourneyPlayback({
   }
 
   useEffect(() => {
-    if (!isPlaying || interactionHold || !activeItem || items.length < 2 || (activeItem.kind === "photo" && activeItem.primary.media_type === "video")) return;
+    if (!isPlaying || interactionHold || !activeItem || (activeItem.kind === "photo" && activeItem.primary.media_type === "video")) return;
     const baseDuration = activeItem.kind === "photo" && !activeItem.primary.caption ? 5000 : 7000;
     const duration = baseDuration / speed;
     const isLast = activeIndex >= items.length - 1;
     autoplayTimerRef.current = window.setTimeout(() => {
       // Autoplay runs through the journey once and then pauses on the final
       // item; manual prev/next still wraps for convenience.
-      if (isLast) setIsPlaying(false);
+      if (isLast) { setIsPlaying(false); setComplete(true); }
       else onNext();
     }, duration);
     return () => {
@@ -196,6 +243,10 @@ export function JourneyPlayback({
       const isEditable = (el: Element | null) =>
         el instanceof HTMLElement && (el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.tagName === "SELECT");
       if (editingCaption || isEditable(event.target as Element | null) || isEditable(document.activeElement)) return;
+      if (introOpen || complete) {
+        if (event.key === "Escape") { event.preventDefault(); onClose(); }
+        return;
+      }
       if (event.key === "ArrowRight") {
         event.preventDefault();
         noteInteraction();
@@ -214,7 +265,7 @@ export function JourneyPlayback({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [editingCaption, onClose, onNext, onPrev]);
+  }, [complete, editingCaption, introOpen, onClose, onNext, onPrev]);
 
   // Warm the browser cache for the neighbouring photos so next/prev swaps in an
   // already-decoded image instead of stalling on a fresh full-size download.
@@ -288,12 +339,29 @@ export function JourneyPlayback({
       : (activeItem.primary.thumbnail_url ?? activeItem.primary.image_url)
     : null;
   const imageUrl = activeItem.kind === "photo" && activeItem.primary.media_type !== "video" ? activeItem.primary.image_url : null;
-  const videoUrl = activeItem.kind === "photo" && activeItem.primary.media_type === "video" ? activeItem.primary.image_url : null;
 
   async function saveCaption() {
     if (activeItem.kind !== "photo") return;
     await onUpdatePhoto(activeItem.primary.id, photoUpdateWithCaption(activeItem.primary, captionDraft.trim() || null));
     setEditingCaption(false);
+  }
+
+  async function shareJourney() {
+    const result = await shareJourneyLink(navigator, {
+      title: trip?.title ?? "Lofoten Logbook",
+      text: "Relive our Lofoten journey.",
+      url: window.location.href,
+    });
+    if (result === "cancelled") return;
+    setShareStatus(result);
+    window.setTimeout(() => setShareStatus(null), 2500);
+  }
+
+  function replay() {
+    setComplete(false);
+    setIntroOpen(false);
+    onSelectIndex(0);
+    setIsPlaying(true);
   }
 
   function touchStart(event: React.TouchEvent) {
@@ -338,16 +406,46 @@ export function JourneyPlayback({
         </div>
         <div className="flex items-center gap-2">
           {filterControls}
-          <button onClick={() => navigator.clipboard?.writeText(window.location.href)} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/12 text-white backdrop-blur transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25" aria-label="Copy share link">
-            <Link className="h-4 w-4" />
+          <button onClick={shareJourney} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/12 text-white backdrop-blur transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25" aria-label="Share journey">
+            <Share2 className="h-4 w-4" />
           </button>
         </div>
       </div>
+
+      {shareStatus ? <div role="status" className="absolute right-4 top-16 z-50 rounded-full bg-white px-3 py-2 text-xs font-bold text-stone-950 shadow-xl">{shareStatus === "copied" ? "Link copied" : shareStatus === "shared" ? "Journey shared" : "Couldn’t share link"}</div> : null}
+
+      {introOpen ? (
+        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-intro-title" className="absolute inset-0 z-40 flex items-center justify-center bg-stone-950/72 p-6 backdrop-blur-md">
+          <section className="max-w-xl text-center">
+            <div className="text-xs font-black uppercase tracking-[0.24em] text-[#e7a13d]">A shared travel story</div>
+            <h1 id="journey-intro-title" className="mt-4 font-serif text-5xl font-semibold md:text-7xl">{trip?.title ?? "Lofoten Logbook"}</h1>
+            {trip?.description ? <p className="mx-auto mt-5 max-w-lg text-base leading-7 text-white/75">{trip.description}</p> : null}
+            <p className="mt-3 text-sm text-white/55">{items.length} moments across {days.length} days</p>
+            <button onClick={() => { setIntroOpen(false); setIsPlaying(true); }} className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#e7a13d] px-6 py-3 font-black text-stone-950"><CirclePlay className="h-5 w-5" /> Begin journey</button>
+          </section>
+        </div>
+      ) : null}
+
+      {complete ? (
+        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-complete-title" className="absolute inset-0 z-40 flex items-center justify-center bg-stone-950/76 p-6 backdrop-blur-md">
+          <section className="max-w-xl text-center">
+            <div className="text-xs font-black uppercase tracking-[0.24em] text-[#e7a13d]">End of the journey</div>
+            <h2 id="journey-complete-title" className="mt-4 font-serif text-5xl font-semibold">Thanks for coming along.</h2>
+            <p className="mt-4 text-white/65">{items.length} moments from {days.length} days in Lofoten.</p>
+            <div className="mt-8 flex flex-wrap justify-center gap-3">
+              <button onClick={replay} className="inline-flex items-center gap-2 rounded-full bg-[#e7a13d] px-5 py-3 font-black text-stone-950"><RotateCcw className="h-4 w-4" /> Replay</button>
+              <button onClick={shareJourney} className="inline-flex items-center gap-2 rounded-full bg-white/12 px-5 py-3 font-bold text-white"><Share2 className="h-4 w-4" /> Share</button>
+              <button onClick={onClose} className="rounded-full bg-white/12 px-5 py-3 font-bold text-white">Return to map</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       <div className="relative z-10 flex h-full items-center justify-center px-4 pb-36 pt-20 md:px-16 md:pb-28 md:pt-24">
         {videoUrl ? (
           <div className="flex h-full w-full items-center justify-center">
             <video
+              ref={videoRef}
               key={videoUrl}
               src={videoUrl}
               poster={activeItem.kind === "photo" ? activeItem.primary.thumbnail_url ?? undefined : undefined}
@@ -359,9 +457,7 @@ export function JourneyPlayback({
                 if (!isPlayingRef.current) return;
                 const video = event.currentTarget;
                 void video.play().catch(() => {
-                  const durationMs = Number.isFinite(video.duration) && video.duration > 0
-                    ? (video.duration * 1000) / speed
-                    : 30000;
+                  const durationMs = videoFallbackDurationMs(video.duration, speed);
                   scheduleVideoAdvance(durationMs);
                 });
               }}

@@ -101,6 +101,7 @@ takes effect on `localhost`/`127.0.0.1` and is ignored everywhere else.
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase mode | Supabase public anon key |
 | `NEXT_PUBLIC_TRIP_SLUG` | Yes | Which trip to load (default `lofoten-2026`) |
 | `NEXT_PUBLIC_LOCAL_DEMO_MODE` | No | Set to `1` to force demo mode on localhost |
+| `NEXT_PUBLIC_SITE_URL` | Production | Canonical deployed origin used for social preview URLs |
 
 All variables are `NEXT_PUBLIC_*` and shipped to the browser. **Never** put a
 Supabase service role key here or in Vercel — the client only needs the public

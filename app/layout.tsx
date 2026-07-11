@@ -1,10 +1,14 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { siteUrl } from "@/lib/site-url";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: siteUrl(),
   title: "Lofoten Logbook",
   description: "A collaborative map and journal for a Lofoten hiking trip.",
+  openGraph: { title: "Lofoten Logbook", description: "Relive a shared journey through Norway's Lofoten Islands.", type: "website", images: ["/opengraph-image"] },
+  twitter: { card: "summary_large_image", title: "Lofoten Logbook", description: "Relive a shared journey through Norway's Lofoten Islands.", images: ["/opengraph-image"] },
 };
 
 export const viewport: Viewport = {
