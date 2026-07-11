@@ -1,9 +1,9 @@
 // Delete storage objects in the photo bucket that no photos row references.
 //
-// A failed upload batch leaves its already-uploaded objects behind: the path is
-// a fresh uuid per attempt, so a retry uploads a second copy rather than
-// overwriting the first, and nothing points at the abandoned one. Those orphans
-// are unreachable from the app but still count against the storage quota.
+// Legacy failed batches can leave UUID-path objects behind. Content-addressed
+// uploads can also leave one stable object behind when a database outcome is
+// unknown. Those objects are unreachable from the app but still count against
+// the storage quota.
 //
 // An object is an orphan only if its path appears in neither image_path nor
 // thumbnail_path of any row. The live set is never touched, and objects younger
@@ -12,17 +12,15 @@
 //
 // Usage:
 //   node scripts/purge-orphan-objects.mjs            # read-only: list, diff, report
-//   node scripts/purge-orphan-objects.mjs --apply    # delete the orphans
-//
-// Read-only mode needs only the anon key (rows and the bucket are both publicly
-// readable). Apply mode needs SUPABASE_SERVICE_ROLE_KEY because object deletes
-// are member-gated by RLS. The orphan manifest is written either way.
+// Deletion is deliberately not automated here: a reference can be created
+// between any client-side confirmation and delete. Safe deletion needs a
+// server-side maintenance protocol shared with uploads. The manifest is an
+// inventory for inspection until that protocol exists.
 
 import { readFileSync, writeFileSync } from "node:fs";
 
 const REPORT_PATH = new URL("../.orphan-report.json", import.meta.url).pathname;
 const PHOTO_BUCKET = "trip-photos";
-const DELETE_BATCH = 100;
 // An in-flight upload looks exactly like an orphan until its row is inserted.
 const MIN_AGE_HOURS = 1;
 
@@ -43,19 +41,17 @@ function readEnv(name) {
 
 const SUPABASE_URL = readEnv("NEXT_PUBLIC_SUPABASE_URL");
 const ANON_KEY = readEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? null;
 const apply = process.argv.includes("--apply");
 
 if (!SUPABASE_URL || !ANON_KEY) {
   console.error("Missing NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY.");
   process.exit(1);
 }
-if (apply && !SERVICE_KEY) {
-  console.error("--apply needs SUPABASE_SERVICE_ROLE_KEY in the environment.");
+if (apply) {
+  console.error("--apply is disabled: deletion is unsafe without a lock shared with uploads.");
   process.exit(1);
 }
 
-const writeKey = SERVICE_KEY ?? ANON_KEY;
 const restHeaders = (key) => ({ apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" });
 
 async function rest(path, { method = "GET", key = ANON_KEY, body } = {}) {
@@ -72,7 +68,7 @@ async function rest(path, { method = "GET", key = ANON_KEY, body } = {}) {
 async function fetchReferencedPaths() {
   const referenced = new Set();
   for (let from = 0; ; from += 1000) {
-    const page = await rest(`/rest/v1/photos?select=image_path,thumbnail_path&limit=1000&offset=${from}`);
+    const page = await rest(`/rest/v1/photos?select=image_path,thumbnail_path&order=id.asc&limit=1000&offset=${from}`);
     for (const row of page) {
       if (row.image_path) referenced.add(row.image_path);
       if (row.thumbnail_path) referenced.add(row.thumbnail_path);
@@ -111,8 +107,11 @@ function partitionOrphans(objects, referenced, now) {
   const tooNew = [];
   for (const object of objects) {
     if (referenced.has(object.path)) live.push(object);
-    else if (object.lastWriteAt && Date.parse(object.lastWriteAt) > cutoff) tooNew.push(object);
-    else orphans.push(object);
+    else {
+      const lastWriteAt = object.lastWriteAt ? Date.parse(object.lastWriteAt) : Number.NaN;
+      if (!Number.isFinite(lastWriteAt) || lastWriteAt > cutoff) tooNew.push(object);
+      else orphans.push(object);
+    }
   }
   return { live, orphans, tooNew };
 }
@@ -149,30 +148,4 @@ if (missing.length > 0) console.log(`\n  WARNING: ${missing.length} referenced p
 console.log(`\n  bucket after purge: ${(sum(live) / 1024 / 1024 / 1024).toFixed(2)} GB`);
 console.log(`\nManifest: ${REPORT_PATH}`);
 
-if (!apply) {
-  console.log("\nDry run complete. Re-run with --apply and SUPABASE_SERVICE_ROLE_KEY to delete the orphans.");
-  process.exit(0);
-}
-
-if (orphans.length === 0) {
-  console.log("\nNothing to delete.");
-  process.exit(0);
-}
-
-// Re-read the rows rather than trusting the set from the top of this run: a
-// photo saved while we were listing would otherwise be deleted out from under
-// its own row.
-console.log("\nRe-checking rows before deleting...");
-const referencedNow = await fetchReferencedPaths();
-const stale = orphans.filter((object) => referencedNow.has(object.path));
-const confirmed = orphans.filter((object) => !referencedNow.has(object.path));
-if (stale.length > 0) console.log(`  ${stale.length} object(s) picked up a row since listing -- sparing them.`);
-
-let deleted = 0;
-for (let from = 0; from < confirmed.length; from += DELETE_BATCH) {
-  const batch = confirmed.slice(from, from + DELETE_BATCH).map((object) => object.path);
-  await rest(`/storage/v1/object/${PHOTO_BUCKET}`, { method: "DELETE", key: writeKey, body: { prefixes: batch } });
-  deleted += batch.length;
-  console.log(`  deleted ${deleted}/${confirmed.length}`);
-}
-console.log(`\nDeleted ${deleted} orphaned objects, reclaiming ${mb(sum(confirmed))} MB.`);
+console.log("\nInventory complete. Automatic deletion is disabled until uploads and cleanup share a server-side lock.");

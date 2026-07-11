@@ -96,6 +96,15 @@ export async function uploadPhotoBatch(options: {
     if (error) warnings.push(`${label}: storage cleanup failed (${error.message})`);
   };
 
+  // Hash paths are immutable. A retry may find the object left by an earlier
+  // attempt whose database outcome was unknown; that is success, not a reason
+  // to overwrite bytes already cached under this key.
+  const isAlreadyStored = (error: unknown) => {
+    if (!error || typeof error !== "object") return false;
+    const value = error as { statusCode?: string | number; status?: string | number; message?: string };
+    return Number(value.statusCode ?? value.status) === 409 || /already exists|duplicate/i.test(value.message ?? "");
+  };
+
   const { uploads: uploadCandidates, duplicates } = partitionDuplicatePhotos(
     inputs.map((input) => ({ input, contentHash: input.contentHash, mediaType: input.mediaType, takenAt: input.exif?.takenAt ?? null, coordinate: input.coordinate })),
     existingPhotos,
@@ -110,21 +119,23 @@ export async function uploadPhotoBatch(options: {
     const prepared = await prepareMediaFiles(input.file);
     const extension = storageFileExtension(prepared.imageFile);
     // Content-addressed, so an upload is idempotent: a retry of a batch that
-    // died before its insert lands on the same key and overwrites the object
-    // instead of stranding it under a fresh uuid. `(trip_id, content_hash)` is
+    // died before its insert lands on the same immutable key and reuses the
+    // existing object instead of stranding a fresh uuid. `(trip_id, content_hash)` is
     // already unique in the database, so one key here is one row there.
     const path = `${trip.slug}/${input.contentHash}.${extension}`;
     const thumbnailPath = prepared.thumbnailFile ? `${trip.slug}/thumbs/${input.contentHash}.jpg` : null;
     // The thumbnail never depends on the image upload, so both go up
     // together instead of back to back.
     const [imageUpload, thumbnailUpload] = await Promise.all([
-      supabase.storage.from(PHOTO_BUCKET).upload(path, prepared.imageFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: true, contentType: prepared.imageFile.type || undefined }),
+      supabase.storage.from(PHOTO_BUCKET).upload(path, prepared.imageFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: false, contentType: prepared.imageFile.type || undefined }),
       prepared.thumbnailFile && thumbnailPath
-        ? supabase.storage.from(PHOTO_BUCKET).upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: true, contentType: prepared.thumbnailFile.type })
+        ? supabase.storage.from(PHOTO_BUCKET).upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: false, contentType: prepared.thumbnailFile.type })
         : Promise.resolve(null),
     ]);
-    if (imageUpload.error) {
-      if (thumbnailPath && thumbnailUpload && !thumbnailUpload.error) await removeObjects([thumbnailPath], input.file.name);
+    if (imageUpload.error && !isAlreadyStored(imageUpload.error)) {
+      if (thumbnailPath && thumbnailUpload && !thumbnailUpload.error) {
+        warnings.push(`${input.file.name}: thumbnail retained for a safe retry`);
+      }
       failures.push(`${input.file.name}: ${imageUpload.error.message}`);
       failedClientIds.push(input.clientId);
       onItemComplete();
@@ -132,7 +143,7 @@ export async function uploadPhotoBatch(options: {
     }
     let thumbnailStoragePath: string | null = null;
     if (thumbnailUpload) {
-      if (thumbnailUpload.error) {
+      if (thumbnailUpload.error && !isAlreadyStored(thumbnailUpload.error)) {
         warnings.push(`${input.file.name}: thumbnail skipped`);
       } else if (thumbnailPath) {
         thumbnailStoragePath = thumbnailPath;
@@ -242,7 +253,8 @@ export async function uploadPhotoBatch(options: {
         : typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
           ? error.message
           : "Could not save uploaded media.";
-      failedClientIds.push(...rows.map((row) => row.client_id));
+      const alreadyFailed = new Set(failedClientIds);
+      failedClientIds.push(...rows.map((row) => row.client_id).filter((clientId) => !alreadyFailed.has(clientId)));
     }
   }
 

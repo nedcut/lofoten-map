@@ -43,7 +43,7 @@ function existingPhoto(contentHash: string): Photo {
   };
 }
 
-function fakeSupabase(options: { failUploadFor?: string[]; clashHashes?: string[]; legacyClashHashes?: string[]; lateClashHashes?: string[]; clashError?: string; recheckError?: string; insertErrorMessage?: string; insertThrows?: string } = {}) {
+function fakeSupabase(options: { failUploadFor?: string[]; existingUploadFor?: string[]; clashHashes?: string[]; legacyClashHashes?: string[]; lateClashHashes?: string[]; clashError?: string; recheckError?: string; insertErrorMessage?: string; insertThrows?: string } = {}) {
   const uploaded: string[] = [];
   let clashQueries = 0;
   const upserted: boolean[] = [];
@@ -54,6 +54,7 @@ function fakeSupabase(options: { failUploadFor?: string[]; clashHashes?: string[
       from: () => ({
         upload: async (path: string, file: File, uploadOptions?: { upsert?: boolean }) => {
           if (options.failUploadFor?.some((name) => file.name.startsWith(name))) return { error: { message: "storage exploded" } };
+          if (options.existingUploadFor?.some((name) => file.name.startsWith(name))) return { error: { message: "The resource already exists", statusCode: "409" } };
           uploaded.push(path);
           upserted.push(Boolean(uploadOptions?.upsert));
           return { error: null };
@@ -192,7 +193,7 @@ describe("uploadPhotoBatch", () => {
     expect(removed).toEqual([]);
   });
 
-  it("keys objects by content hash and upserts, so a retry overwrites instead of orphaning", async () => {
+  it("keys objects by content hash without overwriting immutable objects", async () => {
     const first = fakeSupabase();
     await batch(first.client, [input({ clientId: "a" })]);
     // Same file, second attempt: a batch that died before its insert last time.
@@ -201,7 +202,15 @@ describe("uploadPhotoBatch", () => {
 
     expect(first.uploaded).toEqual(["lofoten-2026/hash-a.mp4"]);
     expect(second.uploaded).toEqual(first.uploaded);
-    expect(first.upserted).toEqual([true]);
+    expect(first.upserted).toEqual([false]);
+  });
+
+  it("reuses an immutable object left by an earlier unknown-outcome attempt", async () => {
+    const { client, inserted } = fakeSupabase({ existingUploadFor: ["a.jpg"] });
+    const { result } = await batch(client, [input({ clientId: "a" })]);
+
+    expect(result.savedClientIds).toEqual(["a"]);
+    expect(inserted).toHaveLength(1);
   });
 
   it("rolls back only the fresh objects when the insert fails", async () => {
