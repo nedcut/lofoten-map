@@ -5,14 +5,16 @@ import dynamic from "next/dynamic";
 // into the initial bundle and defeat MapView's dynamic() split.
 import type { Map as MapboxMap } from "mapbox-gl";
 import { collectItemCoordinates, coordinateBounds, routeDistanceMeters, routeGeometry } from "@/lib/geo";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, Loader2, LogIn, Mail, Play, ShieldCheck, Sparkles, UserRound, X } from "lucide-react";
-import { DaySidebar, type DayStats } from "@/components/DaySidebar";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, Loader2, Play, Sparkles, UserRound } from "lucide-react";
+import { AuthPanel } from "@/components/AuthPanel";
+import { DaySidebar } from "@/components/DaySidebar";
 import type { JourneyFilter } from "@/components/JourneyPlayback";
 import { MapLegend } from "@/components/MapLegend";
 import { MobileSheet } from "@/components/MobileSheet";
+import { StatusPill } from "@/components/StatusPill";
 import type { MapItemKind } from "@/components/TripLayers";
-import { EditItemPanel, type EditTarget } from "@/components/EditItemPanel";
+import { EditItemPanel } from "@/components/EditItemPanel";
 import { deriveTripAccess } from "@/lib/access";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
 import { friendlyPersonName } from "@/lib/display-name";
@@ -29,6 +31,7 @@ import { prepareMediaFiles } from "@/lib/media-processing";
 import { uploadPhotoBatch } from "@/lib/photo-upload";
 import { getSupabaseBrowserClient, resolvePhotoUrls } from "@/lib/supabase";
 import { applyTripUrlState, formatDayParam, formatItemToken, parseItemToken, readTripUrlState, resolveDayParam } from "@/lib/trip-url";
+import { deriveDayStats, deriveOutlierOverlay, filterTripItemsByDay, resolveEditTarget } from "@/lib/trip-view-model";
 import { cn } from "@/lib/utils";
 import type { LngLat, MapClickMode, RouteMode } from "@/types/trip";
 import type { PhotoUploadItemInput, PhotoUploadProgress, PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
@@ -97,34 +100,10 @@ export default function Home() {
   const [journeyIntro, setJourneyIntro] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const filtered = useMemo(() => {
-    const matches = (dayId: string | null) => !selectedDayId || dayId === selectedDayId;
-    return {
-      routes: data.routeSegments.filter((item) => matches(item.day_id)),
-      photos: data.photos.filter((item) => matches(item.day_id)),
-      notes: data.notes.filter((item) => matches(item.day_id)),
-      places: data.places.filter((item) => matches(item.day_id)),
-    };
-  }, [data, selectedDayId]);
+  const filtered = useMemo(() => filterTripItemsByDay(data, selectedDayId), [data, selectedDayId]);
   // Per-day totals for the day cards, computed over the full dataset (not the
   // current filter) so each card describes its whole day.
-  const dayStats = useMemo(() => {
-    const stats = new Map<string, DayStats>();
-    const forDay = (dayId: string | null) => {
-      if (!dayId) return null;
-      let entry = stats.get(dayId);
-      if (!entry) {
-        entry = { media: 0, journal: 0, distanceMeters: 0 };
-        stats.set(dayId, entry);
-      }
-      return entry;
-    };
-    for (const photo of data.photos) { const entry = forDay(photo.day_id); if (entry) entry.media += 1; }
-    for (const note of data.notes) { const entry = forDay(note.day_id); if (entry) entry.journal += 1; }
-    for (const place of data.places) { const entry = forDay(place.day_id); if (entry) entry.journal += 1; }
-    for (const route of data.routeSegments) { const entry = forDay(route.day_id); if (entry) entry.distanceMeters += route.distance_meters ?? 0; }
-    return stats;
-  }, [data]);
+  const dayStats = useMemo(() => deriveDayStats(data), [data]);
   const allJourneyItems = useMemo(() => buildJourneyItems(data), [data]);
   const journeyItems = useMemo(() => allJourneyItems.filter((item) => {
     if (journeyFilter === "photos" && item.kind !== "photo") return false;
@@ -196,14 +175,7 @@ export default function Home() {
 
   // Resolve the popup-selected item live from data, so the editor reflects updates
   // and closes automatically if the item is deleted (here or by another member).
-  const editTarget = useMemo<EditTarget | null>(() => {
-    if (!editTargetRef) return null;
-    const { kind, id } = editTargetRef;
-    if (kind === "photo") { const item = data.photos.find((photo) => photo.id === id); return item ? { kind, item } : null; }
-    if (kind === "note") { const item = data.notes.find((note) => note.id === id); return item ? { kind, item } : null; }
-    if (kind === "place") { const item = data.places.find((place) => place.id === id); return item ? { kind, item } : null; }
-    const item = data.routeSegments.find((route) => route.id === id); return item ? { kind, item } : null;
-  }, [editTargetRef, data]);
+  const editTarget = useMemo(() => resolveEditTarget(data, editTargetRef), [editTargetRef, data]);
   const memberAdmin = access.showMemberAdminControls
     ? {
       members: data.members,
@@ -248,14 +220,7 @@ export default function Home() {
     }
     : null;
   // Map-friendly shape of the previewed outlier (drops photos with no coords).
-  const outlierOverlay = useMemo(() => {
-    if (!outlierPreview || outlierPreview.photo.lng === null || outlierPreview.photo.lat === null) return null;
-    return {
-      photo: { lng: outlierPreview.photo.lng, lat: outlierPreview.photo.lat },
-      suggested: outlierPreview.suggested,
-      neighbors: outlierPreview.neighbors,
-    };
-  }, [outlierPreview]);
+  const outlierOverlay = useMemo(() => deriveOutlierOverlay(outlierPreview), [outlierPreview]);
 
   // A photo only steers the journey start while its popup is open. Guarded so
   // closing a stale popup can't wipe focus from a newer one opened after it.
@@ -843,66 +808,5 @@ export default function Home() {
         />
       ) : null}
     </main>
-  );
-}
-
-function StatusPill({ children, tone = "info", onDismiss }: { children: ReactNode; tone?: "info" | "error"; onDismiss?: () => void }) {
-  return (
-    <div
-      role="status"
-      className={cn(
-        "fixed left-1/2 top-16 z-30 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 text-sm shadow-xl backdrop-blur",
-        tone === "error" ? "border-rose-200 bg-rose-50/95 text-rose-900" : "border-stone-200/80 bg-[rgba(255,253,246,0.94)] text-stone-800",
-      )}
-    >
-      {children}
-      {onDismiss ? <button onClick={onDismiss} className="-mr-1 ml-1 rounded-full p-1 text-current/70 transition hover:bg-stone-900/10" aria-label="Dismiss"><X className="h-3.5 w-3.5" /></button> : null}
-    </div>
-  );
-}
-
-function AuthPanel({ message, messageTone, isSubmitting, onSignIn, onSignInWithGoogle, onClose }: { message: string | null; messageTone: "info" | "error"; isSubmitting: boolean; onSignIn: (email: string) => Promise<void>; onSignInWithGoogle: () => Promise<void>; onClose: () => void }) {
-  async function submit(formData: FormData) {
-    const email = String(formData.get("email") ?? "").trim();
-    if (email) await onSignIn(email);
-  }
-
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm" onClick={onClose}>
-      <form action={submit} onClick={(event) => event.stopPropagation()} className="relative w-full max-w-md rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.97)] p-5 text-stone-950 shadow-2xl">
-        <button type="button" onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-full p-1.5 text-stone-500 transition hover:bg-stone-900/10 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50"><X className="h-4 w-4" /></button>
-        <div className="mb-4 flex items-center gap-3">
-          <div className="rounded-lg bg-teal-50 p-3 text-teal-800"><ShieldCheck className="h-5 w-5" /></div>
-          <div>
-            <h2 className="font-serif text-2xl font-semibold">Sign in to Lofoten</h2>
-            <p className="text-sm leading-6 text-stone-600">Viewing is open to everyone — sign in with an invited account to add or edit.</p>
-          </div>
-        </div>
-        <button type="button" disabled={isSubmitting} onClick={onSignInWithGoogle} className="mb-4 flex w-full items-center justify-center gap-3 rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm font-black text-stone-900 shadow-sm transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
-          {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />} Continue with Google
-        </button>
-        <div className="mb-4 flex items-center gap-3 text-xs font-bold uppercase tracking-[0.12em] text-stone-400">
-          <span className="h-px flex-1 bg-stone-200" /> Or use email <span className="h-px flex-1 bg-stone-200" />
-        </div>
-        <label className="mb-3 block text-sm font-bold text-stone-800" htmlFor="email">Email</label>
-        <div className="mb-3 flex items-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-3">
-          <Mail className="h-4 w-4 text-teal-800" />
-          <input id="email" name="email" type="email" required placeholder="you@example.com" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-stone-400" />
-        </div>
-        {message ? (
-          <div
-            className={cn(
-              "mb-3 rounded-lg border p-3 text-sm",
-              messageTone === "error" ? "border-rose-200 bg-rose-50 text-rose-950" : "border-teal-700/20 bg-teal-50 text-teal-950",
-            )}
-          >
-            {message}
-          </div>
-        ) : null}
-        <button disabled={isSubmitting} className="w-full rounded-lg bg-[#e7a13d] px-4 py-3 font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
-          {isSubmitting ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <LogIn className="mr-2 inline h-4 w-4" />} Send sign-in link
-        </button>
-      </form>
-    </div>
   );
 }

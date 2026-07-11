@@ -3,6 +3,7 @@
 import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, Mountain, PenLine, Play, Route, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { AdminDataPanel, type AdminDataProps } from "@/components/AdminDataPanel";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
+import type { TripDayStats } from "@/lib/trip-view-model";
 import { cn, formatDateOnly } from "@/lib/utils";
 import type { AdminRequest, AdminRequestStatus, Day, Photo, Trip, TripMember } from "@/types/trip";
 
@@ -10,7 +11,7 @@ export type LayerVisibility = { photos: boolean; notes: boolean; routes: boolean
 
 // Per-day totals shown on the day cards so picking a day is informed: how much
 // media it holds, how many journal pins, and how far its routes run.
-export type DayStats = { media: number; journal: number; distanceMeters: number };
+export type DayStats = TripDayStats;
 
 // Everything the Journey hero and per-day play buttons need. Optional so the
 // sidebar still renders before journey data is ready (or when there's none).
