@@ -101,6 +101,16 @@ function timeZoneOffsetMs(instant: Date, timeZone: string): number {
   return Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second")) - instant.getTime();
 }
 
+// Accepts EXIF OffsetTime* values ("+02:00", "-0400") and the trailing zone
+// designators found inside video creation timestamps ("Z", "UTC").
+function normalizeUtcOffset(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  if (/^(?:Z|UTC|GMT)$/i.test(trimmed)) return "+00:00";
+  const match = trimmed.match(/^([+-])(\d{2}):?(\d{2})$/);
+  return match ? `${match[1]}${match[2]}:${match[3]}` : null;
+}
+
 function tripLocalDateToIso(year: number, month: number, day: number, hour: number, minute: number, second: number): string | null {
   const wallClockAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
   const initial = new Date(wallClockAsUtc);
@@ -111,39 +121,48 @@ function tripLocalDateToIso(year: number, month: number, day: number, hour: numb
   return new Date(instantMs).toISOString();
 }
 
-export function parseExifDate(value: string | undefined, offset?: string): { takenAt: string | null; takenDate: string | null } {
-  if (!value) return { takenAt: null, takenDate: null };
+export function parseExifDate(value: string | undefined, offset?: string): { takenAt: string | null; takenDate: string | null; timeZoneSource: "embedded" | "trip-local" | null } {
+  if (!value) return { takenAt: null, takenDate: null, timeZoneSource: null };
 
-  const localDateTime = value.trim().match(/^(\d{4})[:-](\d{2})[:-](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  const trimmed = value.trim();
+  const localDateTime = trimmed.match(/^(\d{4})[:-](\d{2})[:-](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
   if (localDateTime) {
-    const [, year, month, day, hour, minute, second = "0"] = localDateTime;
-    const explicitOffset = offset?.trim().match(/^([+-])(\d{2}):(\d{2})$/);
+    const [, year, month, day, hour, minute, second = "00"] = localDateTime;
+    // A zone designator trailing the datetime itself (video creation times are
+    // often "...T14:30:00Z") is as authoritative as a separate OffsetTime* tag.
+    const trailing = trimmed.slice(localDateTime[0].length).replace(/^\.\d+/, "");
+    const explicitOffset = normalizeUtcOffset(offset) ?? normalizeUtcOffset(trailing);
     const validTripLocalInstant = tripLocalDateToIso(Number(year), Number(month), Number(day), Number(hour), Number(minute), Number(second));
-    const explicitInstant = explicitOffset ? new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}${explicitOffset[0]}`) : null;
-    const takenAt = !validTripLocalInstant
-      ? null
-      : explicitInstant && !Number.isNaN(explicitInstant.getTime())
-        ? explicitInstant.toISOString()
-        : validTripLocalInstant;
+    const explicitInstant = explicitOffset ? new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}${explicitOffset}`) : null;
+    const explicitIso = explicitInstant && !Number.isNaN(explicitInstant.getTime()) ? explicitInstant.toISOString() : null;
+    const takenAt = validTripLocalInstant ? explicitIso ?? validTripLocalInstant : null;
     return {
       takenAt,
       takenDate: `${year}-${month}-${day}`,
+      timeZoneSource: takenAt ? (explicitIso ? "embedded" : "trip-local") : null,
     };
   }
 
-  const localDate = value.trim().match(/^(\d{4})[:-](\d{2})[:-](\d{2})$/);
+  const localDate = trimmed.match(/^(\d{4})[:-](\d{2})[:-](\d{2})$/);
   if (localDate) {
     const [, year, month, day] = localDate;
+    const takenAt = tripLocalDateToIso(Number(year), Number(month), Number(day), 0, 0, 0);
     return {
-      takenAt: tripLocalDateToIso(Number(year), Number(month), Number(day), 0, 0, 0),
+      takenAt,
       takenDate: `${year}-${month}-${day}`,
+      timeZoneSource: takenAt ? "trip-local" : null,
     };
   }
 
-  const normalized = value.trim().replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
+  const normalized = trimmed.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
   const takenDate = normalized.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
   const parsed = new Date(normalized);
-  return { takenAt: Number.isNaN(parsed.getTime()) ? null : parsed.toISOString(), takenDate };
+  const takenAt = Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  return {
+    takenAt,
+    takenDate,
+    timeZoneSource: takenAt ? (/(?:Z|[+-]\d{2}:?\d{2}|GMT|UTC)$/i.test(normalized) ? "embedded" : "trip-local") : null,
+  };
 }
 
 function dateInTripTimeZone(iso: string): string | null {
@@ -191,8 +210,7 @@ export async function extractPhotoExif(file: File, options?: { mediaType?: "phot
     const dateTag = exif.DateTimeOriginal ?? exif.CreateDate ?? exif.DateTimeDigitized;
     const offsetTag = exif.OffsetTimeOriginal ?? exif.OffsetTime ?? exif.TimeZoneOffset;
     const offset = stringFromTag(offsetTag);
-    const { takenAt, takenDate } = parseExifDate(stringFromTag(dateTag), offset);
-    const timeZoneSource = takenAt ? (offset?.trim().match(/^([+-])(\d{2}):(\d{2})$/) ? "embedded" : "trip-local") : null;
+    const { takenAt, takenDate, timeZoneSource } = parseExifDate(stringFromTag(dateTag), offset);
 
     if (lat !== null && lng !== null) {
       return { lat, lng, takenAt, takenDate, exifFound: true, message: "GPS metadata found. Marker location is ready.", timeZoneSource, clockCorrectionHours: 0 };

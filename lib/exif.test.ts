@@ -59,8 +59,8 @@ describe("coordinateFromExif", () => {
 
 describe("parseExifDate", () => {
   it("returns nulls for empty / missing input", () => {
-    expect(parseExifDate(undefined)).toEqual({ takenAt: null, takenDate: null });
-    expect(parseExifDate("")).toEqual({ takenAt: null, takenDate: null });
+    expect(parseExifDate(undefined)).toEqual({ takenAt: null, takenDate: null, timeZoneSource: null });
+    expect(parseExifDate("")).toEqual({ takenAt: null, takenDate: null, timeZoneSource: null });
   });
 
   it("parses the canonical EXIF datetime format (colon-separated date)", () => {
@@ -72,6 +72,30 @@ describe("parseExifDate", () => {
   it("honors an explicit iPhone EXIF timezone offset", () => {
     expect(parseExifDate("2026:06:08 14:30:00", "+02:00").takenAt).toBe("2026-06-08T12:30:00.000Z");
     expect(parseExifDate("2026:06:08 14:30:00", "-04:00").takenAt).toBe("2026-06-08T18:30:00.000Z");
+    expect(parseExifDate("2026:06:08 14:30:00", "+02:00").timeZoneSource).toBe("embedded");
+  });
+
+  it("honors an offset even when the datetime has no seconds", () => {
+    const result = parseExifDate("2026:06:08 14:30", "+02:00");
+    expect(result.takenAt).toBe("2026-06-08T12:30:00.000Z");
+    expect(result.timeZoneSource).toBe("embedded");
+  });
+
+  it("accepts colon-less offsets as written by some cameras", () => {
+    expect(parseExifDate("2026:06:08 14:30:00", "+0200").takenAt).toBe("2026-06-08T12:30:00.000Z");
+  });
+
+  it("treats a zone designator inside the datetime value as embedded", () => {
+    const zulu = parseExifDate("2026-06-08T14:30:00Z");
+    expect(zulu.takenAt).toBe("2026-06-08T14:30:00.000Z");
+    expect(zulu.timeZoneSource).toBe("embedded");
+    const offset = parseExifDate("2026-06-08T14:30:00+02:00");
+    expect(offset.takenAt).toBe("2026-06-08T12:30:00.000Z");
+    expect(offset.timeZoneSource).toBe("embedded");
+  });
+
+  it("marks offset-less timestamps as trip-local (adjustable)", () => {
+    expect(parseExifDate("2026:06:08 14:30:00").timeZoneSource).toBe("trip-local");
   });
 
   it("rejects an impossible datetime even when it carries an offset", () => {

@@ -163,6 +163,9 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
   function restoreDraft() {
     if (!restorableDraft) return;
     setItems(restorableDraft.items);
+    // The select must reflect the correction already baked into the restored
+    // timestamps, not reset to "No change" while the items keep theirs.
+    setCameraClockCorrectionHours(restorableDraft.items.find((item) => item.exif?.clockCorrectionHours)?.exif?.clockCorrectionHours ?? 0);
     setActiveItemId(nextPlacementTarget(restorableDraft.items, new Set()) ?? restorableDraft.items[0]?.id ?? null);
     setRestorableDraft(null);
   }
