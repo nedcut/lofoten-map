@@ -4,6 +4,7 @@ import mapboxgl from "mapbox-gl";
 import { useEffect, useMemo, useRef } from "react";
 import { friendlyPersonName } from "@/lib/display-name";
 import { noteFeatureCollection, photoFeatureCollection, placeFeatureCollection, routeFeatureCollection } from "@/lib/geo";
+import { PHOTO_CLUSTER_MAX_ZOOM, PHOTO_CLUSTER_RADIUS, photoMarkerPresentation } from "@/lib/map-presentation";
 import { formatDateTime } from "@/lib/utils";
 import type { Note, Photo, Place, RouteSegment } from "@/types/trip";
 
@@ -104,8 +105,8 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
           type: "geojson",
           data: photoData,
           cluster: true,
-          clusterMaxZoom: 17,
-          clusterRadius: 64,
+          clusterMaxZoom: PHOTO_CLUSTER_MAX_ZOOM,
+          clusterRadius: PHOTO_CLUSTER_RADIUS,
         });
         // This transparent layer gives queryRenderedFeatures a viewport-aware
         // view of both clusters and individual photos. The visible markers are
@@ -248,10 +249,10 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       return closest;
     }
 
-    function createMarkerElement(photo: Photo, count: number) {
+    function createMarkerElement(photo: Photo, count: number, zoom: number) {
       const element = document.createElement("button");
       element.type = "button";
-      element.className = `lofoten-photo-marker${count > 1 ? " lofoten-photo-marker-cluster" : ""}`;
+      element.className = photoMarkerPresentation(zoom, count).className;
       const mediaNoun = photo.media_type === "video" ? "video" : "photo";
       element.setAttribute("aria-label", count > 1 ? `View cluster of ${count} media items` : `View ${photo.caption || `trip ${mediaNoun}`}`);
       const imageUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
@@ -286,6 +287,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       const features = activeMap.queryRenderedFeatures({ layers: ["photos-hit"] });
       const seen = new Set<string>();
       const canvas = activeMap.getCanvas();
+      const zoom = activeMap.getZoom();
       for (const feature of features) {
         if (!feature.geometry || feature.geometry.type !== "Point") continue;
         const coordinates = feature.geometry.coordinates as [number, number];
@@ -306,7 +308,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
 
         if (!markers.has(key)) {
           const count = isCluster ? Number(feature.properties?.point_count) : 1;
-          const element = createMarkerElement(photo, count);
+          const element = createMarkerElement(photo, count, zoom);
           element.addEventListener("click", (event) => {
             event.stopPropagation();
             if (!isCluster) {
@@ -339,8 +341,10 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
           // genuine controls, so restore the button semantics after creation.
           element.setAttribute("role", "button");
           markers.set(key, marker);
-        } else if (key !== draggingKey) {
-          markers.get(key)?.setLngLat(coordinates);
+        } else {
+          const marker = markers.get(key);
+          marker?.getElement().classList.toggle("lofoten-photo-marker-overview", photoMarkerPresentation(zoom, isCluster ? Number(feature.properties?.point_count) : 1).isOverview);
+          if (key !== draggingKey) marker?.setLngLat(coordinates);
         }
       }
 

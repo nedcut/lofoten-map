@@ -43,8 +43,8 @@
 .mapboxgl-ctrl button { color: #1c1917 !important; }
 
 .lofoten-photo-marker {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   cursor: pointer;
   overflow: visible;
   border: 3px solid #fffdf6;
@@ -75,8 +75,8 @@
 }
 
 .lofoten-photo-marker-cluster {
-  width: 56px;
-  height: 56px;
+  width: 52px;
+  height: 52px;
 }
 
 .lofoten-photo-marker-cluster::before {
@@ -94,6 +94,30 @@
   border-radius: 9px;
   object-fit: cover;
   background: #dbe7df;
+}
+
+/* At the whole-trip zoom, retain a 44px control while visually quieting the
+   thumbnail within it. Clusters use the same compact footprint, so a rich
+   archive reads as a handful of places rather than a wall of cards. */
+.lofoten-photo-marker-overview {
+  width: 44px;
+  height: 44px;
+  padding: 2px;
+  box-shadow:
+    0 2px 4px rgba(28, 25, 23, 0.16),
+    0 7px 15px rgba(46, 61, 54, 0.15);
+}
+
+.lofoten-photo-marker-overview img {
+  border-radius: 7px;
+}
+
+.lofoten-photo-marker-cluster.lofoten-photo-marker-overview::before {
+  transform: translate(3px, -3px) rotate(5deg);
+}
+
+.lofoten-photo-marker-cluster.lofoten-photo-marker-overview::after {
+  transform: translate(-3px, 3px) rotate(-4deg);
 }
 
 /* Pulsing ring around the photo currently open in the editor. The outer div is
