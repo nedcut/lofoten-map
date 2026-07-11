@@ -94,7 +94,10 @@ async function listObjects(prefix = "") {
     for (const entry of page) {
       const path = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.metadata?.size === undefined || entry.metadata === null) objects.push(...await listObjects(path));
-      else objects.push({ path, size: entry.metadata.size, createdAt: entry.created_at ?? null });
+      // A retried upload upserts onto its old key, which refreshes updated_at
+      // but not created_at -- judge age by the newest write so an object that
+      // was just re-uploaded (insert still pending) counts as new.
+      else objects.push({ path, size: entry.metadata.size, lastWriteAt: entry.updated_at ?? entry.created_at ?? null });
     }
     if (page.length < 1000) break;
   }
@@ -108,7 +111,7 @@ function partitionOrphans(objects, referenced, now) {
   const tooNew = [];
   for (const object of objects) {
     if (referenced.has(object.path)) live.push(object);
-    else if (object.createdAt && Date.parse(object.createdAt) > cutoff) tooNew.push(object);
+    else if (object.lastWriteAt && Date.parse(object.lastWriteAt) > cutoff) tooNew.push(object);
     else orphans.push(object);
   }
   return { live, orphans, tooNew };

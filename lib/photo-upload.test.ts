@@ -43,8 +43,9 @@ function existingPhoto(contentHash: string): Photo {
   };
 }
 
-function fakeSupabase(options: { failUploadFor?: string[]; clashHashes?: string[]; legacyClashHashes?: string[]; clashError?: string; insertErrorMessage?: string; insertThrows?: string } = {}) {
+function fakeSupabase(options: { failUploadFor?: string[]; clashHashes?: string[]; legacyClashHashes?: string[]; lateClashHashes?: string[]; clashError?: string; recheckError?: string; insertErrorMessage?: string; insertThrows?: string } = {}) {
   const uploaded: string[] = [];
+  let clashQueries = 0;
   const upserted: boolean[] = [];
   const removed: string[] = [];
   const inserted: Array<Record<string, unknown>> = [];
@@ -66,16 +67,26 @@ function fakeSupabase(options: { failUploadFor?: string[]; clashHashes?: string[
     from: () => ({
       select: () => ({
         eq: () => ({
-          in: async () => ({
-            data: options.clashError
-              ? null
-              : [...(options.clashHashes ?? []), ...(options.legacyClashHashes ?? [])].map((hash) => ({
-                  content_hash: hash,
-                  image_path: options.legacyClashHashes?.includes(hash) ? `lofoten-2026/legacy-${hash}.mp4` : `lofoten-2026/${hash}.mp4`,
-                  thumbnail_path: null,
-                })),
-            error: options.clashError ? { message: options.clashError } : null,
-          }),
+          in: async () => {
+            clashQueries += 1;
+            const errorMessage = clashQueries === 1 ? options.clashError : options.recheckError;
+            if (errorMessage) return { data: null, error: { message: errorMessage } };
+            const hashes = [
+              ...(options.clashHashes ?? []),
+              ...(options.legacyClashHashes ?? []),
+              // Rows a racer inserted between the clash check and the insert:
+              // visible only from the second (post-failure) query onward.
+              ...(clashQueries > 1 ? options.lateClashHashes ?? [] : []),
+            ];
+            return {
+              data: hashes.map((hash) => ({
+                content_hash: hash,
+                image_path: options.legacyClashHashes?.includes(hash) ? `lofoten-2026/legacy-${hash}.mp4` : `lofoten-2026/${hash}.mp4`,
+                thumbnail_path: null,
+              })),
+              error: null,
+            };
+          },
         }),
       }),
       insert: (rows: Array<Record<string, unknown>>) => ({
@@ -201,6 +212,25 @@ describe("uploadPhotoBatch", () => {
     // b's object is unreferenced and goes; a's is the existing row's own object.
     expect(removed).toEqual(["lofoten-2026/hash-b.mp4"]);
     expect(result.savedClientIds).toEqual([]);
+  });
+
+  it("spares objects a racing insert claimed when the unique index rejects the batch", async () => {
+    const { client, removed } = fakeSupabase({ lateClashHashes: ["hash-a"], insertErrorMessage: "unique constraint" });
+    const { result } = await batch(client, [input({ clientId: "a" }), input({ clientId: "b" })]);
+
+    expect(result.insertErrorMessage).toBe("unique constraint");
+    // hash-a gained a row mid-window, and that row references our own
+    // content-addressed objects; only hash-b's object is truly unreferenced.
+    expect(removed).toEqual(["lofoten-2026/hash-b.mp4"]);
+  });
+
+  it("skips rollback cleanup when the post-failure re-check fails", async () => {
+    const { client, removed } = fakeSupabase({ insertErrorMessage: "insert exploded", recheckError: "recheck down" });
+    const { result } = await batch(client, [input({ clientId: "a" })]);
+
+    expect(result.insertErrorMessage).toBe("insert exploded");
+    expect(removed).toEqual([]);
+    expect(result.warnings.some((warning) => warning.includes("recheck down"))).toBe(true);
   });
 
   it("leaves uploads in place when the insert throws", async () => {

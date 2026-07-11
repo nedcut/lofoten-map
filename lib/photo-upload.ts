@@ -204,9 +204,25 @@ export async function uploadPhotoBatch(options: {
       if (insertRows.length > 0) {
         const { data: returnedRows, error: insertError } = await supabase.from("photos").insert(insertRows).select();
         if (insertError) {
-          // Only the fresh rows' objects: their hashes have no row, so nothing
-          // references those paths. The clashed ones belong to rows that exist.
-          await removeObjects(storagePathsOf(freshRows), "rollback");
+          // The likely insert error is the unique index: a racer inserted one
+          // of these hashes after the clash check above, and that row now
+          // references our content-addressed paths. Re-check which hashes
+          // gained rows and remove only the paths nothing references.
+          const { data: recheckData, error: recheckError } = await supabase
+            .from("photos")
+            .select("content_hash,image_path,thumbnail_path")
+            .eq("trip_id", trip.id)
+            .in("content_hash", freshRows.map((row) => row.content_hash));
+          if (recheckError) {
+            warnings.push(`rollback: skipped storage cleanup, could not confirm the objects are unreferenced (${recheckError.message})`);
+          } else {
+            const referencedPaths = new Set(
+              ((recheckData ?? []) as Array<{ image_path: string; thumbnail_path: string | null }>).flatMap((row) =>
+                [row.image_path, row.thumbnail_path].filter((path): path is string => Boolean(path)),
+              ),
+            );
+            await removeObjects(storagePathsOf(freshRows).filter((path) => !referencedPaths.has(path)), "rollback");
+          }
           insertErrorMessage = insertError.message;
           failedClientIds.push(...freshRows.map((row) => row.client_id));
         } else {
