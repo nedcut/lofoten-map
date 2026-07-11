@@ -94,6 +94,7 @@ export default function Home() {
   const [deepLinkChecked, setDeepLinkChecked] = useState(false);
   const [journeyFilter, setJourneyFilter] = useState<JourneyFilter>("all");
   const [journeyUploaderFilter, setJourneyUploaderFilter] = useState("");
+  const [journeyIntro, setJourneyIntro] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const filtered = useMemo(() => {
@@ -289,6 +290,7 @@ export default function Home() {
   // the chosen photo is guaranteed to be in the sequence, and push history so the
   // browser back button exits playback.
   const openJourneyFromMap = useCallback((photoId: string) => {
+    setJourneyIntro(false);
     setJourneyFilter("all");
     setJourneyUploaderFilter("");
     openJourneyAt(`photo:${photoId}`, "push");
@@ -306,12 +308,14 @@ export default function Home() {
     const dayStart = selectedDayId
       ? journeyItems.find((item) => item.dayId === selectedDayId)
       : undefined;
+    setJourneyIntro(!lastFocusedPhotoId && !selectedDayId);
     openJourneyAt((lastFocused ?? dayStart ?? journeyItems[0]).id);
   }, [journeyItems, lastFocusedPhotoId, openJourneyAt, selectedDayId]);
 
   // "Play this day" from a day card: clear any active filters so the day's first
   // moment is guaranteed to be in the sequence, then drop into playback there.
   const playDayJourney = useCallback((dayId: string) => {
+    setJourneyIntro(false);
     setJourneyFilter("all");
     setJourneyUploaderFilter("");
     const first = allJourneyItems.find((item) => item.dayId === dayId);
@@ -358,6 +362,7 @@ export default function Home() {
     setSelectedDayId(dayId);
 
     const journeyToken = journey && allJourneyItems.some((entry) => entry.id === journey) ? journey : null;
+    setJourneyIntro(false);
     setActiveJourneyId(journeyToken);
 
     const itemRef = parseItemToken(item);
@@ -814,6 +819,8 @@ export default function Home() {
       {editTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminStatus.isSaving} onClose={() => { setEditTargetRef(null); applyTripUrlState(window.location.href, { item: null }); }} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
       {journeyOpen ? (
         <JourneyPlayback
+          trip={data.trip}
+          showIntro={journeyIntro}
           items={journeyItems}
           allItems={allJourneyItems}
           activeIndex={Math.max(0, activeJourneyIndex)}

@@ -75,6 +75,40 @@ test.describe("desktop", { tag: "@desktop" }, () => {
     await uploaderFilter.selectOption({ label: "Maja" });
     await expect(page.getByText("Reine harbor at golden hour")).toBeVisible();
   });
+
+  test("global journey entry opens with an authored introduction and deep links restore the exact moment", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Relive the journey" }).first().click();
+    await expect(page.getByRole("heading", { name: "Lofoten 2026" })).toBeVisible();
+    await expect(page.getByText("A shared travel story")).toBeVisible();
+    await page.getByRole("button", { name: "Begin journey" }).click();
+    await expect(page.getByRole("img", { name: "Reine harbor at golden hour" })).toBeVisible();
+    await expect(page).toHaveURL(/journey=photo%3Aphoto-demo-1/);
+
+    await page.reload();
+    await expect(page.getByRole("img", { name: "Reine harbor at golden hour" })).toBeVisible();
+    await expect(page.getByText("A shared travel story")).toBeHidden();
+  });
+
+  test("journey share confirms the exact deep link was shared", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.goto("/?journey=photo%3Aphoto-demo-1");
+    await page.locator("select").first().selectOption("journal");
+    await page.getByRole("button", { name: "Share journey" }).click();
+    await expect(page.getByRole("status")).toContainText(/Link copied|Journey shared/);
+  });
+
+  test("autoplay finishes with a deliberate ending and can replay", async ({ page }) => {
+    await page.goto("/?journey=photo%3Aphoto-demo-1");
+    const progress = page.getByRole("slider", { name: "Journey progress" });
+    const last = await progress.getAttribute("max");
+    await progress.fill(last ?? "0");
+    await page.getByRole("button", { name: "Start autoplay" }).click();
+    await expect(page.getByText("End of the journey")).toBeVisible({ timeout: 12_000 });
+    await page.getByRole("button", { name: "Replay" }).click();
+    await expect(page.getByText("End of the journey")).toBeHidden();
+    await expect(page.getByRole("img", { name: "Reine harbor at golden hour" })).toBeVisible();
+  });
 });
 
 test.describe("mobile", { tag: "@mobile" }, () => {
