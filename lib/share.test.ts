@@ -22,4 +22,11 @@ describe("shareJourneyLink", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     await expect(shareJourneyLink({ share: vi.fn().mockRejectedValue(new Error("nope")), clipboard: { writeText } }, input)).resolves.toBe("copied");
   });
+
+  it("treats dismissing the native share sheet as cancellation", async () => {
+    const writeText = vi.fn();
+    const abort = new DOMException("cancelled", "AbortError");
+    await expect(shareJourneyLink({ share: vi.fn().mockRejectedValue(abort), clipboard: { writeText } }, input)).resolves.toBe("cancelled");
+    expect(writeText).not.toHaveBeenCalled();
+  });
 });

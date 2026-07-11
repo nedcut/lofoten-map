@@ -1,4 +1,4 @@
-export type ShareResult = "shared" | "copied" | "failed";
+export type ShareResult = "shared" | "copied" | "cancelled" | "failed";
 
 type ShareNavigator = {
   clipboard: { writeText: (text: string) => Promise<void> };
@@ -14,7 +14,7 @@ export async function shareJourneyLink(
       await navigatorLike.share(input);
       return "shared";
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return "failed";
+      if (error instanceof DOMException && error.name === "AbortError") return "cancelled";
     }
   }
 

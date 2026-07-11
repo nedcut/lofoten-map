@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { siteUrl } from "@/lib/site-url";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
+  metadataBase: siteUrl(),
   title: "Lofoten Logbook",
   description: "A collaborative map and journal for a Lofoten hiking trip.",
   openGraph: { title: "Lofoten Logbook", description: "Relive a shared journey through Norway's Lofoten Islands.", type: "website", images: ["/opengraph-image"] },

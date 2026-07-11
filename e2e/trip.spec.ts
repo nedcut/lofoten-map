@@ -81,6 +81,8 @@ test.describe("desktop", { tag: "@desktop" }, () => {
     await page.getByRole("button", { name: "Relive the journey" }).first().click();
     await expect(page.getByRole("heading", { name: "Lofoten 2026" })).toBeVisible();
     await expect(page.getByText("A shared travel story")).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+    await expect(page.getByRole("button", { name: "Begin journey" })).toBeFocused();
     await page.getByRole("button", { name: "Begin journey" }).click();
     await expect(page.getByRole("img", { name: "Reine harbor at golden hour" })).toBeVisible();
     await expect(page).toHaveURL(/journey=photo%3Aphoto-demo-1/);
@@ -93,9 +95,18 @@ test.describe("desktop", { tag: "@desktop" }, () => {
   test("journey share confirms the exact deep link was shared", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.goto("/?journey=photo%3Aphoto-demo-1");
-    await page.locator("select").first().selectOption("journal");
     await page.getByRole("button", { name: "Share journey" }).click();
     await expect(page.getByRole("status")).toContainText(/Link copied|Journey shared/);
+  });
+
+  test("browser Back exits a Journey opened from the map", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: /Day 1: Reine arrival/ }).click();
+    await page.getByRole("button", { name: "Relive the journey" }).first().click();
+    await expect(page.getByText("Journey Mode")).toBeVisible();
+    await page.goBack();
+    await expect(page.getByText("Journey Mode")).toBeHidden();
+    await expect(page).not.toHaveURL(/journey=/);
   });
 
   test("autoplay finishes with a deliberate ending and can replay", async ({ page }) => {
