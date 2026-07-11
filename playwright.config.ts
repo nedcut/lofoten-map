@@ -26,6 +26,9 @@ export default defineConfig({
     env: {
       // Demo-mode flag is inlined at build time and only honored on localhost.
       NEXT_PUBLIC_LOCAL_DEMO_MODE: "1",
+      // Keep mapless assertions deterministic even when a developer's
+      // .env.local contains a real token.
+      NEXT_PUBLIC_MAPBOX_TOKEN: "",
       NEXT_DIST_DIR: ".next-e2e",
       PORT: "3100",
     },
