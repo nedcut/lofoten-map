@@ -1,3 +1,9 @@
+// ARCHIVED SUPABASE MAINTENANCE TOOL.
+// This script targets the retired Supabase REST and Storage APIs. Do not run it
+// against the Neon/R2 production stack. It is retained only to audit or repair
+// the source project during the rollback window; a future R2 maintenance tool
+// must authorize database changes through Neon and object changes through R2.
+//
 // Find and remove byte-identical duplicate photos, then backfill content_hash.
 //
 // Duplicates are detected by downloading every stored image and hashing the

@@ -2,9 +2,9 @@
 
 import { useCallback } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { SupabaseClient, User } from "@supabase/supabase-js";
+import type { BackendClient, BackendUser } from "@/lib/backend";
 import type { Day, LngLat, Note, RouteMode, RouteSegment, TripData } from "@/types/trip";
-import { PHOTO_BUCKET } from "@/lib/supabase";
+import { deleteObjects, PHOTO_BUCKET } from "@/lib/object-store";
 // @/lib/gpx is loaded lazily inside importGpx (below) so its @turf/simplify
 // dependency stays out of the initial bundle — GPX import is a rare admin action.
 import { lineDistanceMeters } from "@/lib/geo";
@@ -24,8 +24,8 @@ import {
 import { useStatusMessage } from "./useStatusMessage";
 
 interface Options {
-  supabase: SupabaseClient | null;
-  user: User | null;
+  backend: BackendClient | null;
+  user: BackendUser | null;
   isAdmin: boolean;
   data: TripData;
   setData: Dispatch<SetStateAction<TripData>>;
@@ -40,13 +40,13 @@ interface Options {
  * Every write to the trip's data model: trip/day/route/note/place/photo edits,
  * GPX import, deletes, and optimistic photo moves. Each runs through a shared
  * status channel (surfaced in the admin panel) and clears the global error pill
- * on start. In Supabase mode the write hits Postgres and reloads; in demo mode
+ * on start. In backend mode the write hits Postgres and reloads; in demo mode
  * it applies a pure transform from local-trip-store to the in-memory state.
  *
  * Errors mirror to the global pill too, so a non-admin editing their own map
  * item still sees failures even without the admin panel.
  */
-export function useTripMutations({ supabase, user, isAdmin, data, setData, loadData, selectedDayId, selectDay, setGlobalError }: Options) {
+export function useTripMutations({ backend, user, isAdmin, data, setData, loadData, selectedDayId, selectDay, setGlobalError }: Options) {
   const status = useStatusMessage();
   const { setSaving, setInfo, setError: setStatusError, reset } = status;
   const trip = data.trip;
@@ -79,8 +79,8 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
     async (input: { title: string; description: string | null; start_date: string | null; end_date: string | null }) => {
       if (!trip) return;
       await runAdminOperation(async () => {
-        if (supabase) {
-          const { error } = await supabase.from("trips").update(input).eq("id", trip.id);
+        if (backend) {
+          const { error } = await backend.from("trips").update(input).eq("id", trip.id);
           if (error) reportError(error.message);
           else {
             setInfo("Trip updated.");
@@ -92,15 +92,15 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
         }
       });
     },
-    [trip, runAdminOperation, supabase, reportError, setInfo, loadData, setData],
+    [trip, runAdminOperation, backend, reportError, setInfo, loadData, setData],
   );
 
   const updateDay = useCallback(
     async (dayId: string, input: { day_number: number; date: string | null; title: string | null; summary: string | null }) => {
       if (!trip) return;
       await runAdminOperation(async () => {
-        if (supabase) {
-          const { error } = await supabase.from("days").update(input).eq("id", dayId).eq("trip_id", trip.id);
+        if (backend) {
+          const { error } = await backend.from("days").update(input).eq("id", dayId).eq("trip_id", trip.id);
           if (error) reportError(error.message);
           else {
             setInfo("Day updated.");
@@ -112,7 +112,7 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
         }
       });
     },
-    [trip, runAdminOperation, supabase, reportError, setInfo, loadData, setData],
+    [trip, runAdminOperation, backend, reportError, setInfo, loadData, setData],
   );
 
   const createDay = useCallback(
@@ -120,8 +120,8 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
       if (!trip) return;
       await runAdminOperation(async () => {
         const row = { ...input, trip_id: trip.id };
-        if (supabase) {
-          const { error } = await supabase.from("days").insert(row);
+        if (backend) {
+          const { error } = await backend.from("days").insert(row);
           if (error) reportError(error.message);
           else {
             setInfo("Day added.");
@@ -133,19 +133,19 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
         }
       });
     },
-    [trip, runAdminOperation, supabase, reportError, setInfo, loadData, setData],
+    [trip, runAdminOperation, backend, reportError, setInfo, loadData, setData],
   );
 
   const importGpx = useCallback(
     async (file: File) => {
       if (!trip) return;
       const tripId = trip.id;
-      if (supabase && !isAdmin) {
+      if (backend && !isAdmin) {
         reportError("Only trip admins can import GPX files.");
         return;
       }
-      if (supabase && !user) {
-        reportError("Sign in before importing GPX files to Supabase.");
+      if (backend && !user) {
+        reportError("Sign in before importing GPX files.");
         return;
       }
 
@@ -169,8 +169,8 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
 
           const row = { trip_id: tripId, day_number: nextDayNumber++, date, title: `GPX import ${date}`, summary: null };
 
-          if (supabase) {
-            const { data: insertedDay, error } = await supabase.from("days").insert(row).select("*").single();
+          if (backend) {
+            const { data: insertedDay, error } = await backend.from("days").insert(row).select("*").single();
             if (error) throw new Error(error.message);
             availableDays = [...availableDays, insertedDay as Day].sort((a, b) => a.day_number - b.day_number);
             return insertedDay as Day;
@@ -213,13 +213,13 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
 
         const summary = `Imported ${routeRows.length} route${routeRows.length === 1 ? "" : "s"} and ${noteRows.length} waypoint${noteRows.length === 1 ? "" : "s"}.`;
 
-        if (supabase) {
+        if (backend) {
           if (routeRows.length > 0) {
-            const { error } = await supabase.from("route_segments").insert(routeRows);
+            const { error } = await backend.from("route_segments").insert(routeRows);
             if (error) throw new Error(error.message);
           }
           if (noteRows.length > 0) {
-            const { error } = await supabase.from("notes").insert(noteRows);
+            const { error } = await backend.from("notes").insert(noteRows);
             if (error) throw new Error(error.message);
           }
           setInfo(summary);
@@ -238,15 +238,15 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
         setInfo(summary);
       });
     },
-    [trip, supabase, isAdmin, user, runAdminOperation, reportError, data.days, setInfo, loadData, setData],
+    [trip, backend, isAdmin, user, runAdminOperation, reportError, data.days, setInfo, loadData, setData],
   );
 
   const updateRoute = useCallback(
     async (routeId: string, input: { day_id: string | null; name: string | null; mode: RouteMode; source: string | null }) => {
       if (!trip) return;
       await runAdminOperation(async () => {
-        if (supabase) {
-          const { error } = await supabase.from("route_segments").update(input).eq("id", routeId).eq("trip_id", trip.id);
+        if (backend) {
+          const { error } = await backend.from("route_segments").update(input).eq("id", routeId).eq("trip_id", trip.id);
           if (error) reportError(error.message);
           else {
             setInfo("Route updated.");
@@ -258,15 +258,15 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
         }
       });
     },
-    [trip, runAdminOperation, supabase, reportError, setInfo, loadData, setData],
+    [trip, runAdminOperation, backend, reportError, setInfo, loadData, setData],
   );
 
   const updateNote = useCallback(
     async (noteId: string, input: { day_id: string | null; author_name: string | null; body: string }) => {
       if (!trip) return;
       await runAdminOperation(async () => {
-        if (supabase) {
-          const { error } = await supabase.from("notes").update(input).eq("id", noteId).eq("trip_id", trip.id);
+        if (backend) {
+          const { error } = await backend.from("notes").update(input).eq("id", noteId).eq("trip_id", trip.id);
           if (error) reportError(error.message);
           else {
             setInfo("Note updated.");
@@ -278,15 +278,15 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
         }
       });
     },
-    [trip, runAdminOperation, supabase, reportError, setInfo, loadData, setData],
+    [trip, runAdminOperation, backend, reportError, setInfo, loadData, setData],
   );
 
   const updatePlace = useCallback(
     async (placeId: string, input: { day_id: string | null; name: string; place_type: string | null; description: string | null; lat: number; lng: number }) => {
       if (!trip) return;
       await runAdminOperation(async () => {
-        if (supabase) {
-          const { error } = await supabase.from("places").update(input).eq("id", placeId).eq("trip_id", trip.id);
+        if (backend) {
+          const { error } = await backend.from("places").update(input).eq("id", placeId).eq("trip_id", trip.id);
           if (error) reportError(error.message);
           else {
             setInfo("Place updated.");
@@ -298,19 +298,19 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
         }
       });
     },
-    [trip, runAdminOperation, supabase, reportError, setInfo, loadData, setData],
+    [trip, runAdminOperation, backend, reportError, setInfo, loadData, setData],
   );
 
   const updatePhoto = useCallback(
     async (photoId: string, input: { day_id: string | null; uploader_name: string | null; caption: string | null; lat: number | null; lng: number | null; taken_at: string | null }) => {
       if (!trip) return;
       await runAdminOperation(async () => {
-        if (supabase) {
+        if (backend) {
           // .select() makes the update report which rows it touched: RLS filters
           // silently (no error, zero rows), which would otherwise show "Photo
           // updated." while writing nothing — and leave an optimistic marker
           // move on screen that reverts on the next load.
-          const { data: updatedRows, error } = await supabase.from("photos").update(input).eq("id", photoId).eq("trip_id", trip.id).select("id");
+          const { data: updatedRows, error } = await backend.from("photos").update(input).eq("id", photoId).eq("trip_id", trip.id).select("id");
           if (error) reportError(error.message);
           else if (!updatedRows || updatedRows.length === 0) {
             reportError("The change was not saved — you may not have permission to edit this photo.");
@@ -325,7 +325,7 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
         }
       });
     },
-    [trip, runAdminOperation, supabase, reportError, setInfo, loadData, setData],
+    [trip, runAdminOperation, backend, reportError, setInfo, loadData, setData],
   );
 
   // A photo marker was dragged to a new spot. Update local state immediately so
@@ -352,17 +352,17 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
     async (table: DeletableTable, id: string) => {
       if (!trip) return;
       await runAdminOperation(async () => {
-        if (supabase) {
+        if (backend) {
           const photoToDelete = table === "photos" ? data.photos.find((photo) => photo.id === id) : null;
           const photoStoragePaths = photoToDelete
             ? [photoToDelete.image_path, photoToDelete.thumbnail_path].filter((path): path is string => Boolean(path))
             : [];
-          const { error } = await supabase.from(table).delete().eq("id", id).eq("trip_id", trip.id);
+          const { error } = await backend.from(table).delete().eq("id", id).eq("trip_id", trip.id);
           if (error) reportError(error.message);
           else {
             if (table === "days") selectDay(selectedDayId === id ? null : selectedDayId);
             if (photoStoragePaths.length > 0) {
-              const { error: storageError } = await supabase.storage.from(PHOTO_BUCKET).remove(photoStoragePaths);
+              const { error: storageError } = await deleteObjects(backend, PHOTO_BUCKET, photoStoragePaths);
               if (storageError) reportError(`Item deleted, but photo file cleanup failed: ${storageError.message}`);
               else setInfo("Item deleted.");
             } else {
@@ -380,7 +380,7 @@ export function useTripMutations({ supabase, user, isAdmin, data, setData, loadD
         }
       });
     },
-    [trip, runAdminOperation, supabase, data, reportError, selectDay, selectedDayId, setInfo, loadData, setData],
+    [trip, runAdminOperation, backend, data, reportError, selectDay, selectedDayId, setInfo, loadData, setData],
   );
 
   return {

@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import type { SupabaseClient, User } from "@supabase/supabase-js";
+import type { BackendClient, BackendUser } from "@/lib/backend";
 import type { Trip, TripMember } from "@/types/trip";
 import { prepareAvatarFile } from "@/lib/avatar-processing";
-import { AVATAR_BUCKET, IMMUTABLE_CACHE_SECONDS } from "@/lib/supabase";
+import { AVATAR_BUCKET, deleteObjects, IMMUTABLE_CACHE_SECONDS, uploadObject } from "@/lib/object-store";
 
 interface Options {
-  supabase: SupabaseClient | null;
-  user: User | null;
+  backend: BackendClient | null;
+  user: BackendUser | null;
   /** The signed-in user's membership row, for the current avatar path. */
   currentMember: Pick<TripMember, "avatar_path"> | null;
   trip: Trip | null;
@@ -27,14 +27,14 @@ interface Options {
  * and otherwise leaves the stored avatar untouched. The new file is keyed on the
  * user id (to satisfy the storage RLS policy) with a fresh uuid (to bust the CDN
  * cache), and the previous avatar is best-effort cleaned up. Demo mode has no
- * profiles, so this is Supabase-only.
+ * profiles, so this is backend-only.
  */
-export function useProfile({ supabase, user, currentMember, trip, loadData, onError, onNotice, onSaved }: Options) {
+export function useProfile({ backend, user, currentMember, trip, loadData, onError, onNotice, onSaved }: Options) {
   const [isSaving, setIsSaving] = useState(false);
 
   const saveProfile = useCallback(
     async (input: { displayName: string; avatarFile: File | null; removeAvatar: boolean }) => {
-      if (!supabase || !trip || !user) return;
+      if (!backend || !trip || !user) return;
       setIsSaving(true);
       try {
         // Default to whatever avatar the member already has; only the two write
@@ -44,9 +44,10 @@ export function useProfile({ supabase, user, currentMember, trip, loadData, onEr
         if (input.avatarFile) {
           const prepared = await prepareAvatarFile(input.avatarFile);
           const path = `${user.id}/${crypto.randomUUID()}.jpg`;
-          const { error: uploadError } = await supabase.storage
-            .from(AVATAR_BUCKET)
-            .upload(path, prepared, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: false, contentType: prepared.type || "image/jpeg" });
+          const { error: uploadError } = await uploadObject(backend, AVATAR_BUCKET, path, prepared, {
+            cacheControl: IMMUTABLE_CACHE_SECONDS,
+            contentType: prepared.type || "image/jpeg",
+          });
           if (uploadError) {
             onError(`Could not upload your photo. ${uploadError.message}`);
             return;
@@ -57,22 +58,27 @@ export function useProfile({ supabase, user, currentMember, trip, loadData, onEr
           avatarPath = null;
         }
 
-        const { error: rpcError } = await supabase.rpc("update_my_trip_profile", {
+        const { error: rpcError } = await backend.rpc("update_my_trip_profile", {
           target_trip_slug: trip.slug,
           new_display_name: input.displayName,
           new_avatar_path: avatarPath,
         });
         if (rpcError) {
           // Roll back the newly uploaded file — the DB was never updated to point at it.
-          if (newlyUploadedPath) await supabase.storage.from(AVATAR_BUCKET).remove([newlyUploadedPath]);
+          if (newlyUploadedPath) await deleteObjects(backend, AVATAR_BUCKET, [newlyUploadedPath]);
           onError(`Could not save your profile. ${rpcError.message}`);
           return;
         }
 
         // RPC succeeded — safe to clean up the previous avatar now.
         const previousPath = currentMember?.avatar_path ?? null;
-        if (previousPath && (newlyUploadedPath || input.removeAvatar)) {
-          await supabase.storage.from(AVATAR_BUCKET).remove([previousPath]);
+        // A migrated legacy avatar may live below an old Supabase UUID rather
+        // than the current Neon subject. After the RPC swaps the membership
+        // path, the server can no longer prove that old key belongs to this
+        // user, so retain it for the audited orphan sweep instead of broadening
+        // delete authorization.
+        if (previousPath?.startsWith(`${user.id}/`) && (newlyUploadedPath || input.removeAvatar)) {
+          await deleteObjects(backend, AVATAR_BUCKET, [previousPath]);
         }
         await loadData();
         onNotice("Profile updated.");
@@ -83,7 +89,7 @@ export function useProfile({ supabase, user, currentMember, trip, loadData, onEr
         setIsSaving(false);
       }
     },
-    [supabase, trip, user, currentMember, loadData, onError, onNotice, onSaved],
+    [backend, trip, user, currentMember, loadData, onError, onNotice, onSaved],
   );
 
   return { isSaving, saveProfile };

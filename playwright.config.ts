@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // The suite runs against a production build of the app in demo mode
-// (no Supabase), served on its own port and dist dir so it never collides
+// (no Neon or R2), served on its own port and dist dir so it never collides
 // with a `next dev` instance using .next on :3000.
 export default defineConfig({
   testDir: "e2e",

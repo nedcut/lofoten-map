@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { BackendClient } from "@/lib/backend";
 import { uploadPhotoBatch, type PhotoBatchInput } from "./photo-upload";
 import type { Photo } from "@/types/trip";
 
@@ -43,28 +43,27 @@ function existingPhoto(contentHash: string): Photo {
   };
 }
 
-function fakeSupabase(options: { failUploadFor?: string[]; existingUploadFor?: string[]; clashHashes?: string[]; legacyClashHashes?: string[]; lateClashHashes?: string[]; clashError?: string; recheckError?: string; insertErrorMessage?: string; insertThrows?: string } = {}) {
+function fakeBackend(options: { failUploadFor?: string[]; existingUploadFor?: string[]; clashHashes?: string[]; legacyClashHashes?: string[]; lateClashHashes?: string[]; clashError?: string; recheckError?: string; insertErrorMessage?: string; insertThrows?: string } = {}) {
   const uploaded: string[] = [];
   let clashQueries = 0;
   const upserted: boolean[] = [];
   const removed: string[] = [];
   const inserted: Array<Record<string, unknown>> = [];
-  const client = {
-    storage: {
-      from: () => ({
-        upload: async (path: string, file: File, uploadOptions?: { upsert?: boolean }) => {
-          if (options.failUploadFor?.some((name) => file.name.startsWith(name))) return { error: { message: "storage exploded" } };
-          if (options.existingUploadFor?.some((name) => file.name.startsWith(name))) return { error: { message: "The resource already exists", statusCode: "409" } };
-          uploaded.push(path);
-          upserted.push(Boolean(uploadOptions?.upsert));
-          return { error: null };
-        },
-        remove: async (paths: string[]) => {
-          removed.push(...paths);
-          return { error: null };
-        },
-      }),
+  const objectStore = {
+    upload: async (path: string, file: Blob) => {
+      const namedFile = file as File;
+      if (options.failUploadFor?.some((name) => namedFile.name.startsWith(name))) return { error: { message: "storage exploded" } };
+      if (options.existingUploadFor?.some((name) => namedFile.name.startsWith(name))) return { error: { message: "The resource already exists", statusCode: "409" } };
+      uploaded.push(path);
+      upserted.push(false);
+      return { error: null };
     },
+    remove: async (paths: string[]) => {
+      removed.push(...paths);
+      return { error: null };
+    },
+  };
+  const client = {
     from: () => ({
       select: () => ({
         eq: () => ({
@@ -100,16 +99,17 @@ function fakeSupabase(options: { failUploadFor?: string[]; existingUploadFor?: s
         },
       }),
     }),
-  } as unknown as SupabaseClient;
+    __objectStore: objectStore,
+  } as unknown as BackendClient & { __objectStore: typeof objectStore };
   return { client, uploaded, upserted, removed, inserted };
 }
 
 const trip = { id: "trip-1", slug: "lofoten-2026" };
 
-function batch(client: SupabaseClient, inputs: PhotoBatchInput[], existingPhotos: Photo[] = []) {
+function batch(client: BackendClient & { __objectStore: ReturnType<typeof fakeBackend>["client"]["__objectStore"] }, inputs: PhotoBatchInput[], existingPhotos: Photo[] = []) {
   let progressCalls = 0;
   const outcome = uploadPhotoBatch({
-    supabase: client,
+    backend: client,
     trip,
     existingPhotos,
     uploaderName: "Ned",
@@ -118,13 +118,14 @@ function batch(client: SupabaseClient, inputs: PhotoBatchInput[], existingPhotos
     onItemComplete: () => {
       progressCalls += 1;
     },
+    objectStore: client.__objectStore,
   });
   return outcome.then((result) => ({ result, progressCalls: () => progressCalls }));
 }
 
 describe("uploadPhotoBatch", () => {
   it("uploads and inserts every fresh item, reporting progress per item", async () => {
-    const { client, uploaded, inserted } = fakeSupabase();
+    const { client, uploaded, inserted } = fakeBackend();
     const { result, progressCalls } = await batch(client, [input({ clientId: "a" }), input({ clientId: "b" })]);
 
     expect(result.savedClientIds.sort()).toEqual(["a", "b"]);
@@ -141,7 +142,7 @@ describe("uploadPhotoBatch", () => {
   });
 
   it("skips items that duplicate existing photos without touching storage", async () => {
-    const { client, uploaded } = fakeSupabase();
+    const { client, uploaded } = fakeBackend();
     const { result, progressCalls } = await batch(client, [input({ clientId: "a" })], [existingPhoto("hash-a")]);
 
     expect(result.failedClientIds).toEqual(["a"]);
@@ -152,7 +153,7 @@ describe("uploadPhotoBatch", () => {
   });
 
   it("records a failure for a broken upload but still saves the rest", async () => {
-    const { client, inserted } = fakeSupabase({ failUploadFor: ["a"] });
+    const { client, inserted } = fakeBackend({ failUploadFor: ["a"] });
     const { result } = await batch(client, [input({ clientId: "a" }), input({ clientId: "b" })]);
 
     expect(result.failedClientIds).toEqual(["a"]);
@@ -164,7 +165,7 @@ describe("uploadPhotoBatch", () => {
   // New rows are content-addressed, so a racing upload of an already-stored hash
   // lands on the live row's exact key. Removing it would strand that row.
   it("leaves storage alone for hashes someone else uploaded mid-batch", async () => {
-    const { client, removed, inserted } = fakeSupabase({ clashHashes: ["hash-a"] });
+    const { client, removed, inserted } = fakeBackend({ clashHashes: ["hash-a"] });
     const { result } = await batch(client, [input({ clientId: "a" }), input({ clientId: "b" })]);
 
     expect(result.failedClientIds).toEqual(["a"]);
@@ -174,7 +175,7 @@ describe("uploadPhotoBatch", () => {
   });
 
   it("removes an unused hash-path upload when the clashing row has a legacy UUID path", async () => {
-    const { client, removed, inserted } = fakeSupabase({ legacyClashHashes: ["hash-a"] });
+    const { client, removed, inserted } = fakeBackend({ legacyClashHashes: ["hash-a"] });
     const { result } = await batch(client, [input({ clientId: "a" }), input({ clientId: "b" })]);
 
     expect(result.failedClientIds).toEqual(["a"]);
@@ -184,7 +185,7 @@ describe("uploadPhotoBatch", () => {
   });
 
   it("does not clean up live objects when the clash check fails", async () => {
-    const { client, removed } = fakeSupabase({ clashError: "clash lookup failed" });
+    const { client, removed } = fakeBackend({ clashError: "clash lookup failed" });
     const { result } = await batch(client, [input({ clientId: "a" })]);
 
     expect(result.insertErrorMessage).toBe("clash lookup failed");
@@ -194,10 +195,10 @@ describe("uploadPhotoBatch", () => {
   });
 
   it("keys objects by content hash without overwriting immutable objects", async () => {
-    const first = fakeSupabase();
+    const first = fakeBackend();
     await batch(first.client, [input({ clientId: "a" })]);
     // Same file, second attempt: a batch that died before its insert last time.
-    const second = fakeSupabase();
+    const second = fakeBackend();
     await batch(second.client, [input({ clientId: "a" })]);
 
     expect(first.uploaded).toEqual(["lofoten-2026/hash-a.mp4"]);
@@ -206,7 +207,7 @@ describe("uploadPhotoBatch", () => {
   });
 
   it("reuses an immutable object left by an earlier unknown-outcome attempt", async () => {
-    const { client, inserted } = fakeSupabase({ existingUploadFor: ["a.jpg"] });
+    const { client, inserted } = fakeBackend({ existingUploadFor: ["a.jpg"] });
     const { result } = await batch(client, [input({ clientId: "a" })]);
 
     expect(result.savedClientIds).toEqual(["a"]);
@@ -214,7 +215,7 @@ describe("uploadPhotoBatch", () => {
   });
 
   it("rolls back only the fresh objects when the insert fails", async () => {
-    const { client, removed } = fakeSupabase({ clashHashes: ["hash-a"], insertErrorMessage: "insert exploded" });
+    const { client, removed } = fakeBackend({ clashHashes: ["hash-a"], insertErrorMessage: "insert exploded" });
     const { result } = await batch(client, [input({ clientId: "a" }), input({ clientId: "b" })]);
 
     expect(result.insertErrorMessage).toBe("insert exploded");
@@ -224,7 +225,7 @@ describe("uploadPhotoBatch", () => {
   });
 
   it("spares objects a racing insert claimed when the unique index rejects the batch", async () => {
-    const { client, removed } = fakeSupabase({ lateClashHashes: ["hash-a"], insertErrorMessage: "unique constraint" });
+    const { client, removed } = fakeBackend({ lateClashHashes: ["hash-a"], insertErrorMessage: "unique constraint" });
     const { result } = await batch(client, [input({ clientId: "a" }), input({ clientId: "b" })]);
 
     expect(result.insertErrorMessage).toBe("unique constraint");
@@ -234,7 +235,7 @@ describe("uploadPhotoBatch", () => {
   });
 
   it("skips rollback cleanup when the post-failure re-check fails", async () => {
-    const { client, removed } = fakeSupabase({ insertErrorMessage: "insert exploded", recheckError: "recheck down" });
+    const { client, removed } = fakeBackend({ insertErrorMessage: "insert exploded", recheckError: "recheck down" });
     const { result } = await batch(client, [input({ clientId: "a" })]);
 
     expect(result.insertErrorMessage).toBe("insert exploded");
@@ -243,7 +244,7 @@ describe("uploadPhotoBatch", () => {
   });
 
   it("leaves uploads in place when the insert throws", async () => {
-    const { client, removed, uploaded } = fakeSupabase({ insertThrows: "network died" });
+    const { client, removed, uploaded } = fakeBackend({ insertThrows: "network died" });
     const { result } = await batch(client, [input({ clientId: "a" })]);
 
     expect(result.insertErrorMessage).toBe("network died");
@@ -256,7 +257,7 @@ describe("uploadPhotoBatch", () => {
   });
 
   it("rolls back every uploaded object when the insert fails", async () => {
-    const { client, removed, inserted } = fakeSupabase({ insertErrorMessage: "unique constraint" });
+    const { client, removed, inserted } = fakeBackend({ insertErrorMessage: "unique constraint" });
     const { result } = await batch(client, [input({ clientId: "a" }), input({ clientId: "b" })]);
 
     expect(result.insertErrorMessage).toBe("unique constraint");

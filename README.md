@@ -1,13 +1,12 @@
 # Lofoten Logbook
 
-A collaborative, real-time trip map and journal. Anyone can explore a trip with
-no account — filter days, browse route segments, and open notes and photos
-pinned to the map. Invited friends can sign in to drop their own notes and
-geotagged photos, and edits stream to everyone live.
+A collaborative trip map and journal. Anyone can explore a trip without an
+account; invited members can sign in to add geotagged photos and notes, and
+admins can maintain the itinerary, routes, places, and membership.
 
 <p>
-  <a href="https://lofoten-map-kappa.vercel.app"><strong>▶ Live demo</strong></a>
-  &nbsp;·&nbsp; no login required
+  <a href="https://lofoten-map-kappa.vercel.app"><strong>▶ Live app</strong></a>
+  &nbsp;·&nbsp; public reading requires no login
 </p>
 
 ![Lofoten Logbook — interactive trip map with itinerary sidebar, route line, and photo markers](docs/images/screenshot.png)
@@ -17,286 +16,182 @@ geotagged photos, and edits stream to everyone live.
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white">
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
   <img alt="Mapbox GL" src="https://img.shields.io/badge/Mapbox_GL-3-000000?logo=mapbox&logoColor=white">
-  <img alt="Supabase" src="https://img.shields.io/badge/Supabase-Postgres_·_Auth_·_RLS_·_Realtime-3FCF8E?logo=supabase&logoColor=white">
+  <img alt="Neon" src="https://img.shields.io/badge/Neon-Postgres_·_Auth_·_Data_API-00E599?logo=postgresql&logoColor=white">
+  <img alt="Cloudflare R2" src="https://img.shields.io/badge/Cloudflare-R2-F38020?logo=cloudflare&logoColor=white">
   <img alt="Tested with Vitest" src="https://img.shields.io/badge/tested_with-Vitest-6E9F18?logo=vitest&logoColor=white">
 </p>
 
 ## Engineering highlights
 
-The interesting problems this project solves:
+- **Client-side EXIF geolocation.** ExifReader extracts GPS coordinates and
+  capture time before upload, so a dropped photo places itself on the map.
+- **Graceful placement fallback.** A photo without GPS can be placed with a map
+  tap or projected along the selected day's route with Turf.js.
+- **Browser-side media pipeline.** Images are resized and thumbnailed before
+  upload, reducing storage and bandwidth.
+- **Transactional uploads.** If a database insert fails after an R2 upload, the
+  app attempts to remove the orphaned object and exposes a retryable error.
+- **Database-enforced authorization.** Neon Postgres RLS implements public
+  reads, member contributions, and owner-or-admin writes. Signing in alone does
+  not grant edit access.
+- **Low-churn collaboration.** Visible tabs refresh Neon data every 30 seconds
+  and immediately after local mutations. This replaces the previous Realtime
+  subscription while keeping the UI current without a permanent connection.
+- **Zero-config demo mode.** Without Neon endpoints, the app loads bundled
+  sample data. A Mapbox token is still needed to render map tiles.
 
-- **Client-side EXIF geolocation.** Photos are parsed in the browser with
-  ExifReader to pull GPS coordinates and capture time, so a dropped photo
-  places itself on the map with no server round-trip.
-- **Graceful placement fallback.** When a photo has no geotag, the user can
-  place it with a map tap, or the app auto-places it along the day's route
-  using Turf.js — so ungeotagged photos still land somewhere sensible.
-- **Browser-side image pipeline.** Uploads are downscaled and thumbnailed on a
-  canvas before they ever hit the network, keeping storage and bandwidth small.
-- **Transactional uploads.** If the database insert fails after a file is
-  stored, the orphaned object is cleaned up; failures are retryable rather than
-  leaving dangling storage.
-- **Real authorization, not a toy.** Postgres row-level security enforces
-  *public reads, member contributions, and owner-or-admin writes* at the
-  database — the client can't bypass it. Members self-serve admin requests that
-  existing admins approve in-app. Signing in alone never grants edit access.
-- **Live collaboration.** Supabase Realtime streams inserts/updates for photos,
-  notes, places, and routes, so a second browser sees changes appear instantly.
-- **Zero-config demo mode.** With no backend keys set, the app boots from
-  bundled sample data — which is exactly how the live demo above runs.
+## Product tour
 
-## A closer look
-
-**Journey mode** — step through a day's photos full-screen while a live minimap
-tracks where each shot was taken along the route.
+**Journey mode** steps through a day's media full-screen while a minimap tracks
+each shot along the route.
 
 ![Journey mode — full-screen photo playback with a live minimap tracking the route](docs/images/journey-mode.gif)
 
-The layout is fully responsive: the desktop sidebar collapses into a mobile
-bottom sheet, and every map layer, popup, and upload flow works on touch.
+The responsive desktop sidebar becomes a mobile bottom sheet, and the map,
+popups, upload flow, and administrative tools remain touch-friendly.
 
 <p align="center">
   <img alt="Mobile view with the itinerary bottom sheet and photo markers" src="docs/images/mobile.png" width="300">
 </p>
 
-## How it works
+## Runtime modes
 
-The app runs in two modes from the same codebase:
-
-- **Demo mode** — zero config. With no Supabase keys, the app loads bundled
-  sample data so the UI is fully explorable immediately. (A Mapbox token is
-  still needed for map tiles.) This is what powers the public demo.
-- **Supabase mode** — set the Supabase URL + anon key and it becomes a real
-  multi-user app backed by Postgres, Storage, Auth, row-level security, and
-  Realtime.
+- **Demo mode:** leave both Neon public endpoints unset. Bundled data powers the
+  interface, and mutations stay local to the browser session. Set
+  `NEXT_PUBLIC_LOCAL_DEMO_MODE=1` to force this mode on localhost even when
+  `.env.local` has backend credentials; the flag is ignored on deployed hosts.
+- **Shared mode:** configure Neon Auth, the Neon Data API, and Cloudflare R2.
+  The browser uses Neon Auth and the RLS-protected Data API. Uploads obtain
+  short-lived presigned R2 URLs from authenticated Next.js API routes; R2
+  credentials never reach the browser.
 
 ## Tech stack
 
-- **Next.js 16** (App Router) + **TypeScript** + **React 19**
-- **Tailwind CSS**
-- **Mapbox GL JS** — `outdoors-v12` style centered on Reine/Lofoten
-- **Supabase** — Postgres, Storage, Auth, membership roles, RLS, Realtime
-- **Turf.js** — GeoJSON route/distance utilities
-- **ExifReader** — client-side photo metadata parsing
-- **Vitest** + **Playwright** + **GitHub Actions** — unit, e2e, and CI
+- Next.js 16 (App Router), React 19, TypeScript 6, and Tailwind CSS
+- Mapbox GL JS and Turf.js for maps and route geometry
+- Neon Postgres, Neon Auth, and Neon Data API for data, identity, RPCs, and RLS
+- Cloudflare R2 for public trip media and avatars
+- ExifReader and browser canvas APIs for photo metadata and processing
+- Vitest, Playwright, and GitHub Actions for unit, end-to-end, and CI checks
 
 ## Quick start
 
 ```bash
 npm install
-cp .env.example .env.local   # add at least NEXT_PUBLIC_MAPBOX_TOKEN
-npm run dev                  # http://localhost:3000
+cp .env.example .env.local
+npm run dev
 ```
 
-Leave the Supabase variables blank to stay in demo mode. To force demo mode even
-when Supabase keys are present, set `NEXT_PUBLIC_LOCAL_DEMO_MODE=1` — it only
-takes effect on `localhost`/`127.0.0.1` and is ignored everywhere else.
+Add `NEXT_PUBLIC_MAPBOX_TOKEN` to render the map. Leave the Neon variables blank
+for demo mode.
 
 ### Environment variables
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `NEXT_PUBLIC_MAPBOX_TOKEN` | Yes | Mapbox access token for map tiles |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase mode | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase mode | Supabase public anon key |
-| `NEXT_PUBLIC_TRIP_SLUG` | Yes | Which trip to load (default `lofoten-2026`) |
-| `NEXT_PUBLIC_LOCAL_DEMO_MODE` | No | Set to `1` to force demo mode on localhost |
-| `NEXT_PUBLIC_SITE_URL` | Production | Canonical deployed origin used for social preview URLs |
+| Variable | Required | Scope | Purpose |
+| --- | --- | --- | --- |
+| `NEXT_PUBLIC_MAPBOX_TOKEN` | Map UI | Browser | Mapbox public access token |
+| `NEXT_PUBLIC_NEON_AUTH_URL` | Shared mode | Browser | Neon Auth endpoint |
+| `NEXT_PUBLIC_NEON_DATA_API_URL` | Shared mode | Browser + server | Neon Data API base URL |
+| `NEXT_PUBLIC_R2_PUBLIC_URL` | Shared mode | Browser | Public media origin, without a trailing slash |
+| `NEXT_PUBLIC_TRIP_SLUG` | Yes | Browser | Trip to load; defaults to `lofoten-2026` |
+| `NEXT_PUBLIC_LOCAL_DEMO_MODE` | No | Browser | `1` forces demo mode on localhost only |
+| `NEXT_PUBLIC_SITE_URL` | Production | Browser | Canonical deployment origin for social metadata |
+| `R2_ACCOUNT_ID` | Shared mode | Server only | Cloudflare account containing the bucket |
+| `R2_ACCESS_KEY_ID` | Shared mode | Server only | R2 S3 API token access key |
+| `R2_SECRET_ACCESS_KEY` | Shared mode | Server only | R2 S3 API token secret |
+| `R2_BUCKET_NAME` | Shared mode | Server only | Bucket containing both media namespaces |
 
-All variables are `NEXT_PUBLIC_*` and shipped to the browser. **Never** put a
-Supabase service role key here or in Vercel — the client only needs the public
-URL and anon key.
+Only `NEXT_PUBLIC_*` variables are bundled into client JavaScript. Never prefix
+R2 credentials or a Neon database connection string with `NEXT_PUBLIC_`.
+
+The R2 bucket stores two top-level namespaces while preserving the historical
+bucket-relative paths:
+
+```text
+trip-photos/<existing photo path>
+avatars/<existing avatar path>
+```
+
+The bucket must allow browser `PUT` requests from the deployed and local app
+origins with `Content-Type`, `Cache-Control`, and `If-None-Match` headers. Public
+`GET` access is supplied by `NEXT_PUBLIC_R2_PUBLIC_URL`.
 
 ## Architecture
 
-```
-app/            Next.js App Router entry (single-page map UI in page.tsx)
-components/     Map view, layers, sidebar/mobile sheet, upload/note/route panels,
-                admin data panel, legend
-lib/            access (role/UI access derivation), exif (EXIF parsing),
-                photo-processing (downscale + thumbnails), geo (GeoJSON
-                helpers), supabase (browser client), utils
-                — with co-located *.test.ts suites
-supabase/       schema.sql, seed.sql, grant-member.sql, migrations/
-types/          shared trip data types
-docs/           work log and todo/roadmap notes
+```text
+app/                  Next.js UI and authenticated R2 API routes
+components/           map, journey, upload, profile, and admin interfaces
+lib/backend.ts        Neon Auth + Data API browser client
+lib/object-store*.ts  public R2 URLs, presigned uploads, and guarded deletion
+lib/hooks/            auth, data loading, 30-second polling, and mutations
+neon/                 target schema plus export/import/verification runbook
+supabase/              historical source schema and rollback artifact
+types/                 shared trip data types
 ```
 
-The map layer is structured so a future 3D terrain toggle can add a raster DEM
-source and call `setTerrain` without reworking the architecture.
+Neon RLS remains the source of truth for authorization. The R2 API routes pass
+the caller's Neon access token to narrowly scoped database RPCs before signing
+an upload or deleting an object. R2 secrets are used only on the server.
 
-## Features
+## Shared-backend setup
 
-- Full-screen responsive map with a desktop sidebar and a mobile bottom sheet
-- Trip-day filtering over a seeded itinerary, with admin-editable day details
-- Route segments (ferry / bus / other modes) rendered and styled from GeoJSON
-- Photo, note, and place marker layers with popups and a map legend
-- Add-note flow that uses a map click/tap for location
-- Photo upload pipeline: bulk queue with per-photo review and day assignment,
-  client-side EXIF GPS + timestamp extraction, image downscaling and thumbnail
-  generation, manual or route-based auto-placement, and retryable failures with
-  storage cleanup
-- Admin tools: draw route segments, edit trip/day/route/place/photo data,
-  manage membership, and review admin-access requests
-- Supabase Realtime for photos, notes, places, and route segments
-- Row-level security: public reads, member contributions, owner/admin writes
+1. Create a Neon project, enable Neon Auth and the Neon Data API, then apply
+   [`neon/schema.sql`](neon/schema.sql). Configure the app origins as trusted
+   Auth/CORS origins and enable email OTP and/or Google OAuth.
+2. Create one R2 bucket and an S3-compatible API token scoped to that bucket.
+   Configure its browser CORS policy and public media origin.
+3. Add all shared-mode variables from `.env.example` locally and in Vercel.
+4. Load seed data for a new installation, or follow the guarded migration
+   workflow in [`neon/README.md`](neon/README.md).
+5. Sign in, ensure the initial account has an admin `trip_members` row, and
+   smoke-test guest, member, owner, and admin behavior.
+
+The browser's Neon endpoints are public configuration, not database
+credentials. Data API grants plus RLS protect table and RPC access.
+
+## Supabase migration and rollback
+
+[`neon/README.md`](neon/README.md) is the executable migration runbook. It
+covers the consistent Supabase export, verified email-based identity remap,
+atomic Neon import, row-count/security checks, R2 copy ordering, cutover, and
+staging cleanup.
+
+The `supabase/` directory is intentionally retained. It records the source
+schema and old migrations and is useful for auditing or rollback; it is not the
+active runtime backend. The old Supabase project should remain unchanged during
+the rollback window. A rollback consists of restoring the previous deployment
+environment variables/build, reopening writes there, and treating Neon/R2 as
+read-only until the cause is understood. Never write to both backends during a
+rollback or cutover.
+
+Before retiring Supabase, verify at least:
+
+- all eight table counts and user mappings match the migration report;
+- every referenced photo, thumbnail, and avatar resolves from R2;
+- anonymous reads, OTP/Google sign-in, and sign-out work;
+- member note/photo create-update-delete behavior is correctly scoped;
+- admin membership, profile, itinerary, route, and request RPCs work; and
+- a second visible browser receives the next 30-second refresh.
 
 ## Development
 
 ```bash
-npm run dev            # local dev server
+npm run dev            # local development server
 npm run lint           # ESLint
 npm run typecheck      # next typegen + tsc --noEmit
-npm run test           # Vitest unit suite (one-off)
-npm run test:watch     # Vitest in watch mode
-npm run test:coverage  # unit suite with a coverage report
-npm run test:e2e       # Playwright end-to-end suite (demo-mode build)
+npm run test           # Vitest unit suite
+npm run test:watch     # Vitest watch mode
+npm run test:coverage  # coverage report
+npm run test:e2e       # Playwright against a demo-mode production build
 npm run build          # production build
-npm run ci             # lint + typecheck + test (mirrors CI)
+npm run ci             # lint + typecheck + unit tests
 ```
 
-Unit tests live next to the code they cover (`lib/*.test.ts`) and run under
-[Vitest](https://vitest.dev). GitHub Actions runs `lint`, `typecheck`, `test`,
-and a demo-mode `build` on every push and pull request to `main`
-(see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
-
-## Deployment & Supabase setup
-
-The public demo deploys as a standard demo-mode Next.js project. To stand up the
-full multi-user backend, expand the sections below.
-
-<details>
-<summary><strong>Supabase setup</strong> — schema, auth, and your first admin</summary>
-
-Keep the Supabase variables empty to stay in demo mode. To enable shared mode:
-
-1. Create a Supabase project.
-2. In **Authentication**, enable email magic links / OTP.
-3. In the **SQL Editor**, run `supabase/schema.sql`, then `supabase/seed.sql`.
-4. Put the project URL and anon key in `.env.local`, start the app, and sign in
-   once with your email.
-5. Edit `supabase/grant-member.sql` with your email and run it to make your
-   first account an admin.
-6. Reload — you should see the seeded trip and admin controls.
-7. Friends can view the trip without signing in. To contribute, a friend first
-   signs in once so Supabase creates their Auth account; an admin then adds that
-   email from the in-app Members panel. Their next reload enables notes/photos
-   and admin-access requests.
-
-### What the schema sets up
-
-`schema.sql` creates the trip data model (`trips`, `days`, `route_segments`,
-`photos`, `notes`, `places`, `trip_members`, `admin_requests`), the
-`trip-photos` Storage bucket, member/admin RPCs, Realtime publication for the
-collaborative tables, and RLS policies:
-
-- **Reads are public** — `select` is granted to `anon` with `using (true)`, so
-  anyone can view the trip without an account.
-- **Contribution is invite-only** — signing in does not create a membership.
-  An existing admin must add the account email from the Members panel after the
-  person has signed in once (or use `grant-member.sql` for initial setup).
-- **Notes and photos** can be created by any signed-in member; each row is
-  updatable and deletable by its owner or a trip admin.
-- **Trips, days, routes, places, and membership** are admin-scoped.
-- **Admin requests** are visible to the requester and existing admins; admins
-  can approve or deny them from the Members panel.
-
-### Photo storage
-
-`trip-photos` is a **public** bucket. The `photos` table stores storage *paths*
-(`image_path` / `thumbnail_path`), and the app resolves them to plain public URLs
-with `getPublicUrl` (`resolvePhotoUrls` in [`lib/supabase.ts`](lib/supabase.ts)) —
-a synchronous string build, no signing or expiry, so images load for everyone.
-
-If you are upgrading an existing project, re-run `supabase/schema.sql`: it flips
-the bucket to public and (for older databases) migrates the old `image_url` /
-`thumbnail_url` columns to `image_path` / `thumbnail_path`.
-
-If the deployed app says Supabase could not find `public.admin_requests` in the
-schema cache, your database is behind the app code. Re-run `supabase/schema.sql`
-in the Supabase SQL Editor, then refresh the app after Supabase has reloaded its
-API schema cache. The trip can still load while that feature is unavailable.
-
-</details>
-
-<details>
-<summary><strong>Supabase CLI workflow</strong> — migrations against a linked project</summary>
-
-This repo is initialized for the Supabase CLI. The current schema is captured as
-an initial idempotent migration in `supabase/migrations/`, while
-`supabase/schema.sql` remains a convenient SQL Editor recovery file.
-
-Install/authenticate/link once:
-
-```bash
-brew install supabase/tap/supabase
-supabase login
-supabase link --project-ref YOUR_PROJECT_REF
-```
-
-Then use:
-
-```bash
-npm run supabase:migrations  # compare local/remote migration history
-npm run supabase:db:dry-run  # preview what would be pushed
-npm run supabase:db:push     # apply pending migrations to the linked project
-```
-
-For an existing remote database, run the dry-run first. If Supabase reports that
-the baseline migration history is out of sync, repair the migration history or
-run the idempotent schema once from the SQL Editor before relying on `db push`
-for future changes.
-
-</details>
-
-<details>
-<summary><strong>Deploying to Vercel</strong> — env vars, auth URLs, and smoke test</summary>
-
-The app deploys as a standard Next.js project — Vercel runs `next build`
-automatically, and CI validates a production build on every PR.
-
-1. **Import the repo in Vercel** (New Project → import).
-2. **Add environment variables** in Project Settings → Environment Variables:
-
-   ```bash
-   NEXT_PUBLIC_MAPBOX_TOKEN=
-   NEXT_PUBLIC_SUPABASE_URL=
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=
-   NEXT_PUBLIC_TRIP_SLUG=lofoten-2026
-   ```
-
-   (Omit the Supabase pair to deploy a public demo-mode build.)
-3. **Point Supabase Auth at the deployment** under Authentication → URL
-   Configuration:
-   - Site URL: `https://your-app.vercel.app`
-   - Redirect URLs: `https://your-app.vercel.app/**` (keep
-     `http://localhost:3000/**` while developing locally)
-4. **Run the SQL** if you haven't: `supabase/schema.sql`, then
-   `supabase/seed.sql`.
-5. **Sign in once** from the deployed app, then run `supabase/grant-member.sql`
-   for your email to make that first account an admin. Reload.
-6. **Smoke test:**
-   - Signed-out visitors see the seeded trip (reads are public); the "Sign in"
-     button opens the optional sign-in panel.
-   - Your admin account shows contribute/admin controls; a guest does not.
-   - A newly signed-in, uninvited account remains view-only.
-   - After an admin adds that account's email in Members and it reloads, the
-     friend can contribute notes/photos and request admin access.
-   - A note saves and survives reload.
-   - A small photo uploads, renders on the map, and survives reload.
-   - An admin can approve/deny admin requests and adjust member roles.
-   - Realtime updates appear in a second browser session.
-
-</details>
+Unit tests are colocated with the modules they cover. CI runs lint, typecheck,
+tests, and a demo-mode production build. The Playwright suite forces local demo
+mode and does not contact Neon, R2, or the retired Supabase runtime.
 
 ## Roadmap
 
-See [`docs/TODO.md`](docs/TODO.md) for the working todo list and
-[`docs/WORKLOG.md`](docs/WORKLOG.md) for the project log. Larger next moves:
-
-- Pending invites or email notifications for friends who have not signed in yet
-- Extend test coverage to the EXIF file-reading and canvas/thumbnail paths
-- Route import from GPX/KML
-- Offline-friendly drafts for notes and uploads
-- Mapbox 3D terrain / flyover scenic mode
-- Comments/reactions and richer day journal entries
+See [`docs/TODO.md`](docs/TODO.md) for active work and
+[`docs/WORKLOG.md`](docs/WORKLOG.md) for completed checkpoints.

@@ -11,20 +11,15 @@ describe("invite-only contribution contract", () => {
     expect(source).not.toContain('rpc("ensure_trip_membership"');
   });
 
-  it("removes the legacy self-enrollment RPC from fresh and upgraded databases", () => {
-    const schema = read("supabase/schema.sql");
-    const migration = read("supabase/migrations/20260711120000_invite_only_contributions.sql");
-
-    expect(schema).toContain("drop function if exists public.ensure_trip_membership(text)");
-    expect(schema).not.toContain("create or replace function public.ensure_trip_membership");
-    expect(schema).not.toContain("grant execute on function public.ensure_trip_membership");
-    expect(migration).toContain("drop function if exists public.ensure_trip_membership(text)");
+  it("does not expose the legacy self-enrollment RPC in Neon", () => {
+    const schema = read("neon/schema.sql");
+    expect(schema).not.toContain("ensure_trip_membership");
   });
 
   it("retains public reads and the admin invitation RPC", () => {
-    const schema = read("supabase/schema.sql");
-    expect(schema).toContain('create policy "public read trips" on trips for select to anon, authenticated using (true)');
-    expect(schema).toContain("create or replace function public.grant_trip_member_by_email");
+    const schema = read("neon/schema.sql");
+    expect(schema).toMatch(/create policy "public read trips"\s+on public\.trips for select to anonymous, authenticated using \(true\)/);
+    expect(schema).toContain("create function public.grant_trip_member_by_email");
     expect(schema).toContain("grant execute on function public.grant_trip_member_by_email(text, text, text) to authenticated");
   });
 });
