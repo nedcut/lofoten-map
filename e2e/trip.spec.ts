@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-// All specs run against demo mode (bundled sample data, no Supabase), so they
-// assert on the app shell and data flows rather than live Supabase data.
+// All specs run against demo mode (bundled sample data, no Neon or R2), so they
+// assert on the app shell and data flows rather than live backend data.
 // Map-canvas behavior is deliberately out of scope because CI has no token.
 
 test.describe("desktop", { tag: "@desktop" }, () => {

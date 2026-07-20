@@ -1,7 +1,7 @@
 import type { AdminRequest, TripMember } from "@/types/trip";
 
 type AccessInput = {
-  supabaseEnabled: boolean;
+  backendEnabled: boolean;
   userId: string | null;
   members: TripMember[];
   adminRequests: AdminRequest[];
@@ -22,9 +22,9 @@ function newestFirst<T extends { created_at: string }>(items: T[]) {
   return [...items].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 }
 
-export function deriveTripAccess({ supabaseEnabled, userId, members, adminRequests }: AccessInput): TripAccessState {
+export function deriveTripAccess({ backendEnabled, userId, members, adminRequests }: AccessInput): TripAccessState {
   const currentMember = userId ? members.find((member) => member.user_id === userId) ?? null : null;
-  const isDemoMode = !supabaseEnabled;
+  const isDemoMode = !backendEnabled;
   const isAdmin = isDemoMode || currentMember?.role === "admin";
   const canContribute = isDemoMode || Boolean(currentMember);
   const currentUserAdminRequest = userId
@@ -40,6 +40,6 @@ export function deriveTripAccess({ supabaseEnabled, userId, members, adminReques
     canContribute,
     isAdmin,
     showMemberAdminControls: currentMember?.role === "admin",
-    showAdminRequestControls: Boolean(supabaseEnabled && currentMember && currentMember.role !== "admin"),
+    showAdminRequestControls: Boolean(backendEnabled && currentMember && currentMember.role !== "admin"),
   };
 }

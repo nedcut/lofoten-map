@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { siteUrl } from "@/lib/site-url";
@@ -20,14 +20,16 @@ export const viewport: Viewport = {
   themeColor: "#e7efe8",
 };
 
-// Origin of the Supabase project (storage + realtime). Derived from the public
-// env var so a preconnect can warm the TLS handshake before the first photo or
-// data request fires.
-const supabaseOrigin = (() => {
+// Origins of the Neon API and R2 public media endpoint. Preconnecting warms the
+// TLS handshakes before the first data and gallery requests.
+const backendOrigins = (() => {
   try {
-    return process.env.NEXT_PUBLIC_SUPABASE_URL ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin : null;
+    return [...new Set([
+      process.env.NEXT_PUBLIC_NEON_DATA_API_URL,
+      process.env.NEXT_PUBLIC_R2_PUBLIC_URL,
+    ].filter(Boolean).map((url) => new URL(url!).origin))];
   } catch {
-    return null;
+    return [];
   }
 })();
 
@@ -36,17 +38,17 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="en">
       <head>
         {/* Warm the connections the map and gallery need on first paint: Mapbox
-            style/tiles/telemetry and Supabase storage. preconnect opens the
+            style/tiles/telemetry, Neon, and R2. preconnect opens the
             TCP+TLS early; dns-prefetch is the cheaper fallback for older browsers. */}
         <link rel="preconnect" href="https://api.mapbox.com" crossOrigin="" />
         <link rel="preconnect" href="https://events.mapbox.com" crossOrigin="" />
         <link rel="dns-prefetch" href="https://api.mapbox.com" />
-        {supabaseOrigin ? (
-          <>
-            <link rel="preconnect" href={supabaseOrigin} crossOrigin="" />
-            <link rel="dns-prefetch" href={supabaseOrigin} />
-          </>
-        ) : null}
+        {backendOrigins.map((origin) => (
+          <Fragment key={origin}>
+            <link rel="preconnect" href={origin} crossOrigin="" />
+            <link rel="dns-prefetch" href={origin} />
+          </Fragment>
+        ))}
       </head>
       <body>
         {children}

@@ -21,3 +21,6 @@ npm-debug.log*
 .next-e2e
 /test-results
 /playwright-report
+
+# Cloudflare Wrangler local state
+.wrangler/

@@ -1,8 +1,8 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { BackendClient } from "@/lib/backend";
 import { mapWithConcurrency } from "./concurrency";
 import { prepareMediaFiles, storageFileExtension } from "./media-processing";
 import { partitionDuplicatePhotos } from "./photo-dedup";
-import { IMMUTABLE_CACHE_SECONDS, PHOTO_BUCKET } from "./supabase";
+import { deleteObjects, IMMUTABLE_CACHE_SECONDS, PHOTO_BUCKET, uploadObject } from "./object-store";
 import type { LngLat, Photo } from "@/types/trip";
 
 export type PhotoBatchInput = {
@@ -53,7 +53,7 @@ type PendingRow = {
 };
 
 /**
- * Upload a batch of media files to Supabase Storage and insert their rows.
+ * Upload a batch of media files to R2 and insert their rows.
  *
  * Stages: skip duplicates already in `existingPhotos`, upload image +
  * thumbnail concurrently per item (bounded by `concurrency`), re-check
@@ -66,16 +66,27 @@ type PendingRow = {
  * Pure orchestration over the injected client — UI state (error banners,
  * reloads, panel close) stays with the caller, driven by the outcome.
  */
+type ObjectStoreOperations = {
+  upload: (path: string, file: Blob, options: { cacheControl: string; contentType?: string }) => Promise<{ error: { message: string; statusCode?: number | string } | null }>;
+  remove: (paths: string[]) => Promise<{ error: { message: string } | null }>;
+};
+
 export async function uploadPhotoBatch(options: {
-  supabase: SupabaseClient;
+  backend: BackendClient;
   trip: { id: string; slug: string };
   existingPhotos: Photo[];
   uploaderName: string;
   inputs: PhotoBatchInput[];
   concurrency: number;
   onItemComplete: () => void;
+  /** Test seam for the two HTTP-backed object-store operations. */
+  objectStore?: ObjectStoreOperations;
 }): Promise<PhotoBatchOutcome> {
-  const { supabase, trip, existingPhotos, uploaderName, inputs, concurrency, onItemComplete } = options;
+  const { backend, trip, existingPhotos, uploaderName, inputs, concurrency, onItemComplete } = options;
+  const objectStore: ObjectStoreOperations = options.objectStore ?? {
+    upload: (path, file, uploadOptions) => uploadObject(backend, PHOTO_BUCKET, path, file, uploadOptions),
+    remove: (paths) => deleteObjects(backend, PHOTO_BUCKET, paths),
+  };
   const rows: PendingRow[] = [];
   const failures: string[] = [];
   const warnings: string[] = [];
@@ -92,7 +103,7 @@ export async function uploadPhotoBatch(options: {
   // objects in the first place, so a failed removal is reported, not dropped.
   const removeObjects = async (paths: string[], label: string) => {
     if (paths.length === 0) return;
-    const { error } = await supabase.storage.from(PHOTO_BUCKET).remove(paths);
+    const { error } = await objectStore.remove(paths);
     if (error) warnings.push(`${label}: storage cleanup failed (${error.message})`);
   };
 
@@ -127,9 +138,9 @@ export async function uploadPhotoBatch(options: {
     // The thumbnail never depends on the image upload, so both go up
     // together instead of back to back.
     const [imageUpload, thumbnailUpload] = await Promise.all([
-      supabase.storage.from(PHOTO_BUCKET).upload(path, prepared.imageFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: false, contentType: prepared.imageFile.type || undefined }),
+      objectStore.upload(path, prepared.imageFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, contentType: prepared.imageFile.type || undefined }),
       prepared.thumbnailFile && thumbnailPath
-        ? supabase.storage.from(PHOTO_BUCKET).upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, upsert: false, contentType: prepared.thumbnailFile.type })
+        ? objectStore.upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, contentType: prepared.thumbnailFile.type })
         : Promise.resolve(null),
     ]);
     if (imageUpload.error && !isAlreadyStored(imageUpload.error)) {
@@ -172,7 +183,7 @@ export async function uploadPhotoBatch(options: {
       // Re-check hashes against the database rather than local state, so a
       // photo someone else uploaded mid-batch is skipped instead of failing
       // the whole insert on the unique index.
-      const { data: clashData, error: clashError } = await supabase
+      const { data: clashData, error: clashError } = await backend
         .from("photos")
         .select("content_hash,image_path,thumbnail_path")
         .eq("trip_id", trip.id)
@@ -213,13 +224,13 @@ export async function uploadPhotoBatch(options: {
         exif_found: row.exif_found,
       }));
       if (insertRows.length > 0) {
-        const { data: returnedRows, error: insertError } = await supabase.from("photos").insert(insertRows).select();
+        const { data: returnedRows, error: insertError } = await backend.from("photos").insert(insertRows).select();
         if (insertError) {
           // The likely insert error is the unique index: a racer inserted one
           // of these hashes after the clash check above, and that row now
           // references our content-addressed paths. Re-check which hashes
           // gained rows and remove only the paths nothing references.
-          const { data: recheckData, error: recheckError } = await supabase
+          const { data: recheckData, error: recheckError } = await backend
             .from("photos")
             .select("content_hash,image_path,thumbnail_path")
             .eq("trip_id", trip.id)

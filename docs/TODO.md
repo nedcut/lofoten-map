@@ -15,10 +15,12 @@ passes over broad rewrites.
   the current shell/day-filter/marker-popup/draft-restore specs — e.g. the
   note flow and the full upload placement walk-through; route auto-placement
   is now unit-tested in lib/upload-queue.test.ts.
-- Verify the auto-join + admin-request flow against a real Supabase project as:
+- Verify the membership + admin-request flow against the production Neon branch as:
   guest, newly signed-in member, existing admin, and demoted member.
 - Add a thin integration smoke test around the admin-request RPCs once a test
-  Supabase project or local Supabase test harness is in place.
+  Neon branch/test harness is in place.
+- Add an automated R2 inventory check that compares object keys with the photo
+  and avatar paths referenced by Neon without performing deletion.
 
 ## Product Gaps
 

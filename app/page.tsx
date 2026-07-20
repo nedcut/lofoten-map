@@ -29,7 +29,8 @@ import { clearNoteDraft } from "@/lib/offline-drafts";
 import { addNote, addRoute, prependPhotos } from "@/lib/local-trip-store";
 import { prepareMediaFiles } from "@/lib/media-processing";
 import { uploadPhotoBatch } from "@/lib/photo-upload";
-import { getSupabaseBrowserClient, resolvePhotoUrls } from "@/lib/supabase";
+import { getBackendBrowserClient } from "@/lib/backend";
+import { resolvePhotoUrls } from "@/lib/object-store";
 import { applyTripUrlState, formatDayParam, formatItemToken, parseItemToken, readTripUrlState, resolveDayParam } from "@/lib/trip-url";
 import { deriveDayStats, deriveOutlierOverlay, filterTripItemsByDay, resolveEditTarget } from "@/lib/trip-view-model";
 import { cn } from "@/lib/utils";
@@ -49,7 +50,7 @@ const UploadPhotoPanel = dynamic(() => import("@/components/UploadPhotoPanel").t
 const UPLOAD_CONCURRENCY = 4;
 
 export default function Home() {
-  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const backend = useMemo(() => getBackendBrowserClient(), []);
   const tripSlug = process.env.NEXT_PUBLIC_TRIP_SLUG ?? "lofoten-2026";
   const {
     user,
@@ -62,7 +63,7 @@ export default function Home() {
     signIn,
     signInWithGoogle,
     signOut,
-  } = useTripAuth(supabase);
+  } = useTripAuth(backend);
   const {
     data,
     setData,
@@ -75,11 +76,11 @@ export default function Home() {
     adminRequestsAvailable,
     profilesAvailable,
   } = useTripData({
-    supabase,
+    backend,
     user,
     authLoading,
     tripSlug,
-    initialData: supabase ? emptyTripData : demoTripData,
+    initialData: backend ? emptyTripData : demoTripData,
   });
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
@@ -118,8 +119,8 @@ export default function Home() {
   const journeyOpen = Boolean(activeJourneyId);
 
   const access = useMemo(
-    () => deriveTripAccess({ supabaseEnabled: Boolean(supabase), userId: user?.id ?? null, members: data.members, adminRequests: data.adminRequests }),
-    [data.adminRequests, data.members, supabase, user?.id],
+    () => deriveTripAccess({ backendEnabled: Boolean(backend), userId: user?.id ?? null, members: data.members, adminRequests: data.adminRequests }),
+    [backend, data.adminRequests, data.members, user?.id],
   );
   const { currentMember, currentUserId, canContribute, isAdmin } = access;
 
@@ -135,7 +136,7 @@ export default function Home() {
   // Domain mutation hooks. Each owns its own status channel and the demo-mode
   // vs. Supabase write paths, keeping this component focused on view state.
   const { isSaving: profileSaving, saveProfile } = useProfile({
-    supabase,
+    backend,
     user,
     currentMember,
     trip: data.trip,
@@ -145,7 +146,7 @@ export default function Home() {
     onSaved: () => setProfilePanelOpen(false),
   });
   const { status: memberStatus, grantMember, requestAdmin, setMemberRole, resolveAdminRequest } = useMembership({
-    supabase,
+    backend,
     trip: data.trip,
     loadData,
   });
@@ -162,7 +163,7 @@ export default function Home() {
     deleteDataItem,
     importGpx,
   } = useTripMutations({
-    supabase,
+    backend,
     user,
     isAdmin,
     data,
@@ -563,12 +564,12 @@ export default function Home() {
     let didSave = false;
     try {
       const row = { trip_id: data.trip.id, day_id: input.dayId, user_id: user?.id ?? null, author_name: input.authorName || "Friend", lat: pendingCoordinate.lat, lng: pendingCoordinate.lng, body: input.body, note_type: "note" };
-      if (supabase) {
+      if (backend) {
         if (!user) {
-          setError("Sign in before saving notes to Supabase.");
+          setError("Sign in before saving notes.");
           return;
         }
-        const { error: insertError } = await supabase.from("notes").insert(row);
+        const { error: insertError } = await backend.from("notes").insert(row);
         if (insertError) setError(insertError.message);
         else {
           await loadData();
@@ -607,7 +608,7 @@ export default function Home() {
       onProgress({ completed: completedUploads, total: inputs.length });
     };
     try {
-      if (!supabase) {
+      if (!backend) {
         const rows = await Promise.all(inputs.map(async (input) => {
           const prepared = await prepareMediaFiles(input.file);
           const row = {
@@ -639,11 +640,11 @@ export default function Home() {
         didSave = true;
       } else {
         if (!user) {
-          setError("Sign in before uploading media to Supabase.");
+          setError("Sign in before uploading media.");
           return;
         }
         const outcome = await uploadPhotoBatch({
-          supabase,
+          backend,
           trip: { id: data.trip.id, slug: data.trip.slug },
           existingPhotos: data.photos,
           uploaderName,
@@ -658,7 +659,7 @@ export default function Home() {
           // Patch the returned rows into local state instead of refetching
           // every table; the realtime echo of this insert upserts by id, so
           // the two paths converge instead of duplicating.
-          const resolved = resolvePhotoUrls(supabase, outcome.insertedRows);
+          const resolved = resolvePhotoUrls(outcome.insertedRows);
           const insertedIds = new Set(resolved.map((row) => row.id));
           setData((current) => ({ ...current, photos: [...resolved, ...current.photos.filter((photo) => !insertedIds.has(photo.id))] }));
           didSave = true;
@@ -682,7 +683,7 @@ export default function Home() {
 
   async function saveRoute(input: { name: string; dayId: string | null; mode: RouteMode }) {
     if (routeDraftPoints.length < 2 || !data.trip) return;
-    if (supabase && !isAdmin) {
+    if (backend && !isAdmin) {
       setError("Only trip admins can save routes.");
       return;
     }
@@ -704,12 +705,12 @@ export default function Home() {
         elevation_gain_meters: null,
       };
 
-      if (supabase) {
+      if (backend) {
         if (!user) {
-          setError("Sign in before saving routes to Supabase.");
+          setError("Sign in before saving routes.");
           return;
         }
-        const { error: insertError } = await supabase.from("route_segments").insert(row);
+        const { error: insertError } = await backend.from("route_segments").insert(row);
         if (insertError) setError(insertError.message);
         else {
           await loadData();
@@ -736,7 +737,7 @@ export default function Home() {
           <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#d0872f]" /> <span className="truncate">{tripTitle}</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{supabase ? (user ? (currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only") : "Viewing as guest") : "Local demo mode"}</div>
+          <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{backend ? (user ? (currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only") : "Viewing as guest") : "Local demo mode"}</div>
           <button
             onClick={startJourney}
             disabled={journeyItems.length === 0}
@@ -745,7 +746,7 @@ export default function Home() {
           >
             <Play className="h-3.5 w-3.5 fill-current text-[#d0872f]" /> <span className="hidden sm:inline">Relive</span>
           </button>
-          {supabase && user && currentMember && profilesAvailable ? (
+          {backend && user && currentMember && profilesAvailable ? (
             <button onClick={() => setProfilePanelOpen(true)} aria-label="Edit your profile" className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] py-1 pl-1 pr-3 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">
               <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-stone-200">
                 {currentMember.avatar_url ? (
@@ -758,8 +759,8 @@ export default function Home() {
               <span className="hidden sm:inline">Profile</span>
             </button>
           ) : null}
-          {supabase && user ? <button onClick={signOut} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign out</button> : null}
-          {supabase && !authLoading && !user ? <button onClick={() => setAuthPanelOpen(true)} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign in</button> : null}
+          {backend && user ? <button onClick={signOut} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign out</button> : null}
+          {backend && !authLoading && !user ? <button onClick={() => setAuthPanelOpen(true)} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign in</button> : null}
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
@@ -776,8 +777,8 @@ export default function Home() {
       {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
-      {supabase && !authLoading && !user && authPanelOpen ? <AuthPanel message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
-      {supabase && user && currentMember && profilesAvailable && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
+      {backend && !authLoading && !user && authPanelOpen ? <AuthPanel message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
+      {backend && user && currentMember && profilesAvailable && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
       {panel === "note" ? <AddNotePanel tripSlug={tripSlug} days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} existingPhotos={data.photos} tripSlug={tripSlug} mapAvailable={mapActionsEnabled} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}

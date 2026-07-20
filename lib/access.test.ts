@@ -32,16 +32,16 @@ function request(overrides: Partial<AdminRequest>): AdminRequest {
 }
 
 describe("deriveTripAccess", () => {
-  it("treats demo mode as editable without a Supabase member", () => {
-    const access = deriveTripAccess({ supabaseEnabled: false, userId: null, members: [], adminRequests: [] });
+  it("treats demo mode as editable without a backend member", () => {
+    const access = deriveTripAccess({ backendEnabled: false, userId: null, members: [], adminRequests: [] });
     expect(access.canContribute).toBe(true);
     expect(access.isAdmin).toBe(true);
     expect(access.showMemberAdminControls).toBe(false);
     expect(access.showAdminRequestControls).toBe(false);
   });
 
-  it("keeps signed-out Supabase visitors in public view-only mode", () => {
-    const access = deriveTripAccess({ supabaseEnabled: true, userId: null, members: [member({})], adminRequests: [] });
+  it("keeps signed-out backend visitors in public view-only mode", () => {
+    const access = deriveTripAccess({ backendEnabled: true, userId: null, members: [member({})], adminRequests: [] });
     expect(access.currentMember).toBeNull();
     expect(access.canContribute).toBe(false);
     expect(access.isAdmin).toBe(false);
@@ -51,7 +51,7 @@ describe("deriveTripAccess", () => {
 
   it("keeps a signed-in but uninvited visitor in view-only mode", () => {
     const access = deriveTripAccess({
-      supabaseEnabled: true,
+      backendEnabled: true,
       userId: "visitor-1",
       members: [member({ user_id: "friend-1" })],
       adminRequests: [],
@@ -66,7 +66,7 @@ describe("deriveTripAccess", () => {
 
   it("lets signed-in members contribute and request admin access", () => {
     const current = member({ user_id: "user-1", role: "member" });
-    const access = deriveTripAccess({ supabaseEnabled: true, userId: "user-1", members: [current], adminRequests: [] });
+    const access = deriveTripAccess({ backendEnabled: true, userId: "user-1", members: [current], adminRequests: [] });
     expect(access.currentMember).toBe(current);
     expect(access.canContribute).toBe(true);
     expect(access.isAdmin).toBe(false);
@@ -76,7 +76,7 @@ describe("deriveTripAccess", () => {
 
   it("shows admin management controls only to current admins", () => {
     const current = member({ user_id: "admin-1", role: "admin" });
-    const access = deriveTripAccess({ supabaseEnabled: true, userId: "admin-1", members: [current], adminRequests: [] });
+    const access = deriveTripAccess({ backendEnabled: true, userId: "admin-1", members: [current], adminRequests: [] });
     expect(access.currentMember).toBe(current);
     expect(access.canContribute).toBe(true);
     expect(access.isAdmin).toBe(true);
@@ -86,7 +86,7 @@ describe("deriveTripAccess", () => {
 
   it("chooses the newest request for the current user even if rows arrive unsorted", () => {
     const access = deriveTripAccess({
-      supabaseEnabled: true,
+      backendEnabled: true,
       userId: "user-1",
       members: [member({})],
       adminRequests: [
@@ -99,7 +99,7 @@ describe("deriveTripAccess", () => {
 
   it("returns pending admin requests newest first for admin review", () => {
     const access = deriveTripAccess({
-      supabaseEnabled: true,
+      backendEnabled: true,
       userId: "admin-1",
       members: [member({ user_id: "admin-1", role: "admin" })],
       adminRequests: [
