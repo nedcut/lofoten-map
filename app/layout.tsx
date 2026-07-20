@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Fragment, type ReactNode } from "react";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { siteUrl } from "@/lib/site-url";
 import "./globals.css";
 
@@ -48,7 +50,13 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
           </Fragment>
         ))}
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* Vercel page-view analytics and Core Web Vitals reporting. Both are
+            no-ops off Vercel, so local dev and the E2E build stay untouched. */}
+        <Analytics />
+        <SpeedInsights />
+      </body>
     </html>
   );
 }
