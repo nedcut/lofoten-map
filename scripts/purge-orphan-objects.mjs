@@ -1,3 +1,8 @@
+// ARCHIVED SUPABASE INVENTORY TOOL.
+// This script targets the retired Supabase REST and Storage APIs. Do not use it
+// to inventory Cloudflare R2: its listing and authorization model are different.
+// It remains read-only and is retained only for source/rollback auditing.
+//
 // Delete storage objects in the photo bucket that no photos row references.
 //
 // Legacy failed batches can leave UUID-path objects behind. Content-addressed

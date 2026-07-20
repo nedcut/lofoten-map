@@ -1,9 +1,9 @@
 import type { Day, LngLat, Note, Photo, Place, RouteSegment, Trip, TripData } from "@/types/trip";
 
-// Pure transforms for the demo-mode (no-Supabase) branches of the trip mutation
+// Pure transforms for the demo-mode (no-backend) branches of the trip mutation
 // hooks. Every function takes the current TripData and returns a new value
 // without mutating the input, so they can be unit-tested in isolation and
-// reasoned about independently of React. The Supabase branches reload from the
+// reasoned about independently of React. The Neon branches reload from the
 // server instead and never touch these.
 
 export type DeletableTable = "days" | "route_segments" | "notes" | "places" | "photos";

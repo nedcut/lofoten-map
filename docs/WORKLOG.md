@@ -3,6 +3,23 @@
 Chronological notes for meaningful project checkpoints. Keep entries short:
 what changed, why it mattered, and any verification worth remembering.
 
+## 2026-07-20
+
+- Replaced the active Supabase client with Neon Auth and the RLS-protected Neon
+  Data API. Existing email/Google users reauthenticate, and the migration
+  runbook maps verified identities before importing ownership and membership.
+- Replaced Supabase Storage with a single Cloudflare R2 bucket containing
+  `trip-photos/` and `avatars/` namespaces. Browser uploads now use short-lived
+  presigned URLs from authenticated Next.js routes; R2 credentials remain
+  server-only.
+- Replaced Supabase Realtime subscriptions with visibility-aware 30-second
+  polling plus immediate refreshes after local mutations.
+- Added a clean Neon schema, guarded Supabase export/Neon import scripts,
+  row-count and authorization verification, and a rollback procedure in
+  `neon/`. Kept `supabase/` as a source-schema and rollback artifact.
+- Updated runtime configuration, tests, and deployment documentation for the
+  Neon/R2 architecture while preserving the zero-config demo path.
+
 ## 2026-06-09
 
 - Performance pass after the app started feeling sluggish: the admin panel now
