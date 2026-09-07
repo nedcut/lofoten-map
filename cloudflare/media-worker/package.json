@@ -1,0 +1,14 @@
+{
+  "name": "lofoten-logbook-media-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "wrangler": "^4.0.0"
+  }
+}

@@ -74,6 +74,10 @@ popups, upload flow, and administrative tools remain touch-friendly.
 - ExifReader and browser canvas APIs for photo metadata and processing
 - Vitest, Playwright, and GitHub Actions for unit, end-to-end, and CI checks
 
+`@aws-sdk/*` is pinned to an exact version and `@neondatabase/neon-js` is a
+pinned beta; both are bumped deliberately rather than by Dependabot, which is
+configured to ignore them.
+
 ## Quick start
 
 ```bash
@@ -143,6 +147,8 @@ an upload or deleting an object. R2 secrets are used only on the server.
 3. Add all shared-mode variables from `.env.example` locally and in Vercel.
 4. Load seed data for a new installation, or follow the guarded migration
    workflow in [`neon/README.md`](neon/README.md).
+   The Neon CLI project id lives in the untracked `.neon` file; recreate it
+   locally with `neon set-context --project-id <id>`.
 5. Sign in, ensure the initial account has an admin `trip_members` row, and
    smoke-test guest, member, owner, and admin behavior.
 

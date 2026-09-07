@@ -1,0 +1,27 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Pinned exactly in package.json and bumped deliberately (see README).
+      - dependency-name: "@aws-sdk/*"
+      # Pinned beta; bumped deliberately once a stable release is validated.
+      - dependency-name: "@neondatabase/neon-js"
+
+  - package-ecosystem: npm
+    directory: /cloudflare/media-worker
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
