@@ -18,12 +18,14 @@
 .lofoten-popup .mapboxgl-popup-tip { border-top-color: color-mix(in srgb, var(--color-paper) 98%, transparent) !important; }
 .mapboxgl-popup-close-button,
 .lofoten-popup .mapboxgl-popup-close-button {
+  /* Glyph stays 20px (unchanged visually); padding grows the tappable area to
+     the ~40px touch-target minimum without the button looking bigger. */
   border-radius: 999px;
   color: #57534e !important;
   font-size: 20px;
   line-height: 1;
-  margin: 8px;
-  padding: 5px 8px;
+  margin: 4px;
+  padding: 10px;
 }
 .mapboxgl-popup-close-button:hover,
 .mapboxgl-popup-close-button:focus,

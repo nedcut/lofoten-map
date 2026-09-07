@@ -1,16 +1,27 @@
 "use client";
 
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
+import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { cn } from "@/lib/utils";
 
 // The bottom-right floating panel shell shared by AddNotePanel, EditItemPanel
 // and ProfilePanel (previously three copies of the same markup). Positioning
 // utilities (inset-x-3 bottom-3 ... md:w-96) stay with each call site since
 // widths differ; this owns the box treatment only.
-export function Panel({ className, children }: { className?: string; children: ReactNode }) {
+//
+// `labelledBy` should match the `id` given to this panel's PanelHeader, and
+// `onClose` wires up initial focus, a Tab trap, Escape-to-close, and focus
+// restoration on close via useDialogFocus.
+export function Panel({ className, children, labelledBy, onClose }: { className?: string; children: ReactNode; labelledBy?: string; onClose?: () => void }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(containerRef, { onClose });
   return (
     <div
+      ref={containerRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={labelledBy}
       className={cn(
         "pointer-events-auto fixed inset-x-3 bottom-3 z-30 max-h-[calc(100dvh-1.5rem)] overflow-hidden rounded-panel border border-stone-200/80 bg-paper/96 text-stone-950 shadow-panel backdrop-blur-xl md:bottom-6 md:left-auto md:right-6",
         className,

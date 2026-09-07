@@ -74,6 +74,15 @@ function statusDotClass(item: QueueItem) {
   return "bg-stone-300";
 }
 
+// The status dot is color-only; this gives screen reader users the same
+// information as its color.
+function statusDotLabel(item: QueueItem) {
+  if (item.status === "ready") return "Ready";
+  if (item.status === "needs-location") return "Needs location";
+  if (item.status === "invalid") return "Invalid";
+  return "Reading";
+}
+
 export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, selectedIds, isSaving, uploadProgress, cameraClockCorrectionHours, adjustableTimestampCount, onSelectItem, onToggleSelected, onSelectAllUnplaced, onClearSelection, onUpload, onClose, onAddFiles, onRemoveItem, onCaptionChange, onDayChange, onAllDaysChange, onClearQueue, onCameraClockCorrectionChange }: Props) {
   // One object URL per queue item so the filmstrip and preview can render the
   // local files. URLs are created once per item and revoked when the item
@@ -178,6 +187,7 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
       onClick={onUpload}
       disabled={ready.length === 0 || reading.length > 0 || isSaving}
       size="sm"
+      aria-live="polite"
       className="flex-1"
     >
       {isSaving
@@ -296,7 +306,7 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-stone-200">
             <div className="h-full rounded-full bg-teal-700 transition-all" style={{ width: total > 0 ? `${Math.round((ready.length / total) * 100)}%` : "0%" }} />
           </div>
-          <p className="mt-2 text-xs leading-5 text-stone-600">{hint}</p>
+          <p aria-live="polite" className="mt-2 text-xs leading-5 text-stone-600">{hint}</p>
           <p className="mt-1 text-[11px] text-stone-500">Arrow keys move through photos · space adds to the group</p>
         </div>
         {activeEditor ? <div className="border-b border-stone-200/70 px-3 py-2.5">{activeEditor}</div> : null}
@@ -318,6 +328,7 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
                   <span className="block truncate text-[11px] text-stone-500">{item.status === "invalid" ? item.message : [takenLabel(item), dayLabel(days, item.dayId)].filter(Boolean).join(" · ")}</span>
                 </span>
                 <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", statusDotClass(item))} aria-hidden />
+                <span className="sr-only">{statusDotLabel(item)}</span>
               </button>
             </div>
           ))}
@@ -360,7 +371,7 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
             <button type="button" onClick={onClose} className="rounded-lg border border-stone-300 bg-white p-1.5 text-stone-600 transition hover:bg-stone-50" aria-label="Close upload"><X className="h-4 w-4" /></button>
           </div>
         </div>
-        <p className="mt-1 truncate text-[11px] text-stone-500">{hint}</p>
+        <p aria-live="polite" className="mt-1 truncate text-[11px] text-stone-500">{hint}</p>
         <div ref={filmstripRef} className="mt-2 flex gap-2 overflow-x-auto pb-1">
           {items.map((item) => (
             <div key={item.id} data-thumb-id={item.id} className="relative shrink-0">
@@ -373,11 +384,15 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
                 ) : <span className="flex h-full items-center justify-center text-stone-400"><Camera className="h-4 w-4" /></span>}
               </button>
               {mapAvailable && item.status !== "invalid" && item.status !== "reading" ? (
-                <button type="button" onClick={() => onToggleSelected(item.id)} className={cn("absolute left-1 top-1 flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-black transition", selectedIds.has(item.id) ? "border-teal-700 bg-teal-700 text-white" : "border-stone-300 bg-white/90 text-transparent")} aria-label={`${selectedIds.has(item.id) ? "Deselect" : "Select"} ${item.file.name} for group placement`} aria-pressed={selectedIds.has(item.id)}>
-                  ✓
+                // The visible circle stays 20px; the button itself is a 40px hit
+                // target centered on the same spot via negative offsets, so the
+                // touch target grows without the control looking any bigger.
+                <button type="button" onClick={() => onToggleSelected(item.id)} className="absolute -left-2.5 -top-2.5 flex h-10 w-10 items-center justify-center" aria-label={`${selectedIds.has(item.id) ? "Deselect" : "Select"} ${item.file.name} for group placement`} aria-pressed={selectedIds.has(item.id)}>
+                  <span className={cn("flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-black transition", selectedIds.has(item.id) ? "border-teal-700 bg-teal-700 text-white" : "border-stone-300 bg-white/90 text-transparent")} aria-hidden>✓</span>
                 </button>
               ) : null}
               <span className={cn("absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full ring-1 ring-white", statusDotClass(item))} aria-hidden />
+              <span className="sr-only">{statusDotLabel(item)}</span>
             </div>
           ))}
           <label className="flex h-16 w-16 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-dashed border-stone-300 bg-white text-stone-500 transition hover:bg-stone-50" aria-label="Add more media">

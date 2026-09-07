@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 import { useRef, useState } from "react";
 import { AdminDataPanel } from "@/components/AdminDataPanel";
-import { AdminRequestPanel, DayList, DayListSkeleton, LayersPanel, MemberAdminPanel, QuickActions, SidebarHeader, type SidebarProps } from "@/components/DaySidebar";
+import { AdminRequestPanel, DayList, DayListSkeleton, LayersPanel, MemberAdminPanel, NotesPlacesList, QuickActions, SidebarHeader, type SidebarProps } from "@/components/DaySidebar";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
 import { cn } from "@/lib/utils";
 import type { Day } from "@/types/trip";
@@ -79,7 +79,7 @@ export function MobileSheet(props: MobileSheetProps) {
       />
 
       <div className="fixed inset-x-0 bottom-0 z-30">
-        <div className="mx-3 mb-3 overflow-hidden rounded-panel border border-stone-200/80 bg-paper/96 text-stone-950 shadow-[0_-12px_60px_rgba(46,61,54,0.28)] backdrop-blur-xl">
+        <div className="mx-3 mb-[calc(0.75rem+env(safe-area-inset-bottom))] overflow-hidden rounded-panel border border-stone-200/80 bg-paper/96 text-stone-950 shadow-[0_-12px_60px_rgba(46,61,54,0.28)] backdrop-blur-xl">
           {/* Grab handle + peek header — tap to toggle, swipe sideways or use the
               chevrons to step through days. */}
           <div
@@ -146,6 +146,7 @@ export function MobileSheet(props: MobileSheetProps) {
                     <DayList days={props.days} dayStats={props.dayStats} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} />
                   )}
                   {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
+                  {props.notesPlaces ? <NotesPlacesList {...props.notesPlaces} /> : null}
                   {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
                   {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}
                   {props.adminRequest ? <AdminRequestPanel {...props.adminRequest} /> : null}

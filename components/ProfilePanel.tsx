@@ -56,7 +56,7 @@ export function ProfilePanel({ displayName, avatarUrl, email, isSaving, onClose,
   }
 
   return (
-    <Panel className="md:w-96">
+    <Panel className="md:w-96" labelledBy="profile-panel-title" onClose={onClose}>
       <PanelHeader id="profile-panel-title" title="Your profile" subtitle="Set how your name and photo appear on this trip." onClose={onClose} closeLabel="Close profile panel" />
       <form action={submit} aria-labelledby="profile-panel-title" className="min-h-0 space-y-4 overflow-y-auto pr-1">
         <div className="flex items-center gap-4">

@@ -59,7 +59,7 @@ export function AddNotePanel({ tripSlug, days, selectedCoordinate, defaultDayId,
   }
 
   return (
-    <Panel className="md:w-96">
+    <Panel className="md:w-96" labelledBy="add-note-title" onClose={handleCancel}>
       <PanelHeader id="add-note-title" title="Add a trail note" subtitle="Tap the map to choose a location, then save a short note." onClose={handleCancel} closeLabel="Close note panel" />
       <form action={submit} aria-labelledby="add-note-title" className="min-h-0 space-y-3 overflow-y-auto pr-1">
         <InlineMessage>

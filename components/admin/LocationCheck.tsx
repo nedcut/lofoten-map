@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, MapPin, X } from "lucide-react";
+import { Loader2, MapPin, MapPinned, X } from "lucide-react";
 import { photoLabel } from "@/components/admin/editors";
 import { Button } from "@/components/ui/Button";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
@@ -23,14 +23,10 @@ function OutlierRow({ outlier, isSaving, pinned, onMove, onDismiss, onHover, onS
   const { photo } = outlier;
   return (
     <div
-      role="button"
-      tabIndex={0}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
-      onClick={onSelect}
-      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }}
       className={cn(
-        "grid cursor-pointer grid-cols-[3rem_minmax(0,1fr)] gap-2 rounded-lg border bg-amber-50/70 p-2 transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-amber-400/30",
+        "grid grid-cols-[3rem_minmax(0,1fr)] gap-2 rounded-lg border bg-amber-50/70 p-2 transition",
         pinned ? "border-amber-500 ring-2 ring-amber-400/40" : "border-amber-300/60 hover:border-amber-400",
       )}
     >
@@ -48,6 +44,14 @@ function OutlierRow({ outlier, isSaving, pinned, onMove, onDismiss, onHover, onS
           {formatOffset(outlier.distanceKm)} away from the {outlier.neighborCount} photos taken within {outlier.windowMinutes} min of it
         </div>
         <div className="flex flex-wrap gap-1.5">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onSelect}
+            className={cn("px-2.5 py-1.5 text-xs", pinned && "border-amber-500 bg-amber-100")}
+          >
+            <MapPinned className="h-3.5 w-3.5" /> Show on map
+          </Button>
           <Button
             tone="fjord"
             disabled={isSaving}

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
+import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { friendlyPersonName, personFilterOptions } from "@/lib/display-name";
 import { formatDateOnly, formatDateTime } from "@/lib/utils";
 import { journeyItemTitle, type JourneyAttachedItem, type JourneyItem } from "@/lib/journey";
@@ -124,6 +125,7 @@ export function JourneyPlayback({
   const videoFallbackTimerRef = useRef<number | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const modalRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const isPlayingRef = useRef(isPlaying);
   const activeIndexRef = useRef(activeIndex);
   const uploaderOptions = useMemo(
@@ -199,6 +201,12 @@ export function JourneyPlayback({
     return () => document.removeEventListener("keydown", trap);
   }, [complete, introOpen]);
 
+  // The main viewer is itself a full-screen dialog: initial focus, a Tab trap,
+  // and focus restore on close. Disabled while the intro/complete overlay is
+  // up (the effect above owns focus then) and doesn't take onClose — the
+  // window keydown handler below already closes on Escape.
+  useDialogFocus(rootRef, { active: !introOpen && !complete });
+
   function advanceVideoInSlideshow() {
     if (!isPlayingRef.current) return;
     if (activeIndexRef.current >= items.length - 1) { setIsPlaying(false); setComplete(true); }
@@ -244,7 +252,12 @@ export function JourneyPlayback({
       // focused element, which also covers the filter selects.
       const isEditable = (el: Element | null) =>
         el instanceof HTMLElement && (el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.tagName === "SELECT");
+      // Space on a focused Close/Share/nav button should activate that button,
+      // not toggle autoplay — match PlacementWorkspace's own space-key guard.
+      const isActivatable = (el: Element | null) =>
+        el instanceof HTMLElement && (el.tagName === "BUTTON" || el.tagName === "A");
       if (editingCaption || isEditable(event.target as Element | null) || isEditable(document.activeElement)) return;
+      if (event.key === " " && (isActivatable(event.target as Element | null) || isActivatable(document.activeElement))) return;
       if (introOpen || complete) {
         if (event.key === "Escape") { event.preventDefault(); onClose(); }
         return;
@@ -288,7 +301,7 @@ export function JourneyPlayback({
 
   const filterControls = (
     <>
-      <select value={filter} onChange={(event) => onFilterChange(event.target.value as JourneyFilter)} className="max-w-[8rem] rounded-full border border-white/15 bg-stone-950/45 px-3 py-2 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20">
+      <select value={filter} onChange={(event) => onFilterChange(event.target.value as JourneyFilter)} aria-label="Filter journey by type" className="max-w-[8rem] rounded-full border border-white/15 bg-stone-950/45 px-3 py-2 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20">
         <option value="all">All</option>
         <option value="photos">Media</option>
         <option value="journal">Journal</option>
@@ -311,7 +324,7 @@ export function JourneyPlayback({
   // controls (and a reset) rather than trapping the user behind a bare Close.
   if (!activeItem) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-stone-950 text-white">
+      <div ref={rootRef} role="dialog" aria-modal="true" aria-label="Journey Mode" className="fixed inset-0 z-50 flex flex-col bg-stone-950 text-white">
         <div className="flex items-center justify-between gap-3 px-3 py-3 md:px-6 md:py-5">
           <IconButton onClick={onClose} aria-label="Close journey">
             <X className="h-5 w-5" />
@@ -384,8 +397,13 @@ export function JourneyPlayback({
     else onPrev();
   }
 
+  // The intro/complete overlays are themselves dialogs (see below); the root
+  // only claims the dialog role while neither is showing, so the page never
+  // has two nested aria-modal dialogs at once.
+  const rootIsDialog = !introOpen && !complete;
+
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-stone-950 text-white" onPointerDown={noteInteraction} onTouchStart={touchStart} onTouchEnd={touchEnd}>
+    <div ref={rootRef} {...(rootIsDialog ? { role: "dialog" as const, "aria-modal": true, "aria-label": "Journey Mode" } : {})} className="fixed inset-0 z-50 overflow-hidden bg-stone-950 text-white" onPointerDown={noteInteraction} onTouchStart={touchStart} onTouchEnd={touchEnd}>
       {backgroundUrl ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element -- User-uploaded image URLs are rendered directly in the viewer. */}
@@ -420,7 +438,9 @@ export function JourneyPlayback({
         <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-intro-title" className="absolute inset-0 z-40 flex items-center justify-center bg-stone-950/72 p-6 backdrop-blur-md">
           <section className="max-w-xl text-center">
             <div className="text-xs font-black uppercase tracking-[0.24em] text-ember-400">A shared travel story</div>
-            <h1 id="journey-intro-title" className="mt-4 font-serif text-5xl font-semibold md:text-7xl">{trip?.title ?? "this trip"}</h1>
+            {/* h2, not h1 — the app already has an h1 for the trip title (DaySidebar),
+                and this overlay is transient. */}
+            <h2 id="journey-intro-title" className="mt-4 font-serif text-5xl font-semibold md:text-7xl">{trip?.title ?? "this trip"}</h2>
             {trip?.description ? <p className="mx-auto mt-5 max-w-lg text-base leading-7 text-white/75">{trip.description}</p> : null}
             <p className="mt-3 text-sm text-white/55">{items.length} moments across {days.length} days</p>
             <Button onClick={() => { setIntroOpen(false); setIsPlaying(true); }} className="mt-8 rounded-full px-6"><CirclePlay className="h-5 w-5" /> Begin journey</Button>
@@ -577,7 +597,16 @@ export function JourneyPlayback({
                   />
                 );
               })}
-              <input type="range" min={0} max={Math.max(0, items.length - 1)} value={activeIndex} onChange={(event) => onSelectIndex(Number(event.target.value))} className="absolute inset-0 h-9 w-full cursor-pointer opacity-0" aria-label="Journey progress" />
+              <input
+                type="range"
+                min={0}
+                max={Math.max(0, items.length - 1)}
+                value={activeIndex}
+                onChange={(event) => onSelectIndex(Number(event.target.value))}
+                className="absolute inset-0 h-9 w-full cursor-pointer opacity-0"
+                aria-label="Journey progress"
+                aria-valuetext={`${title}, ${dayLabel(days, activeItem.dayId)}`}
+              />
             </div>
             <div className="flex items-center gap-1">
               <IconButton onClick={() => { noteInteraction(); onPrev(); }} className="md:hidden" aria-label="Previous item"><ChevronLeft className="h-5 w-5" /></IconButton>

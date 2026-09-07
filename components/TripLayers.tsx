@@ -34,6 +34,22 @@ function getSource(map: mapboxgl.Map, id: string) {
   }
 }
 
+// After a popup opens, move focus into it (its first action button, or the
+// body as a fallback) instead of leaving focus stranded on whatever was
+// clicked/tapped underneath it.
+function focusPopupContent(popup: mapboxgl.Popup) {
+  const element = popup.getElement();
+  if (!element) return;
+  const action = element.querySelector<HTMLElement>(".lofoten-popup-action");
+  if (action) {
+    action.focus();
+    return;
+  }
+  const body = element.querySelector<HTMLElement>(".lofoten-popup-body") ?? element;
+  body.setAttribute("tabindex", "-1");
+  body.focus();
+}
+
 function hasLayer(map: mapboxgl.Map, id: string) {
   if (!canUseStyle(map)) return false;
   try {
@@ -202,7 +218,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       body.append(manageBar);
     }
 
-    function showPhotoPopup(photo: Photo) {
+    function showPhotoPopup(photo: Photo, triggerElement: HTMLElement | null) {
       if (photo.lng === null || photo.lat === null) return;
       const uploader = friendlyPersonName(photo.uploader_name);
       // Uncaptioned photos take their date as the title ("Untitled photo" told
@@ -227,10 +243,14 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
         .setHTML(content)
         .addTo(activeMap);
       addPopupActions(popup, photo);
+      focusPopupContent(popup);
       // The photo counts as "focused" only while its popup is open; dismissing
       // the popup hands journey-start priority back to the selected day.
       actionsRef.current.onPhotoFocus(photo.id);
-      popup.on("close", () => actionsRef.current.onPhotoBlur(photo.id));
+      popup.on("close", () => {
+        actionsRef.current.onPhotoBlur(photo.id);
+        if (triggerElement && document.contains(triggerElement)) triggerElement.focus();
+      });
     }
 
     function closestPhoto(coordinates: [number, number]) {
@@ -312,7 +332,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
           element.addEventListener("click", (event) => {
             event.stopPropagation();
             if (!isCluster) {
-              showPhotoPopup(photo);
+              showPhotoPopup(photo, element);
               return;
             }
             const source = getSource(activeMap, "photos") as mapboxgl.GeoJSONSource | undefined;
@@ -435,6 +455,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       }
       const popup = new mapboxgl.Popup({ offset: 18, className: "lofoten-popup", maxWidth: "17rem" }).setLngLat(coordinates).setHTML(content).addTo(activeMap);
       injectActions(popup, props.kind as MapItemKind, String(props.id ?? ""), (props.user_id as string | null) ?? null);
+      focusPopupContent(popup);
     }
 
     function showRoutePopup(event: mapboxgl.MapLayerMouseEvent) {
@@ -449,6 +470,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       const content = `<div class="lofoten-popup-card"><div class="lofoten-popup-body">${tag("route")}<div class="lofoten-popup-title">${escapeHtml(props.name || "Route segment")}</div><div class="lofoten-popup-meta">${escapeHtml(meta || "Saved route")}</div></div></div>`;
       const popup = new mapboxgl.Popup({ offset: 18, className: "lofoten-popup", maxWidth: "17rem" }).setLngLat(event.lngLat).setHTML(content).addTo(activeMap);
       injectActions(popup, "route", String(props.id ?? ""), null);
+      focusPopupContent(popup);
     }
 
     function setPointerCursor() {

@@ -33,7 +33,7 @@ const KIND_TITLE: Record<EditTarget["kind"], string> = {
 
 export function EditItemPanel({ target, days, isSaving, onClose, onUpdatePhoto, onUpdateNote, onUpdatePlace, onUpdateRoute, onDeleteItem }: Props) {
   return (
-    <Panel className="z-40 md:w-[28rem]">
+    <Panel className="z-40 md:w-[28rem]" labelledBy="edit-item-title" onClose={onClose}>
       <PanelHeader id="edit-item-title" title={KIND_TITLE[target.kind]} subtitle="Update the details or remove it from the trip." onClose={onClose} closeLabel="Close editor" />
       <div aria-labelledby="edit-item-title" role="group" className="min-h-0 overflow-y-auto overscroll-contain pr-1">
           {/* Keyed on the item's content so the uncontrolled form remounts with

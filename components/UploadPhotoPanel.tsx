@@ -5,6 +5,7 @@ import type { ChangeEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { PlacementWorkspace } from "@/components/PlacementWorkspace";
 import { Button } from "@/components/ui/Button";
+import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { correctCameraClock, extractPhotoExif, type ExtractedExif } from "@/lib/exif";
 import { fileContentHash } from "@/lib/file-hash";
@@ -95,6 +96,10 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
   const draftTimerRef = useRef<number | null>(null);
   const cameraRollInputRef = useRef<HTMLInputElement | null>(null);
   const autoPickedRef = useRef(false);
+  // The fallback picker card (rendered below when the queue is empty) is a
+  // true modal, so it gets the same focus trap/restore as the other panels.
+  const pickerCardRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(pickerCardRef, { onClose: onCancel, active: items.length === 0 });
 
   // The single draft read for this mount; the picker-cancel handler awaits the
   // same promise so both always agree on whether a draft exists.
@@ -546,9 +551,9 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
   // -------- Fallback picker card (cancelled dialog or restorable draft) --------
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-stone-950/40 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-sm rounded-panel border border-stone-200/80 bg-paper/99 p-5 shadow-panel">
+      <div ref={pickerCardRef} role="dialog" aria-modal="true" aria-labelledby="upload-picker-title" className="w-full max-w-sm rounded-panel border border-stone-200/80 bg-paper/99 p-5 shadow-panel">
         <div className="flex items-start justify-between gap-3">
-          <h2 className="font-serif text-2xl font-semibold tracking-tight text-stone-950">Add photos & videos</h2>
+          <h2 id="upload-picker-title" className="font-serif text-2xl font-semibold tracking-tight text-stone-950">Add photos & videos</h2>
           <button onClick={onCancel} className="-mr-1 rounded-full p-2 text-stone-500 hover:bg-stone-900/5" aria-label="Close upload"><X className="h-5 w-5" /></button>
         </div>
         <p className="mt-2 text-sm leading-6 text-stone-600">GPS, dates, and placement are prepared on your device before anything uploads.</p>

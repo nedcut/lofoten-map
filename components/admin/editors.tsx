@@ -319,10 +319,10 @@ export function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo
   return (
     <form action={submit} className="grid grid-cols-[4rem_minmax(0,1fr)] gap-2 rounded-[var(--radius-control)] border border-stone-200 bg-white p-2">
       <div className="h-16 overflow-hidden rounded-md bg-stone-100">
-        {photo.media_type === "video" && !photo.thumbnail_url
-          ? <div className="flex h-full items-center justify-center text-xs font-bold text-stone-500">Video</div>
+        {photo.thumbnail_url || photo.image_url
           // eslint-disable-next-line @next/next/no-img-element -- Existing remote URLs come from user uploads.
-          : <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />}
+          ? <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+          : <div className="flex h-full items-center justify-center text-xs font-bold text-stone-500">{photo.media_type === "video" ? "Video" : "Photo"}</div>}
       </div>
       <div className="min-w-0 space-y-2">
         <Field label="Day" hideLabel><Select name="day_id" defaultValue={photo.day_id ?? ""}>{dayOptions(days)}</Select></Field>

@@ -1,6 +1,7 @@
 "use client";
 
-import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, Mountain, PenLine, Play, Route, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, MapPin, Mountain, PenLine, Play, Route, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { useState } from "react";
 import { AdminDataPanel, type AdminDataProps } from "@/components/AdminDataPanel";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
 import { Button } from "@/components/ui/Button";
@@ -8,7 +9,7 @@ import { InlineMessage } from "@/components/ui/InlineMessage";
 import { SectionCard } from "@/components/ui/SectionCard";
 import type { TripDayStats } from "@/lib/trip-view-model";
 import { cn, formatDateOnly } from "@/lib/utils";
-import type { AdminRequest, AdminRequestStatus, Day, Photo, Trip, TripMember } from "@/types/trip";
+import type { AdminRequest, AdminRequestStatus, Day, Note, Photo, Place, Trip, TripMember } from "@/types/trip";
 
 export type LayerVisibility = { photos: boolean; notes: boolean; routes: boolean };
 
@@ -44,6 +45,16 @@ export type SidebarProps = {
   adminData?: AdminDataProps | null;
   memberAdmin?: MemberAdminProps | null;
   adminRequest?: AdminRequestProps | null;
+  notesPlaces?: NotesPlacesEntry | null;
+};
+
+// Notes and places are Mapbox map layers with click-only handlers, so there's
+// no way to reach them with a keyboard. This list gives keyboard/screen-reader
+// users the same "open its editor/popup path" outcome as clicking the marker.
+export type NotesPlacesEntry = {
+  notes: Note[];
+  places: Place[];
+  onOpen: (kind: "note" | "place", id: string) => void;
 };
 
 export type MemberAdminProps = {
@@ -157,8 +168,8 @@ export function DayList({ days, dayStats, selectedDayId, onSelectDay, onStepDay,
       <div className="flex items-center gap-2 text-sm font-bold text-stone-900">
         <CalendarDays className="h-4 w-4 text-teal-700" /> Trip days
         <span className="ml-auto flex items-center gap-1">
-          <button onClick={() => onStepDay(-1)} aria-label="Previous day" title="Previous day (←)" className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-200 bg-white/75 text-stone-600 transition hover:border-stone-300 hover:bg-white hover:text-stone-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:scale-[0.95]"><ChevronLeft className="h-4 w-4" /></button>
-          <button onClick={() => onStepDay(1)} aria-label="Next day" title="Next day (→)" className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-200 bg-white/75 text-stone-600 transition hover:border-stone-300 hover:bg-white hover:text-stone-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:scale-[0.95]"><ChevronRight className="h-4 w-4" /></button>
+          <button onClick={() => onStepDay(-1)} aria-label="Previous day" title="Previous day (←)" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white/75 text-stone-600 transition hover:border-stone-300 hover:bg-white hover:text-stone-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:scale-[0.95] md:h-7 md:w-7"><ChevronLeft className="h-4 w-4" /></button>
+          <button onClick={() => onStepDay(1)} aria-label="Next day" title="Next day (→)" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white/75 text-stone-600 transition hover:border-stone-300 hover:bg-white hover:text-stone-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:scale-[0.95] md:h-7 md:w-7"><ChevronRight className="h-4 w-4" /></button>
         </span>
       </div>
       <div className="space-y-2">
@@ -249,6 +260,46 @@ export function LayersPanel({ layerVisibility, onLayerVisibilityChange }: Pick<S
   );
 }
 
+const NOTES_PLACES_VISIBLE_LIMIT = 6;
+
+export function NotesPlacesList({ notes, places, onOpen }: NotesPlacesEntry) {
+  const [expanded, setExpanded] = useState(false);
+  const items = [
+    ...notes.map((note) => ({ kind: "note" as const, id: note.id, label: note.body?.trim() || "Trail note" })),
+    ...places.map((place) => ({ kind: "place" as const, id: place.id, label: place.name?.trim() || "Place" })),
+  ];
+  if (items.length === 0) return null;
+  const collapsible = items.length > NOTES_PLACES_VISIBLE_LIMIT;
+  const visible = expanded || !collapsible ? items : items.slice(0, NOTES_PLACES_VISIBLE_LIMIT);
+
+  return (
+    <SectionCard icon={MapPin} title="Notes & places">
+      <div className="space-y-1.5">
+        {visible.map((item) => (
+          <button
+            key={`${item.kind}:${item.id}`}
+            type="button"
+            onClick={() => onOpen(item.kind, item.id)}
+            className="flex w-full items-center gap-2 truncate rounded-[var(--radius-control)] bg-paper-tint px-3 py-2 text-left text-sm text-stone-800 transition hover:bg-[#f1e8d8]"
+          >
+            <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-teal-800">{item.kind}</span>
+            <span className="truncate">{item.label}</span>
+          </button>
+        ))}
+      </div>
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="text-xs font-bold text-teal-800 underline-offset-2 hover:underline"
+        >
+          {expanded ? "Show less" : `Show ${items.length - NOTES_PLACES_VISIBLE_LIMIT} more`}
+        </button>
+      ) : null}
+    </SectionCard>
+  );
+}
+
 export function MemberAdminPanel({ members, requests, currentUserId, message, messageTone, isSaving, onGrantMember, onSetMemberRole, onResolveRequest }: MemberAdminProps) {
   async function submit(formData: FormData) {
     const email = String(formData.get("email") ?? "").trim();
@@ -278,8 +329,8 @@ export function MemberAdminPanel({ members, requests, currentUserId, message, me
             <div key={request.id} className="flex items-center justify-between gap-2 rounded-lg bg-white/80 px-3 py-2 text-sm">
               <span className="min-w-0 truncate font-semibold text-stone-800" title={request.email ?? undefined}>{request.display_name ?? request.email ?? request.user_id}</span>
               <div className="flex shrink-0 items-center gap-1.5">
-                <button disabled={isSaving} onClick={() => onResolveRequest(request.id, true)} aria-label="Approve admin request" className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-teal-700 text-white transition hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-50"><Check className="h-4 w-4" /></button>
-                <button disabled={isSaving} onClick={() => onResolveRequest(request.id, false)} aria-label="Deny admin request" className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-stone-300 bg-white text-stone-600 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-rose-300/30 active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-50"><X className="h-4 w-4" /></button>
+                <button disabled={isSaving} onClick={() => onResolveRequest(request.id, true)} aria-label="Approve admin request" className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700 text-white transition hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-50 md:h-7 md:w-7"><Check className="h-4 w-4" /></button>
+                <button disabled={isSaving} onClick={() => onResolveRequest(request.id, false)} aria-label="Deny admin request" className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-stone-300 bg-white text-stone-600 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-rose-300/30 active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-50 md:h-7 md:w-7"><X className="h-4 w-4" /></button>
               </div>
             </div>
           ))}
@@ -352,6 +403,7 @@ export function DaySidebar(props: SidebarProps) {
         <DayList days={props.days} dayStats={props.dayStats} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} />
       )}
       {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
+      {props.notesPlaces ? <NotesPlacesList {...props.notesPlaces} /> : null}
       {props.adminData ? <AdminDataPanel {...props.adminData} /> : null}
       {props.memberAdmin ? <MemberAdminPanel {...props.memberAdmin} /> : null}
       {props.adminRequest ? <AdminRequestPanel {...props.adminRequest} /> : null}

@@ -112,7 +112,6 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, onPlay, disable
       type="button"
       onClick={onPlay}
       disabled={disabled}
-      aria-label="Relive the journey"
       className={cn(
         // shrink-0: the slideshow layers are all absolutely positioned, so the
         // button has no intrinsic height — without this, the flex-column sidebar

@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 export function InlineMessage({ tone = "info", className, children }: { tone?: "info" | "error"; className?: string; children: ReactNode }) {
   return (
     <div
+      role={tone === "error" ? "alert" : "status"}
       className={cn(
         "rounded-[var(--radius-control)] border px-3 py-2 text-sm leading-5",
         tone === "error" ? "border-rose-200 bg-rose-50 text-rose-950" : "border-teal-700/15 bg-teal-50 text-teal-950",
