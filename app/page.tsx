@@ -4,9 +4,9 @@ import dynamic from "next/dynamic";
 // Types only — a value import of mapbox-gl here would pull the whole library
 // into the initial bundle and defeat MapView's dynamic() split.
 import type { Map as MapboxMap } from "mapbox-gl";
-import { collectItemCoordinates, coordinateBounds, routeDistanceMeters, routeGeometry } from "@/lib/geo";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2, Play, Sparkles, UserRound } from "lucide-react";
+import { collectItemCoordinates, coordinateBounds, routeDistanceMeters } from "@/lib/geo";
 import { AuthPanel } from "@/components/AuthPanel";
 import { DaySidebar } from "@/components/DaySidebar";
 import type { JourneyFilter } from "@/components/JourneyPlayback";
@@ -17,25 +17,19 @@ import type { MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel } from "@/components/EditItemPanel";
 import { deriveTripAccess } from "@/lib/access";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
-import { friendlyPersonName } from "@/lib/display-name";
 import { useTripAuth } from "@/lib/hooks/useTripAuth";
 import { useTripData } from "@/lib/hooks/useTripData";
 import { useProfile } from "@/lib/hooks/useProfile";
 import { useMembership } from "@/lib/hooks/useMembership";
 import { useTripMutations } from "@/lib/hooks/useTripMutations";
+import { useTripCreation } from "@/lib/hooks/useTripCreation";
 import { buildJourneyItems } from "@/lib/journey";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
-import { clearNoteDraft } from "@/lib/offline-drafts";
-import { addNote, addRoute, prependPhotos } from "@/lib/local-trip-store";
-import { prepareMediaFiles } from "@/lib/media-processing";
-import { uploadPhotoBatch } from "@/lib/photo-upload";
 import { getBackendBrowserClient } from "@/lib/backend";
-import { resolvePhotoUrls } from "@/lib/object-store";
 import { applyTripUrlState, formatDayParam, formatItemToken, parseItemToken, readTripUrlState, resolveDayParam } from "@/lib/trip-url";
 import { deriveDayStats, deriveOutlierOverlay, filterTripItemsByDay, resolveEditTarget } from "@/lib/trip-view-model";
 import { cn } from "@/lib/utils";
-import type { LngLat, MapClickMode, RouteMode } from "@/types/trip";
-import type { PhotoUploadItemInput, PhotoUploadProgress, PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
+import type { LngLat, MapClickMode } from "@/types/trip";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
 // These also value-import mapbox-gl (markers, popups, the mini map), so they
@@ -47,7 +41,6 @@ const AddNotePanel = dynamic(() => import("@/components/AddNotePanel").then((mod
 const ManualRoutePanel = dynamic(() => import("@/components/ManualRoutePanel").then((mod) => mod.ManualRoutePanel));
 const ProfilePanel = dynamic(() => import("@/components/ProfilePanel").then((mod) => mod.ProfilePanel));
 const UploadPhotoPanel = dynamic(() => import("@/components/UploadPhotoPanel").then((mod) => mod.UploadPhotoPanel));
-const UPLOAD_CONCURRENCY = 4;
 
 export default function Home() {
   const backend = useMemo(() => getBackendBrowserClient(), []);
@@ -99,7 +92,6 @@ export default function Home() {
   const [journeyFilter, setJourneyFilter] = useState<JourneyFilter>("all");
   const [journeyUploaderFilter, setJourneyUploaderFilter] = useState("");
   const [journeyIntro, setJourneyIntro] = useState(false);
-  const [saving, setSaving] = useState(false);
 
   const filtered = useMemo(() => filterTripItemsByDay(data, selectedDayId), [data, selectedDayId]);
   // Per-day totals for the day cards, computed over the full dataset (not the
@@ -133,8 +125,8 @@ export default function Home() {
     applyTripUrlState(window.location.href, { day: formatDayParam(dayId, data.days) });
   }, [data.days]);
 
-  // Domain mutation hooks. Each owns its own status channel and the demo-mode
-  // vs. Supabase write paths, keeping this component focused on view state.
+  // Domain hooks own the demo-mode vs. Neon write paths and their status
+  // channels, so this component only holds view state and wiring.
   const { isSaving: profileSaving, saveProfile } = useProfile({
     backend,
     user,
@@ -172,6 +164,29 @@ export default function Home() {
     selectedDayId,
     selectDay,
     setGlobalError: setError,
+  });
+
+  const closePanel = useCallback(() => {
+    setPanel(null);
+    setClickMode("idle");
+    setPendingCoordinate(null);
+    setRouteDraftPoints([]);
+  }, []);
+
+  const { saving, saveNote, savePhotos, saveRoute } = useTripCreation({
+    backend,
+    user,
+    currentMember,
+    isAdmin,
+    data,
+    setData,
+    loadData,
+    tripSlug,
+    pendingCoordinate,
+    routeDraftPoints,
+    onSaved: closePanel,
+    setError,
+    setNotice,
   });
 
   // Resolve the popup-selected item live from data, so the editor reflects updates
@@ -467,10 +482,10 @@ export default function Home() {
     if (!bounds) return;
 
     if (bounds.diagonalMeters < 1) {
-      map.easeTo({ center: bounds.center, zoom: 13.5, padding, duration: 800, essential: true });
+      map.easeTo({ center: bounds.center, zoom: 13.5, padding, duration: 800 });
       return;
     }
-    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800, essential: true });
+    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800 });
   }, [map, selectedDayId]);
 
   function startPanel(next: "photo" | "note" | "route") {
@@ -484,13 +499,6 @@ export default function Home() {
       setRouteDraftPoints([]);
       setClickMode(next === "photo" && mapActionsEnabled ? "place-photo" : next === "note" ? "add-note" : "idle");
     }
-  }
-
-  function closePanel() {
-    setPanel(null);
-    setClickMode("idle");
-    setPendingCoordinate(null);
-    setRouteDraftPoints([]);
   }
 
   // Opened from a map popup. RLS enforces who may write; the popup only shows the
@@ -525,7 +533,6 @@ export default function Home() {
         zoom: Math.max(map.getZoom(), 13.5),
         offset: isMobile ? [0, -120] : [-160, 0],
         duration: 900,
-        essential: true,
       });
     }, 120);
   }
@@ -547,7 +554,7 @@ export default function Home() {
     if (!bounds) return;
     const isMobile = window.innerWidth < 768;
     const padding = isMobile ? { top: 96, right: 48, bottom: 220, left: 48 } : { top: 80, right: 80, bottom: 80, left: 80 };
-    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800, essential: true });
+    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800 });
   }
 
   async function deleteFromMap(kind: MapItemKind, id: string) {
@@ -555,179 +562,6 @@ export default function Home() {
     if (!window.confirm("Delete this item? This can't be undone.")) return;
     await deleteDataItem(table, id);
   }
-
-  async function saveNote(input: { body: string; authorName: string; dayId: string | null }) {
-    if (!pendingCoordinate || !input.body || !data.trip) return;
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    let didSave = false;
-    try {
-      const row = { trip_id: data.trip.id, day_id: input.dayId, user_id: user?.id ?? null, author_name: input.authorName || "Friend", lat: pendingCoordinate.lat, lng: pendingCoordinate.lng, body: input.body, note_type: "note" };
-      if (backend) {
-        if (!user) {
-          setError("Sign in before saving notes.");
-          return;
-        }
-        const { error: insertError } = await backend.from("notes").insert(row);
-        if (insertError) setError(insertError.message);
-        else {
-          await loadData();
-          didSave = true;
-        }
-      } else {
-        setData((current) => addNote(current, { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }));
-        didSave = true;
-      }
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save note.");
-    } finally {
-      setSaving(false);
-      if (didSave) {
-        clearNoteDraft(tripSlug);
-        closePanel();
-      }
-    }
-  }
-
-  async function savePhotos(inputs: PhotoUploadItemInput[], onProgress: (progress: PhotoUploadProgress) => void): Promise<PhotoUploadSaveResult | void> {
-    if (inputs.length === 0 || !data.trip) return;
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    // Uploader is the signed-in user — no name field needed in the upload flow.
-    // friendlyPersonName keeps the stored byline from being a raw email when
-    // the member never set a display name (reads are public).
-    const uploaderName = currentMember?.display_name || friendlyPersonName(user?.email) || "Friend";
-    let didSave = false;
-    const savedClientIds: string[] = [];
-    const failedClientIds: string[] = [];
-    let completedUploads = 0;
-    const markUploadComplete = () => {
-      completedUploads += 1;
-      onProgress({ completed: completedUploads, total: inputs.length });
-    };
-    try {
-      if (!backend) {
-        const rows = await Promise.all(inputs.map(async (input) => {
-          const prepared = await prepareMediaFiles(input.file);
-          const row = {
-            id: crypto.randomUUID(),
-            trip_id: data.trip!.id,
-            day_id: input.dayId,
-            user_id: user?.id ?? null,
-            uploader_name: uploaderName,
-            content_hash: input.contentHash,
-            media_type: input.mediaType,
-            // Demo mode has no Storage: preview straight from local blob URLs and
-            // leave the storage paths empty (never read in this branch).
-            image_path: "",
-            thumbnail_path: null,
-            image_url: URL.createObjectURL(prepared.imageFile),
-            thumbnail_url: prepared.thumbnailFile ? URL.createObjectURL(prepared.thumbnailFile) : null,
-            lat: input.coordinate.lat,
-            lng: input.coordinate.lng,
-            taken_at: input.exif?.takenAt ?? null,
-            caption: input.caption,
-            exif_found: input.exif?.exifFound ?? false,
-            created_at: new Date().toISOString(),
-          };
-          markUploadComplete();
-          return row;
-        }));
-        setData((current) => prependPhotos(current, rows));
-        savedClientIds.push(...inputs.map((input) => input.clientId));
-        didSave = true;
-      } else {
-        if (!user) {
-          setError("Sign in before uploading media.");
-          return;
-        }
-        const outcome = await uploadPhotoBatch({
-          backend,
-          trip: { id: data.trip.id, slug: data.trip.slug },
-          existingPhotos: data.photos,
-          uploaderName,
-          inputs,
-          concurrency: UPLOAD_CONCURRENCY,
-          onItemComplete: markUploadComplete,
-        });
-        savedClientIds.push(...outcome.savedClientIds);
-        failedClientIds.push(...outcome.failedClientIds);
-        if (outcome.insertErrorMessage) setError(outcome.insertErrorMessage);
-        if (outcome.inserted) {
-          // Patch the returned rows into local state instead of refetching
-          // every table; the realtime echo of this insert upserts by id, so
-          // the two paths converge instead of duplicating.
-          const resolved = resolvePhotoUrls(outcome.insertedRows);
-          const insertedIds = new Set(resolved.map((row) => row.id));
-          setData((current) => ({ ...current, photos: [...resolved, ...current.photos.filter((photo) => !insertedIds.has(photo.id))] }));
-          didSave = true;
-        }
-        if (outcome.failures.length > 0) {
-          setError(`${outcome.failures.length} media item${outcome.failures.length === 1 ? "" : "s"} failed to upload. ${outcome.failures.slice(0, 2).join(" ")}`);
-          didSave = false;
-        } else if (outcome.warnings.length > 0) {
-          setNotice(`${outcome.uploadedCount} media item${outcome.uploadedCount === 1 ? "" : "s"} uploaded. ${outcome.warnings.length} thumbnail${outcome.warnings.length === 1 ? "" : "s"} could not be created, but the originals are saved.`);
-        }
-      }
-      return { savedClientIds, failedClientIds };
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not upload photos.");
-      return { savedClientIds, failedClientIds: inputs.filter((input) => !savedClientIds.includes(input.clientId)).map((input) => input.clientId) };
-    } finally {
-      setSaving(false);
-      if (didSave) closePanel();
-    }
-  }
-
-  async function saveRoute(input: { name: string; dayId: string | null; mode: RouteMode }) {
-    if (routeDraftPoints.length < 2 || !data.trip) return;
-    if (backend && !isAdmin) {
-      setError("Only trip admins can save routes.");
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    let didSave = false;
-    try {
-      const geometry = routeGeometry(routeDraftPoints);
-      const row = {
-        trip_id: data.trip.id,
-        day_id: input.dayId,
-        name: input.name || "Manual route",
-        source: "manual",
-        mode: input.mode,
-        geometry_geojson: geometry,
-        distance_meters: routeDistanceMeters(routeDraftPoints),
-        elevation_gain_meters: null,
-      };
-
-      if (backend) {
-        if (!user) {
-          setError("Sign in before saving routes.");
-          return;
-        }
-        const { error: insertError } = await backend.from("route_segments").insert(row);
-        if (insertError) setError(insertError.message);
-        else {
-          await loadData();
-          didSave = true;
-        }
-      } else {
-        setData((current) => addRoute(current, { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }));
-        didSave = true;
-      }
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save route.");
-    } finally {
-      setSaving(false);
-      if (didSave) closePanel();
-    }
-  }
-
 
   return (
     <main className="relative h-dvh overflow-hidden bg-[#e7efe8] text-stone-950">
