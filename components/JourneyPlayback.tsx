@@ -3,6 +3,8 @@
 import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Loader2, MapPinned, Pencil, RotateCcw, Save, Share2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
+import { Button } from "@/components/ui/Button";
+import { IconButton } from "@/components/ui/IconButton";
 import { friendlyPersonName, personFilterOptions } from "@/lib/display-name";
 import { formatDateOnly, formatDateTime } from "@/lib/utils";
 import { journeyItemTitle, type JourneyAttachedItem, type JourneyItem } from "@/lib/journey";
@@ -311,9 +313,9 @@ export function JourneyPlayback({
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-stone-950 text-white">
         <div className="flex items-center justify-between gap-3 px-3 py-3 md:px-6 md:py-5">
-          <button onClick={onClose} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/12 text-white backdrop-blur transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25" aria-label="Close journey">
+          <IconButton onClick={onClose} aria-label="Close journey">
             <X className="h-5 w-5" />
-          </button>
+          </IconButton>
           <div className="flex items-center gap-2">{filterControls}</div>
         </div>
         <div className="flex flex-1 items-center justify-center p-6 text-center">
@@ -348,8 +350,8 @@ export function JourneyPlayback({
 
   async function shareJourney() {
     const result = await shareJourneyLink(navigator, {
-      title: trip?.title ?? "Lofoten Logbook",
-      text: "Relive our Lofoten journey.",
+      title: trip?.title ?? "this trip",
+      text: trip?.title ? `Relive our ${trip.title} journey.` : "Relive our journey.",
       url: window.location.href,
     });
     if (result === "cancelled") return;
@@ -396,9 +398,9 @@ export function JourneyPlayback({
 
       <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 px-3 py-3 md:px-6 md:py-5">
         <div className="flex min-w-0 items-center gap-2">
-          <button onClick={onClose} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/12 text-white backdrop-blur transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25" aria-label="Close journey">
+          <IconButton onClick={onClose} aria-label="Close journey">
             <X className="h-5 w-5" />
-          </button>
+          </IconButton>
           <div className="min-w-0">
             <div className="truncate text-xs font-bold uppercase tracking-[0.14em] text-white/65">Journey Mode</div>
             <div className="truncate text-sm font-bold text-white">{dayLabel(days, activeItem.dayId)}</div>
@@ -406,9 +408,9 @@ export function JourneyPlayback({
         </div>
         <div className="flex items-center gap-2">
           {filterControls}
-          <button onClick={shareJourney} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/12 text-white backdrop-blur transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25" aria-label="Share journey">
+          <IconButton onClick={shareJourney} aria-label="Share journey">
             <Share2 className="h-4 w-4" />
-          </button>
+          </IconButton>
         </div>
       </div>
 
@@ -417,11 +419,11 @@ export function JourneyPlayback({
       {introOpen ? (
         <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-intro-title" className="absolute inset-0 z-40 flex items-center justify-center bg-stone-950/72 p-6 backdrop-blur-md">
           <section className="max-w-xl text-center">
-            <div className="text-xs font-black uppercase tracking-[0.24em] text-[#e7a13d]">A shared travel story</div>
-            <h1 id="journey-intro-title" className="mt-4 font-serif text-5xl font-semibold md:text-7xl">{trip?.title ?? "Lofoten Logbook"}</h1>
+            <div className="text-xs font-black uppercase tracking-[0.24em] text-ember-400">A shared travel story</div>
+            <h1 id="journey-intro-title" className="mt-4 font-serif text-5xl font-semibold md:text-7xl">{trip?.title ?? "this trip"}</h1>
             {trip?.description ? <p className="mx-auto mt-5 max-w-lg text-base leading-7 text-white/75">{trip.description}</p> : null}
             <p className="mt-3 text-sm text-white/55">{items.length} moments across {days.length} days</p>
-            <button onClick={() => { setIntroOpen(false); setIsPlaying(true); }} className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#e7a13d] px-6 py-3 font-black text-stone-950"><CirclePlay className="h-5 w-5" /> Begin journey</button>
+            <Button onClick={() => { setIntroOpen(false); setIsPlaying(true); }} className="mt-8 rounded-full px-6"><CirclePlay className="h-5 w-5" /> Begin journey</Button>
           </section>
         </div>
       ) : null}
@@ -429,11 +431,11 @@ export function JourneyPlayback({
       {complete ? (
         <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-complete-title" className="absolute inset-0 z-40 flex items-center justify-center bg-stone-950/76 p-6 backdrop-blur-md">
           <section className="max-w-xl text-center">
-            <div className="text-xs font-black uppercase tracking-[0.24em] text-[#e7a13d]">End of the journey</div>
+            <div className="text-xs font-black uppercase tracking-[0.24em] text-ember-400">End of the journey</div>
             <h2 id="journey-complete-title" className="mt-4 font-serif text-5xl font-semibold">Thanks for coming along.</h2>
-            <p className="mt-4 text-white/65">{items.length} moments from {days.length} days in Lofoten.</p>
+            <p className="mt-4 text-white/65">{items.length} moments from {days.length} days{trip?.title ? ` in ${trip.title}` : ""}.</p>
             <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <button onClick={replay} className="inline-flex items-center gap-2 rounded-full bg-[#e7a13d] px-5 py-3 font-black text-stone-950"><RotateCcw className="h-4 w-4" /> Replay</button>
+              <Button onClick={replay} className="rounded-full px-5"><RotateCcw className="h-4 w-4" /> Replay</Button>
               <button onClick={shareJourney} className="inline-flex items-center gap-2 rounded-full bg-white/12 px-5 py-3 font-bold text-white"><Share2 className="h-4 w-4" /> Share</button>
               <button onClick={onClose} className="rounded-full bg-white/12 px-5 py-3 font-bold text-white">Return to map</button>
             </div>
@@ -478,7 +480,7 @@ export function JourneyPlayback({
             <img src={imageUrl} alt={title} decoding="async" fetchPriority="high" className="max-h-full max-w-full rounded-lg object-contain shadow-[0_36px_100px_rgba(0,0,0,0.45)]" />
           </div>
         ) : (
-          <article className="mx-auto max-w-2xl rounded-xl border border-white/15 bg-[rgba(255,253,246,0.94)] p-6 text-stone-950 shadow-[0_36px_100px_rgba(0,0,0,0.3)]">
+          <article className="mx-auto max-w-2xl rounded-xl border border-white/15 bg-paper/94 p-6 text-stone-950 shadow-[0_36px_100px_rgba(0,0,0,0.3)]">
             <div className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-teal-800">{itemKindLabel(activeItem)}</div>
             <h2 className="font-serif text-3xl font-semibold leading-tight">{title}</h2>
             {activeItem.kind === "place" && activeItem.primary.description ? <p className="mt-4 text-sm leading-6 text-stone-700">{activeItem.primary.description}</p> : null}
@@ -486,12 +488,12 @@ export function JourneyPlayback({
         )}
       </div>
 
-      <button onClick={() => { noteInteraction(); onPrev(); }} className="absolute left-3 top-1/2 z-20 hidden h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/12 text-white backdrop-blur transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25 md:inline-flex" aria-label="Previous item">
+      <IconButton onClick={() => { noteInteraction(); onPrev(); }} className="absolute left-3 top-1/2 z-20 hidden h-12 w-12 -translate-y-1/2 md:inline-flex" aria-label="Previous item">
         <ChevronLeft className="h-6 w-6" />
-      </button>
-      <button onClick={() => { noteInteraction(); onNext(); }} className="absolute right-3 top-1/2 z-20 hidden h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/12 text-white backdrop-blur transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25 md:inline-flex" aria-label="Next item">
+      </IconButton>
+      <IconButton onClick={() => { noteInteraction(); onNext(); }} className="absolute right-3 top-1/2 z-20 hidden h-12 w-12 -translate-y-1/2 md:inline-flex" aria-label="Next item">
         <ChevronRight className="h-6 w-6" />
-      </button>
+      </IconButton>
 
       <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-stone-950 via-stone-950/86 to-transparent px-3 pb-3 pt-16 md:px-6 md:pb-5">
         <div className="mx-auto max-w-5xl">
@@ -508,9 +510,9 @@ export function JourneyPlayback({
                   <div className="space-y-2">
                     <textarea value={captionDraft} onChange={(event) => setCaptionDraft(event.target.value)} className="min-h-20 w-full rounded-lg border border-white/15 bg-white/95 px-3 py-2 text-sm text-stone-950 outline-none focus:ring-4 focus:ring-white/25" placeholder="Caption" />
                     <div className="flex gap-2">
-                      <button disabled={isSaving} onClick={saveCaption} className="inline-flex items-center gap-2 rounded-lg bg-[#e7a13d] px-3 py-2 text-sm font-black text-stone-950 transition hover:bg-[#f0ae4b] disabled:opacity-50">
-                        {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save
-                      </button>
+                      <Button size="sm" disabled={isSaving} onClick={saveCaption} className="px-3 py-2">
+                        {isSaving ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <Save className="h-4 w-4" />} Save
+                      </Button>
                       <button onClick={() => setEditingCaption(false)} className="rounded-lg bg-white/10 px-3 py-2 text-sm font-bold text-white transition hover:bg-white/20">Cancel</button>
                     </div>
                   </div>
@@ -519,12 +521,12 @@ export function JourneyPlayback({
                     <p className="min-w-0 flex-1 text-sm leading-6 text-white">{activeItem.primary.caption || "No caption yet."}</p>
                     {canEditCaption ? (
                       <div className="flex shrink-0 items-center gap-1.5">
-                        <button onClick={() => setEditingCaption(true)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white transition hover:bg-white/20" aria-label="Edit caption" title="Edit caption">
+                        <IconButton size="sm" onClick={() => setEditingCaption(true)} aria-label="Edit caption" title="Edit caption" className="rounded-lg bg-white/10 hover:bg-white/20">
                           <Pencil className="h-4 w-4" />
-                        </button>
-                        <button onClick={() => onEditPhoto(activeItem.primary.id)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white transition hover:bg-white/20" aria-label="Edit photo details (location, day, time)" title="Edit details — location, day, time">
+                        </IconButton>
+                        <IconButton size="sm" onClick={() => onEditPhoto(activeItem.primary.id)} aria-label="Edit photo details (location, day, time)" title="Edit details — location, day, time" className="rounded-lg bg-white/10 hover:bg-white/20">
                           <MapPinned className="h-4 w-4" />
-                        </button>
+                        </IconButton>
                       </div>
                     ) : null}
                   </div>
@@ -540,7 +542,7 @@ export function JourneyPlayback({
                 ) : null}
               </div>
             ) : (
-              <div className="max-w-xl rounded-xl border border-white/15 bg-[rgba(255,253,246,0.94)] p-3 text-sm leading-6 text-stone-800 shadow-xl">
+              <div className="max-w-xl rounded-xl border border-white/15 bg-paper/94 p-3 text-sm leading-6 text-stone-800 shadow-xl">
                 {activeItem.kind === "note" ? activeItem.primary.body : activeItem.primary.description || activeItem.primary.name}
               </div>
             )}
@@ -553,13 +555,13 @@ export function JourneyPlayback({
               </button>
               <div className="flex items-center gap-1.5" title="Autoplay speed">
                 <Gauge className="hidden h-3.5 w-3.5 shrink-0 text-white/45 sm:block" />
-                <input type="range" min={0.5} max={2.5} step={0.5} value={speed} onChange={(event) => setSpeed(Number(event.target.value))} className="w-14 cursor-pointer accent-[#e7a13d] sm:w-20" aria-label="Autoplay speed" />
+                <input type="range" min={0.5} max={2.5} step={0.5} value={speed} onChange={(event) => setSpeed(Number(event.target.value))} className="w-14 cursor-pointer accent-ember-400 sm:w-20" aria-label="Autoplay speed" />
                 <span className="w-7 text-[11px] font-bold tabular-nums text-white/60">{speed}×</span>
               </div>
             </div>
             <div className="relative h-9">
               <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-white/16">
-                <div className="h-full rounded-full bg-[#e7a13d]" style={{ width: `${Math.max(2, progress * 100)}%` }} />
+                <div className="h-full rounded-full bg-ember-400" style={{ width: `${Math.max(2, progress * 100)}%` }} />
               </div>
               {items.map((item, index) => {
                 const isDayStart = index === 0 || item.dayId !== items[index - 1]?.dayId;
@@ -578,9 +580,9 @@ export function JourneyPlayback({
               <input type="range" min={0} max={Math.max(0, items.length - 1)} value={activeIndex} onChange={(event) => onSelectIndex(Number(event.target.value))} className="absolute inset-0 h-9 w-full cursor-pointer opacity-0" aria-label="Journey progress" />
             </div>
             <div className="flex items-center gap-1">
-              <button onClick={() => { noteInteraction(); onPrev(); }} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/12 text-white transition hover:bg-white/20 md:hidden" aria-label="Previous item"><ChevronLeft className="h-5 w-5" /></button>
+              <IconButton onClick={() => { noteInteraction(); onPrev(); }} className="md:hidden" aria-label="Previous item"><ChevronLeft className="h-5 w-5" /></IconButton>
               <span className="min-w-14 text-center text-xs font-bold text-white/60">{activeIndex + 1} / {items.length}</span>
-              <button onClick={() => { noteInteraction(); onNext(); }} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/12 text-white transition hover:bg-white/20 md:hidden" aria-label="Next item"><ChevronRight className="h-5 w-5" /></button>
+              <IconButton onClick={() => { noteInteraction(); onNext(); }} className="md:hidden" aria-label="Next item"><ChevronRight className="h-5 w-5" /></IconButton>
             </div>
           </div>
         </div>

@@ -170,7 +170,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       const journeyButton = document.createElement("button");
       journeyButton.type = "button";
       journeyButton.className = "lofoten-popup-action lofoten-popup-action-journey";
-      journeyButton.textContent = photo.media_type === "video" ? "Play video" : "Open in Journey";
+      journeyButton.textContent = photo.media_type === "video" ? "Play video" : "Relive from here";
       journeyButton.addEventListener("click", () => {
         popup.remove();
         actionsRef.current.onOpenJourney(photo.id);

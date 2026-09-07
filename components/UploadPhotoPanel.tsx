@@ -4,6 +4,7 @@ import { FileImage, Images, RotateCcw, Trash2, X } from "lucide-react";
 import type { ChangeEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { PlacementWorkspace } from "@/components/PlacementWorkspace";
+import { Button } from "@/components/ui/Button";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { correctCameraClock, extractPhotoExif, type ExtractedExif } from "@/lib/exif";
 import { fileContentHash } from "@/lib/file-hash";
@@ -545,7 +546,7 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
   // -------- Fallback picker card (cancelled dialog or restorable draft) --------
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-stone-950/40 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-sm rounded-[1.6rem] border border-stone-200/80 bg-[rgba(255,253,246,0.99)] p-5 shadow-[0_30px_90px_rgba(46,61,54,0.32)]">
+      <div className="w-full max-w-sm rounded-panel border border-stone-200/80 bg-paper/99 p-5 shadow-panel">
         <div className="flex items-start justify-between gap-3">
           <h2 className="font-serif text-2xl font-semibold tracking-tight text-stone-950">Add photos & videos</h2>
           <button onClick={onCancel} className="-mr-1 rounded-full p-2 text-stone-500 hover:bg-stone-900/5" aria-label="Close upload"><X className="h-5 w-5" /></button>
@@ -556,9 +557,9 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
             <div className="font-bold">Unfinished import found</div>
             <p className="text-xs leading-5 text-amber-900/80">{restorableDraft.items.length} media item{restorableDraft.items.length === 1 ? "" : "s"} from a previous session never finished uploading.</p>
             <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={restoreDraft} className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-xs font-bold text-white transition hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-[0.98]">
+              <Button tone="fjord" onClick={restoreDraft} className="px-3 py-2 text-xs">
                 <RotateCcw className="h-3.5 w-3.5" /> Restore
-              </button>
+              </Button>
               <button type="button" onClick={discardDraft} className="inline-flex items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.98]">
                 <Trash2 className="h-3.5 w-3.5" /> Discard
               </button>
@@ -569,7 +570,7 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
           <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-teal-700/35 bg-teal-50 px-4 py-5 text-center text-teal-950 transition hover:bg-teal-100">
             <Images className="h-7 w-7" />
             <span className="text-base font-black">Choose from camera roll</span>
-            <span className="text-xs text-teal-900/70">iPhone, Android, HEIC, JPG, MOV, MP4</span>
+            <span className="text-xs text-teal-900/85">iPhone, Android, HEIC, JPG, MOV, MP4</span>
             <input ref={cameraRollInputRef} name="media" type="file" accept="image/*,video/*,.heic,.heif,.mov,.m4v" multiple className="hidden" onChange={handleFileInputChange} />
           </label>
           <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-700 transition hover:bg-stone-50">

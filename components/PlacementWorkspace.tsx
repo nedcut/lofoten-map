@@ -4,6 +4,7 @@ import { Camera, CheckCircle2, Images, Loader2, MapPin, Minus, Plus, RotateCcw, 
 import type { ChangeEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { PhotoUploadProgress } from "@/components/UploadPhotoPanel";
+import { Button } from "@/components/ui/Button";
 import { dayLabel, locationLabel, type QueueItem } from "@/lib/upload-queue";
 import { cn } from "@/lib/utils";
 import type { Day } from "@/types/trip";
@@ -173,18 +174,18 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
         : "Tap the map to place the highlighted photo — it advances on its own.";
 
   const uploadButton = (
-    <button
-      type="button"
+    <Button
       onClick={onUpload}
       disabled={ready.length === 0 || reading.length > 0 || isSaving}
-      className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#e7a13d] px-4 py-2.5 text-sm font-black text-stone-950 shadow-[0_12px_24px_rgba(184,106,31,0.22)] transition-all duration-150 hover:bg-[#f0ae4b] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+      size="sm"
+      className="flex-1"
     >
       {isSaving
-        ? <><Loader2 className="h-4 w-4 animate-spin" /> {uploadProgress ? `Uploading ${uploadProgress.completed} of ${uploadProgress.total}` : "Uploading..."}</>
+        ? <><Loader2 className="h-4 w-4 motion-safe:animate-spin" /> {uploadProgress ? `Uploading ${uploadProgress.completed} of ${uploadProgress.total}` : "Uploading..."}</>
         : reading.length > 0
-          ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading {reading.length}</>
-          : <><Upload className="h-4 w-4" /> Upload {ready.length > 1 ? `${ready.length} photos` : "photo"}</>}
-    </button>
+          ? <><Loader2 className="h-4 w-4 motion-safe:animate-spin" /> Reading {reading.length}</>
+          : <><Upload className="h-4 w-4" /> Upload {ready.length} item{ready.length === 1 ? "" : "s"}</>}
+    </Button>
   );
 
   const selectionBar = !mapAvailable ? null : placingSelection ? (
@@ -257,7 +258,7 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
     <div className="pointer-events-none fixed inset-0 z-40">
       {/* Corner photo preview — large enough to actually recognize the spot. */}
       {activeItem ? (
-        <div className={cn("pointer-events-auto absolute right-3 bottom-[14.5rem] overflow-hidden rounded-2xl border border-stone-200/80 bg-[rgba(255,253,246,0.98)] shadow-[0_20px_60px_rgba(46,61,54,0.3)] backdrop-blur transition-all md:bottom-6 md:right-14", PREVIEW_SIZES[previewSizeIndex])}>
+        <div className={cn("pointer-events-auto absolute right-3 bottom-[14.5rem] overflow-hidden rounded-2xl border border-stone-200/80 bg-paper/98 shadow-panel backdrop-blur transition-all md:bottom-6 md:right-14", PREVIEW_SIZES[previewSizeIndex])}>
           <div className="relative aspect-[4/3] bg-stone-100">
             {activeUrl ? (
               activeItem.mediaType === "video"
@@ -282,10 +283,10 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
       ) : null}
 
       {/* Desktop: the queue takes over the day-sidebar column; map stays live. */}
-      <div className="pointer-events-auto absolute bottom-4 left-4 top-[4.5rem] hidden w-96 flex-col overflow-hidden rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.97)] shadow-[0_30px_90px_rgba(46,61,54,0.32)] backdrop-blur md:flex">
+      <div className="pointer-events-auto absolute bottom-4 left-4 top-[4.5rem] hidden w-96 flex-col overflow-hidden rounded-panel border border-stone-200/80 bg-paper/97 shadow-panel backdrop-blur md:flex">
         <div className="border-b border-stone-200/70 px-4 py-3.5">
           <div className="flex items-start justify-between gap-2">
-            <h2 className="font-serif text-xl font-semibold tracking-tight text-stone-950">Add photos</h2>
+            <h2 className="font-serif text-xl font-semibold tracking-tight text-stone-950">Add photos & videos</h2>
             <button type="button" onClick={onClose} className="-mr-1 rounded-full p-2 text-stone-500 hover:bg-stone-900/5" aria-label="Close upload"><X className="h-5 w-5" /></button>
           </div>
           <div className="mt-1 flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.1em] text-stone-500">
@@ -296,7 +297,7 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
             <div className="h-full rounded-full bg-teal-700 transition-all" style={{ width: total > 0 ? `${Math.round((ready.length / total) * 100)}%` : "0%" }} />
           </div>
           <p className="mt-2 text-xs leading-5 text-stone-600">{hint}</p>
-          <p className="mt-1 text-[11px] text-stone-400">Arrow keys move through photos · space adds to the group</p>
+          <p className="mt-1 text-[11px] text-stone-500">Arrow keys move through photos · space adds to the group</p>
         </div>
         {activeEditor ? <div className="border-b border-stone-200/70 px-3 py-2.5">{activeEditor}</div> : null}
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain p-2">
@@ -345,16 +346,16 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
       </div>
 
       {/* Mobile: bottom filmstrip; thumbnails are the queue. */}
-      <div className="pointer-events-auto absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-teal-700/30 bg-[rgba(255,253,246,0.98)] px-3 pb-[calc(env(safe-area-inset-bottom)+0.6rem)] pt-2.5 shadow-[0_-12px_40px_rgba(46,61,54,0.25)] backdrop-blur-xl md:hidden">
+      <div className="pointer-events-auto absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-teal-700/30 bg-paper/98 px-3 pb-[calc(env(safe-area-inset-bottom)+0.6rem)] pt-2.5 shadow-[0_-12px_40px_rgba(46,61,54,0.25)] backdrop-blur-xl md:hidden">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-[0.1em] text-teal-800">
             <MapPin className="h-3.5 w-3.5" /> {ready.length}/{total} placed
           </div>
           <div className="flex items-center gap-1.5">
             {ready.length > 0 ? (
-              <button type="button" onClick={onUpload} disabled={isSaving || reading.length > 0} className="flex items-center gap-1 rounded-lg bg-[#e7a13d] px-2.5 py-1.5 text-xs font-black text-stone-950 transition hover:bg-[#f0ae4b] disabled:cursor-not-allowed disabled:opacity-50">
-                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} {uploadProgress ? `${uploadProgress.completed}/${uploadProgress.total}` : ready.length}
-              </button>
+              <Button onClick={onUpload} disabled={isSaving || reading.length > 0} className="px-2.5 py-1.5 text-xs">
+                {isSaving ? <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" /> : <Upload className="h-3.5 w-3.5" />} {uploadProgress ? `${uploadProgress.completed}/${uploadProgress.total}` : ready.length}
+              </Button>
             ) : null}
             <button type="button" onClick={onClose} className="rounded-lg border border-stone-300 bg-white p-1.5 text-stone-600 transition hover:bg-stone-50" aria-label="Close upload"><X className="h-4 w-4" /></button>
           </div>

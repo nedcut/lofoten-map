@@ -132,11 +132,11 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
   }, [pendingCoordinate]);
 
   return (
-    <div className={`relative h-full min-h-[520px] overflow-hidden rounded-none bg-[#dbe7df] md:rounded-[1.35rem] md:ring-1 md:ring-stone-200/80 ${tokenMissing || mapUnavailable ? "map-unavailable" : ""}`}>
+    <div className={`relative h-full min-h-[520px] overflow-hidden rounded-none bg-[#dbe7df] md:rounded-panel md:ring-1 md:ring-stone-200/80 ${tokenMissing || mapUnavailable ? "map-unavailable" : ""}`}>
       <div ref={containerRef} className="h-full w-full" />
       {tokenMissing || mapUnavailable ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#e7efe8] p-6 text-center">
-          <div className="max-w-md rounded-[1.25rem] border border-stone-200 bg-[rgba(255,253,246,0.94)] p-6 shadow-2xl">
+        <div className="absolute inset-0 flex items-center justify-center bg-mist p-6 text-center">
+          <div className="max-w-md rounded-[1.25rem] border border-stone-200 bg-paper/94 p-6 shadow-2xl">
             <h2 className="font-serif text-3xl font-semibold text-stone-950">{tokenMissing ? "Mapbox token needed" : "Map unavailable"}</h2>
             <p className="mt-2 text-sm leading-6 text-stone-600">
               {tokenMissing ? "Add NEXT_PUBLIC_MAPBOX_TOKEN to your environment to load the interactive trip map." : mapUnavailable}
@@ -145,7 +145,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
         </div>
       ) : null}
       {clickMode !== "idle" && !tokenMissing && !mapUnavailable ? (
-        <div className="absolute left-1/2 top-16 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-teal-700/20 bg-[rgba(255,253,246,0.94)] px-4 py-2 text-center text-sm font-bold text-teal-950 shadow-xl backdrop-blur md:top-4">
+        <div className="absolute left-1/2 top-16 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-teal-700/20 bg-paper/94 px-4 py-2 text-center text-sm font-bold text-teal-950 shadow-xl backdrop-blur md:top-4">
           <span className="relative flex h-2.5 w-2.5">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-600/60" />
             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-teal-700" />

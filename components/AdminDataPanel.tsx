@@ -28,6 +28,10 @@ import {
   tripFormKey,
 } from "@/components/admin/editors";
 import { LocationCheckList } from "@/components/admin/LocationCheck";
+import { Button } from "@/components/ui/Button";
+import { Field, Input, Textarea } from "@/components/ui/Field";
+import { InlineMessage } from "@/components/ui/InlineMessage";
+import { SectionCard } from "@/components/ui/SectionCard";
 import { cn } from "@/lib/utils";
 import { detectPhotoOutliers, type PhotoOutlier } from "@/lib/photo-outliers";
 import type { Day, Note, Photo, Place, RouteSegment, Trip } from "@/types/trip";
@@ -67,7 +71,7 @@ const PHOTO_PAGE_SIZE = 24;
 function LazyDetails({ summary, className, children }: { summary: ReactNode; className?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
-    <details className={cn("rounded-lg bg-[#f7f1e7] p-3", className)} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details className={cn("rounded-[var(--radius-control)] bg-paper-tint p-3", className)} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer text-sm font-bold text-stone-900">{summary}</summary>
       {open ? children : null}
     </details>
@@ -83,7 +87,7 @@ function PhotoList({ photos, days, isSaving, onSave, onDeleteItem }: Pick<AdminD
         <PhotoEditor key={photoEditorKey(photo)} photo={photo} days={days} isSaving={isSaving} onSave={onSave} onDelete={() => onDeleteItem("photos", photo.id)} />
       ))}
       {photos.length > visibleCount ? (
-        <button type="button" onClick={() => setVisibleCount((current) => current + PHOTO_PAGE_SIZE)} className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-bold text-stone-700 transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50">
+        <button type="button" onClick={() => setVisibleCount((current) => current + PHOTO_PAGE_SIZE)} className="w-full rounded-[var(--radius-control)] border border-stone-200 bg-white px-3 py-2 text-xs font-bold text-stone-700 transition hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50">
           Show {Math.min(PHOTO_PAGE_SIZE, photos.length - visibleCount)} more of {photos.length - visibleCount} remaining
         </button>
       ) : null}
@@ -127,27 +131,17 @@ export function AdminDataPanel(props: AdminDataProps) {
   }
 
   return (
-    <section className="space-y-3 rounded-xl border border-stone-200 bg-white/75 p-4">
-      <div className="flex items-center gap-2 text-sm font-bold text-stone-900"><Pencil className="h-4 w-4 text-teal-700" /> Admin data</div>
-      {props.message ? (
-        <div
-          className={cn(
-            "rounded-lg border px-3 py-2 text-xs leading-5",
-            props.messageTone === "error" ? "border-rose-200 bg-rose-50 text-rose-950" : "border-teal-700/15 bg-teal-50 text-teal-950",
-          )}
-        >
-          {props.message}
-        </div>
-      ) : null}
+    <SectionCard icon={Pencil} title="Admin data">
+      {props.message ? <InlineMessage tone={props.messageTone} className="text-xs">{props.message}</InlineMessage> : null}
 
       {props.trip ? (
         <LazyDetails className="group" summary="Trip">
           <form key={tripFormKey(props.trip)} action={submitTrip} className="mt-3 space-y-2">
-            <input name="title" defaultValue={props.trip.title} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-            <textarea name="description" defaultValue={props.trip.description ?? ""} placeholder="Description" className="min-h-20 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+            <Field label="Trip title" hideLabel><Input name="title" defaultValue={props.trip.title} /></Field>
+            <Field label="Description" hideLabel><Textarea name="description" defaultValue={props.trip.description ?? ""} placeholder="Description" className="min-h-20" /></Field>
             <div className="grid grid-cols-2 gap-2">
-              <input name="start_date" type="date" defaultValue={props.trip.start_date ?? ""} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-              <input name="end_date" type="date" defaultValue={props.trip.end_date ?? ""} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+              <Field label="Start date" hideLabel><Input name="start_date" type="date" defaultValue={props.trip.start_date ?? ""} /></Field>
+              <Field label="End date" hideLabel><Input name="end_date" type="date" defaultValue={props.trip.end_date ?? ""} /></Field>
             </div>
             <SaveButton isSaving={props.isSaving}>Save trip</SaveButton>
           </form>
@@ -163,14 +157,14 @@ export function AdminDataPanel(props: AdminDataProps) {
 
       <LazyDetails summary={<><Route className="mr-2 inline h-4 w-4 text-teal-700" />Routes</>}>
         <div className="mt-3 space-y-3">
-          <form action={submitGpxImport} className="space-y-2 rounded-lg border border-teal-700/20 bg-teal-50 p-2">
+          <form action={submitGpxImport} className="space-y-2 rounded-[var(--radius-control)] border border-teal-700/20 bg-teal-50 p-2">
             <label className="block space-y-1 text-[11px] font-bold uppercase tracking-[0.08em] text-teal-900">
               GPX file
-              <input name="gpx" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" disabled={props.isSaving} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-normal tracking-normal text-stone-950 file:mr-3 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-stone-700 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15 disabled:cursor-not-allowed disabled:opacity-60" />
+              <input name="gpx" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" disabled={props.isSaving} className="w-full rounded-[var(--radius-control)] border border-stone-300 bg-white px-3 py-2 text-sm font-normal tracking-normal text-stone-950 file:mr-3 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-stone-700 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15 disabled:cursor-not-allowed disabled:opacity-60" />
             </label>
-            <button disabled={props.isSaving} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-3 py-2.5 text-sm font-black text-white transition hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">
-              {props.isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Import GPX
-            </button>
+            <Button tone="fjord" size="sm" disabled={props.isSaving} className="w-full">
+              {props.isSaving ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <Upload className="h-4 w-4" />} Import GPX
+            </Button>
           </form>
           {props.routes.length === 0 ? <EmptyRow label="No routes yet" /> : props.routes.map((route) => (
             <RouteEditor key={routeEditorKey(route)} route={route} days={props.days} isSaving={props.isSaving} onSave={props.onUpdateRoute} onDelete={() => props.onDeleteItem("route_segments", route.id)} />
@@ -210,6 +204,6 @@ export function AdminDataPanel(props: AdminDataProps) {
           )}
         </div>
       </LazyDetails>
-    </section>
+    </SectionCard>
   );
 }

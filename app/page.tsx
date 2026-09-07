@@ -13,6 +13,7 @@ import type { JourneyFilter } from "@/components/JourneyPlayback";
 import { MapLegend } from "@/components/MapLegend";
 import { MobileSheet } from "@/components/MobileSheet";
 import { StatusPill } from "@/components/StatusPill";
+import { HeaderPill, PillButton } from "@/components/ui/HeaderPill";
 import type { MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel } from "@/components/EditItemPanel";
 import { deriveTripAccess } from "@/lib/access";
@@ -564,24 +565,19 @@ export default function Home() {
   }
 
   return (
-    <main className="relative h-dvh overflow-hidden bg-[#e7efe8] text-stone-950">
+    <main className="relative h-dvh overflow-hidden bg-mist text-stone-950">
       <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(135deg,rgba(255,253,246,0.92),rgba(211,229,222,0.5)_44%,rgba(234,198,132,0.26))]" />
       <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 px-3 py-3 md:px-6">
-        <div className="pointer-events-auto flex max-w-[min(18rem,calc(100vw-11rem))] items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-sm font-black shadow-lg backdrop-blur sm:max-w-none">
-          <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#d0872f]" /> <span className="truncate">{tripTitle}</span>
-        </div>
+        <HeaderPill className="flex max-w-[min(18rem,calc(100vw-11rem))] items-center gap-2 text-sm font-black text-stone-950 sm:max-w-none">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-ember-500" /> <span className="truncate">{tripTitle}</span>
+        </HeaderPill>
         <div className="flex items-center gap-2">
-          <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{backend ? (user ? (currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only") : "Viewing as guest") : "Local demo mode"}</div>
-          <button
-            onClick={startJourney}
-            disabled={journeyItems.length === 0}
-            aria-label="Relive the journey"
-            className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Play className="h-3.5 w-3.5 fill-current text-[#d0872f]" /> <span className="hidden sm:inline">Relive</span>
-          </button>
+          <HeaderPill className="hidden sm:block">{backend ? (user ? (currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only") : "Viewing as guest") : "Local demo mode"}</HeaderPill>
+          <PillButton onClick={startJourney} disabled={journeyItems.length === 0} aria-label="Relive the journey">
+            <Play className="h-3.5 w-3.5 fill-current text-ember-500" /> <span className="hidden sm:inline">Relive</span>
+          </PillButton>
           {backend && user && currentMember && profilesAvailable ? (
-            <button onClick={() => setProfilePanelOpen(true)} aria-label="Edit your profile" className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] py-1 pl-1 pr-3 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">
+            <PillButton onClick={() => setProfilePanelOpen(true)} aria-label="Edit your profile" className="py-1 pl-1 pr-3">
               <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-stone-200">
                 {currentMember.avatar_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -591,10 +587,10 @@ export default function Home() {
                 )}
               </span>
               <span className="hidden sm:inline">Profile</span>
-            </button>
+            </PillButton>
           ) : null}
-          {backend && user ? <button onClick={signOut} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign out</button> : null}
-          {backend && !authLoading && !user ? <button onClick={() => setAuthPanelOpen(true)} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign in</button> : null}
+          {backend && user ? <PillButton onClick={signOut}>Sign out</PillButton> : null}
+          {backend && !authLoading && !user ? <PillButton onClick={() => setAuthPanelOpen(true)}>Sign in</PillButton> : null}
         </div>
       </div>
       <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
@@ -608,10 +604,10 @@ export default function Home() {
         </div>
       </div>
       {!panel ? <MobileSheet trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
-      {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
+      {loading ? <StatusPill><Loader2 className="h-4 w-4 motion-safe:animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
-      {backend && !authLoading && !user && authPanelOpen ? <AuthPanel message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
+      {backend && !authLoading && !user && authPanelOpen ? <AuthPanel tripTitle={data.trip?.title ?? null} message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
       {backend && user && currentMember && profilesAvailable && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
       {panel === "note" ? <AddNotePanel tripSlug={tripSlug} days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} existingPhotos={data.photos} tripSlug={tripSlug} mapAvailable={mapActionsEnabled} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}

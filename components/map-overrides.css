@@ -7,7 +7,7 @@
 .mapboxgl-popup-content,
 .lofoten-popup .mapboxgl-popup-content {
   border-radius: 14px !important;
-  background: rgba(255, 253, 246, 0.98) !important;
+  background: color-mix(in srgb, var(--color-paper) 98%, transparent) !important;
   color: #1c1917 !important;
   border: 1px solid rgba(214, 204, 188, 0.9);
   box-shadow: 0 24px 60px rgba(46, 61, 54, 0.22) !important;
@@ -15,7 +15,7 @@
   overflow: hidden;
 }
 .mapboxgl-popup-tip,
-.lofoten-popup .mapboxgl-popup-tip { border-top-color: rgba(255, 253, 246, 0.98) !important; }
+.lofoten-popup .mapboxgl-popup-tip { border-top-color: color-mix(in srgb, var(--color-paper) 98%, transparent) !important; }
 .mapboxgl-popup-close-button,
 .lofoten-popup .mapboxgl-popup-close-button {
   border-radius: 999px;
@@ -31,13 +31,13 @@
 .lofoten-popup .mapboxgl-popup-close-button:focus {
   background: rgba(28, 25, 23, 0.06) !important;
   color: #1c1917 !important;
-  outline: 2px solid rgba(15, 118, 110, 0.35);
+  outline: 2px solid color-mix(in srgb, var(--color-fjord) 35%, transparent);
   outline-offset: 2px;
 }
 .mapboxgl-ctrl-group {
   border-radius: 10px !important;
   overflow: hidden;
-  background: rgba(255, 253, 246, 0.94) !important;
+  background: color-mix(in srgb, var(--color-paper) 94%, transparent) !important;
   box-shadow: 0 12px 30px rgba(46, 61, 54, 0.18) !important;
 }
 .mapboxgl-ctrl button { color: #1c1917 !important; }
@@ -47,9 +47,9 @@
   height: 44px;
   cursor: pointer;
   overflow: visible;
-  border: 3px solid #fffdf6;
+  border: 3px solid var(--color-paper);
   border-radius: 12px;
-  background: #e7a13d;
+  background: var(--color-ember-400);
   padding: 0;
   box-shadow:
     0 2px 5px rgba(28, 25, 23, 0.22),
@@ -63,7 +63,7 @@
   position: absolute;
   z-index: -1;
   inset: 2px;
-  border: 2px solid #fffdf6;
+  border: 2px solid var(--color-paper);
   border-radius: 11px;
   background: #d6ccb8;
   box-shadow: 0 4px 10px rgba(28, 25, 23, 0.16);
@@ -135,11 +135,11 @@
 .lofoten-photo-highlight-ring {
   position: absolute;
   inset: 0;
-  border: 3px solid #e7a13d;
+  border: 3px solid var(--color-ember-400);
   border-radius: 18px;
   box-shadow:
-    0 0 0 7px rgba(231, 161, 61, 0.28),
-    0 0 34px rgba(231, 161, 61, 0.55);
+    0 0 0 7px color-mix(in srgb, var(--color-ember-400) 28%, transparent),
+    0 0 34px color-mix(in srgb, var(--color-ember-400) 55%, transparent);
   animation: lofoten-highlight-pulse 1.5s ease-in-out infinite;
 }
 
@@ -167,8 +167,8 @@
   width: 14px;
   height: 14px;
   border-radius: 9999px;
-  border: 2.5px solid #fffdf6;
-  background: #0f766e;
+  border: 2.5px solid var(--color-paper);
+  background: var(--color-fjord);
   box-shadow: 0 2px 8px rgba(28, 25, 23, 0.35);
   pointer-events: none;
 }
@@ -177,8 +177,8 @@
   width: 36px;
   height: 36px;
   border-radius: 9999px;
-  border: 3px dashed #0f766e;
-  background: rgba(15, 118, 110, 0.14);
+  border: 3px dashed var(--color-fjord);
+  background: color-mix(in srgb, var(--color-fjord) 14%, transparent);
   pointer-events: none;
 }
 
@@ -189,7 +189,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 9px;
-  color: #fffdf6;
+  color: var(--color-paper);
   font-size: 0.62rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -205,9 +205,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid #fffdf6;
+  border: 2px solid var(--color-paper);
   border-radius: 999px;
-  background: #0f766e;
+  background: var(--color-fjord);
   color: white;
   font-size: 0.7rem;
   font-weight: 800;
@@ -224,7 +224,7 @@
 }
 
 .lofoten-photo-marker:focus-visible {
-  outline: 3px solid rgba(15, 118, 110, 0.55);
+  outline: 3px solid color-mix(in srgb, var(--color-fjord) 55%, transparent);
   outline-offset: 4px;
 }
 
@@ -255,7 +255,7 @@
 
 .lofoten-popup-card {
   width: 16rem;
-  background: rgba(255, 253, 246, 0.98);
+  background: color-mix(in srgb, var(--color-paper) 98%, transparent);
   color: #1c1917;
 }
 
@@ -311,7 +311,7 @@
   cursor: pointer;
   border-radius: 8px;
   border: 1px solid rgba(214, 204, 188, 0.9);
-  background: #fffdf6;
+  background: var(--color-paper);
   padding: 0.4rem 0.5rem;
   font-size: 0.78rem;
   font-weight: 800;
@@ -320,7 +320,7 @@
 }
 .lofoten-popup-action:hover { background: rgba(28, 25, 23, 0.05); }
 .lofoten-popup-action:focus-visible {
-  outline: 2px solid rgba(15, 118, 110, 0.4);
+  outline: 2px solid color-mix(in srgb, var(--color-fjord) 40%, transparent);
   outline-offset: 1px;
 }
 .lofoten-popup-action-danger {
@@ -330,9 +330,9 @@
 }
 .lofoten-popup-action-danger:hover { background: #fde4e6; }
 .lofoten-popup-action-journey {
-  border-color: rgba(231, 161, 61, 0.6);
+  border-color: color-mix(in srgb, var(--color-ember-400) 60%, transparent);
   background: #fdf1dc;
-  color: #8a5414;
+  color: var(--color-ember-700);
 }
 .lofoten-popup-action-journey:hover { background: #fbe6c2; }
 
@@ -341,7 +341,7 @@
   margin-bottom: 0.4rem;
   border-radius: 999px;
   padding: 0.12rem 0.5rem;
-  font-size: 0.62rem;
+  font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;

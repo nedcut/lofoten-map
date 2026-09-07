@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, MapPin, X } from "lucide-react";
 import { photoLabel } from "@/components/admin/editors";
+import { Button } from "@/components/ui/Button";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
 import { cn } from "@/lib/utils";
 
@@ -47,14 +48,14 @@ function OutlierRow({ outlier, isSaving, pinned, onMove, onDismiss, onHover, onS
           {formatOffset(outlier.distanceKm)} away from the {outlier.neighborCount} photos taken within {outlier.windowMinutes} min of it
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
+          <Button
+            tone="fjord"
             disabled={isSaving}
             onClick={(event) => { event.stopPropagation(); void onMove(); }}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+            className="px-2.5 py-1.5 text-xs"
           >
-            {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />} Move to group
-          </button>
+            {isSaving ? <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" /> : <MapPin className="h-3.5 w-3.5" />} Move to group
+          </Button>
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); onDismiss(); }}

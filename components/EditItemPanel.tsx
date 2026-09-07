@@ -1,7 +1,7 @@
 "use client";
 
-import { X } from "lucide-react";
 import { NoteEditor, PhotoEditor, PlaceEditor, RouteEditor, noteEditorKey, photoEditorKey, placeEditorKey, routeEditorKey, type AdminDataProps } from "@/components/AdminDataPanel";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import type { Day, Note, Photo, Place, RouteSegment } from "@/types/trip";
 
 // A single resolved map item the user picked from a popup. Discriminated so the
@@ -33,16 +33,9 @@ const KIND_TITLE: Record<EditTarget["kind"], string> = {
 
 export function EditItemPanel({ target, days, isSaving, onClose, onUpdatePhoto, onUpdateNote, onUpdatePlace, onUpdateRoute, onDeleteItem }: Props) {
   return (
-    <div className="pointer-events-auto fixed inset-x-3 bottom-3 z-40 max-h-[calc(100dvh-1.5rem)] overflow-hidden rounded-[1.35rem] border border-stone-200/80 bg-[rgba(255,253,246,0.97)] text-stone-950 shadow-[0_24px_80px_rgba(46,61,54,0.24)] backdrop-blur-xl md:bottom-6 md:left-auto md:right-6 md:w-[28rem]">
-      <div className="flex max-h-[calc(100dvh-1.5rem)] flex-col p-4">
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div>
-            <h2 className="font-serif text-2xl font-semibold tracking-tight">{KIND_TITLE[target.kind]}</h2>
-            <p className="mt-1 text-sm leading-5 text-stone-600">Update the details or remove it from the trip.</p>
-          </div>
-          <button onClick={onClose} className="rounded-full p-2 text-stone-500 hover:bg-stone-900/5" aria-label="Close editor"><X className="h-4 w-4" /></button>
-        </div>
-        <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
+    <Panel className="z-40 md:w-[28rem]">
+      <PanelHeader id="edit-item-title" title={KIND_TITLE[target.kind]} subtitle="Update the details or remove it from the trip." onClose={onClose} closeLabel="Close editor" />
+      <div aria-labelledby="edit-item-title" role="group" className="min-h-0 overflow-y-auto overscroll-contain pr-1">
           {/* Keyed on the item's content so the uncontrolled form remounts with
               fresh defaultValues when the item changes underneath it — e.g.
               dragging the marker while the editor is open. Without the key,
@@ -87,8 +80,7 @@ export function EditItemPanel({ target, days, isSaving, onClose, onUpdatePhoto, 
               onDelete={async () => { await onDeleteItem("route_segments", target.item.id); onClose(); }}
             />
           ) : null}
-        </div>
       </div>
-    </div>
+    </Panel>
   );
 }

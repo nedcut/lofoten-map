@@ -650,12 +650,12 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
           </div>
         ) : null}
         {unavailable ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#e7efe8] p-3 text-center text-xs font-bold text-stone-700">
+          <div className="absolute inset-0 flex items-center justify-center bg-mist p-3 text-center text-xs font-bold text-stone-700">
             <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-teal-700" /> {activeItem.coord ? unavailable : "Location unknown"}</span>
           </div>
         ) : null}
         {!activeItem.coord && !unavailable ? (
-          <div className="pointer-events-none absolute inset-x-2 bottom-2 rounded-lg bg-[rgba(255,253,246,0.93)] px-2 py-1.5 text-center text-[11px] font-bold text-stone-700 shadow">
+          <div className="pointer-events-none absolute inset-x-2 bottom-2 rounded-lg bg-paper/93 px-2 py-1.5 text-center text-[11px] font-bold text-stone-700 shadow">
             Location unknown
           </div>
         ) : null}
