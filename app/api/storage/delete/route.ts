@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { authorizeObjectRequest, parseNamespace, removeObjects, validObjectPath } from "@/lib/object-store-server";
+import { isMissingSchemaObjectError } from "@/lib/schema-errors";
+
+const DELETE_RPC = "can_delete_photo_object";
+const DELETE_RPC_PATCH = "neon/patches/2026-09-07-can-delete-photo-object.sql";
 
 export async function POST(request: Request) {
   try {
@@ -16,6 +20,13 @@ export async function POST(request: Request) {
     await removeObjects(namespace, paths);
     return NextResponse.json({ ok: true });
   } catch (error) {
+    if (error instanceof Error && isMissingSchemaObjectError(error, DELETE_RPC)) {
+      console.error(`[storage/delete] The ${DELETE_RPC} RPC does not exist in the database. Apply ${DELETE_RPC_PATCH}.`, error);
+      return NextResponse.json(
+        { error: `The database is missing the ${DELETE_RPC} function. Apply ${DELETE_RPC_PATCH} before using this route.` },
+        { status: 500 },
+      );
+    }
     // S3 client errors can name the bucket, endpoint, or other keys. Keep the
     // detail in the server log and return a generic message to the caller.
     console.error("[storage/delete]", error);

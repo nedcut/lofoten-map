@@ -3,6 +3,7 @@ import "server-only";
 import { DeleteObjectsCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { AVATAR_BUCKET, PHOTO_BUCKET, type ObjectNamespace } from "@/lib/object-store";
+import { isMissingSchemaObjectError } from "@/lib/schema-errors";
 
 const NAMESPACES = new Set<ObjectNamespace>([PHOTO_BUCKET, AVATAR_BUCKET]);
 
@@ -58,7 +59,16 @@ async function rpc(token: string, functionName: string, body: Record<string, unk
     body: JSON.stringify(body),
     cache: "no-store",
   });
-  if (!response.ok) return null;
+  if (!response.ok) {
+    // A function the schema does not have yet (PostgREST PGRST202) is a
+    // deployment mistake, not a permission decision. Surface it so the route
+    // can report the missing patch instead of a misleading 403.
+    const failure = await response.json().catch(() => null) as { code?: string; message?: string } | null;
+    if (typeof failure?.message === "string" && isMissingSchemaObjectError({ code: failure.code, message: failure.message }, functionName)) {
+      throw new Error(`Database RPC ${functionName} is missing: ${failure.message}`);
+    }
+    return null;
+  }
   return response.json();
 }
 

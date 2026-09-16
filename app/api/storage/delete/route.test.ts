@@ -67,6 +67,19 @@ describe("POST /api/storage/delete", () => {
     expect(mocks.removeObjects).toHaveBeenCalledWith("avatars", paths);
   });
 
+  it("returns 500 naming the patch when the authorization RPC is missing", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.authorizeObjectRequest.mockRejectedValue(new Error(
+      "Database RPC can_delete_photo_object is missing: Could not find the function public.can_delete_photo_object(check_path, check_trip_slug) in the schema cache",
+    ));
+    const response = await post({ namespace: "trip-photos", paths });
+    expect(response.status).toBe(500);
+    expect((await response.json()).error).toContain("neon/patches/2026-09-07-can-delete-photo-object.sql");
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("neon/patches/2026-09-07-can-delete-photo-object.sql"), expect.any(Error));
+    expect(mocks.removeObjects).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
   it("returns a generic 500 body when deletion throws", async () => {
     mocks.removeObjects.mockRejectedValue(new Error("lofoten-2026/abc.jpg: AccessDenied"));
     const response = await post({ namespace: "trip-photos", paths });
