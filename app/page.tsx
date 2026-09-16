@@ -9,7 +9,6 @@ import { AlertCircle, Loader2, Play, Sparkles, UserRound } from "lucide-react";
 import { collectItemCoordinates, coordinateBounds, routeDistanceMeters } from "@/lib/geo";
 import { AuthPanel } from "@/components/AuthPanel";
 import { DaySidebar } from "@/components/DaySidebar";
-import type { JourneyFilter } from "@/components/JourneyPlayback";
 import { MapLegend } from "@/components/MapLegend";
 import { MobileSheet } from "@/components/MobileSheet";
 import { StatusPill } from "@/components/StatusPill";
@@ -24,10 +23,11 @@ import { useProfile } from "@/lib/hooks/useProfile";
 import { useMembership } from "@/lib/hooks/useMembership";
 import { useTripMutations } from "@/lib/hooks/useTripMutations";
 import { useTripCreation } from "@/lib/hooks/useTripCreation";
+import { useJourneyState } from "@/lib/hooks/useJourneyState";
+import { useTripUrlState } from "@/lib/hooks/useTripUrlState";
 import { buildJourneyItems } from "@/lib/journey";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
 import { getBackendBrowserClient } from "@/lib/backend";
-import { applyTripUrlState, formatDayParam, formatItemToken, parseItemToken, readTripUrlState, resolveDayParam } from "@/lib/trip-url";
 import { deriveDayStats, deriveOutlierOverlay, filterTripItemsByDay, resolveEditTarget } from "@/lib/trip-view-model";
 import { cn } from "@/lib/utils";
 import type { LngLat, MapClickMode } from "@/types/trip";
@@ -77,7 +77,6 @@ export default function Home() {
     initialData: backend ? emptyTripData : demoTripData,
   });
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
-  const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
   const [layerVisibility, setLayerVisibility] = useState({ photos: true, notes: true, routes: true });
   const [clickMode, setClickMode] = useState<MapClickMode>("idle");
   const [pendingCoordinate, setPendingCoordinate] = useState<LngLat | null>(null);
@@ -85,31 +84,42 @@ export default function Home() {
   const [map, setMap] = useState<MapboxMap | null>(null);
   const [mapUnavailable, setMapUnavailable] = useState(false);
   const [panel, setPanel] = useState<"photo" | "note" | "route" | null>(null);
-  const [editTargetRef, setEditTargetRef] = useState<{ kind: MapItemKind; id: string } | null>(null);
-  const [activeJourneyId, setActiveJourneyId] = useState<string | null>(null);
   const [lastFocusedPhotoId, setLastFocusedPhotoId] = useState<string | null>(null);
   const [outlierPreview, setOutlierPreview] = useState<PhotoOutlier | null>(null);
-  const [deepLinkChecked, setDeepLinkChecked] = useState(false);
-  const [journeyFilter, setJourneyFilter] = useState<JourneyFilter>("all");
-  const [journeyUploaderFilter, setJourneyUploaderFilter] = useState("");
-  const [journeyIntro, setJourneyIntro] = useState(false);
 
+  const allJourneyItems = useMemo(() => buildJourneyItems(data), [data]);
+  const {
+    activeJourneyId,
+    setActiveJourneyId,
+    activeJourneyIndex,
+    journeyOpen,
+    journeyItems,
+    journeyFilter,
+    setJourneyFilter,
+    journeyUploaderFilter,
+    setJourneyUploaderFilter,
+    journeyIntro,
+    setJourneyIntro,
+    openJourneyAt,
+    closeJourney,
+    restoreJourneyFromUrl,
+    selectJourneyIndex,
+    selectJourneyItem,
+    nextJourneyItem,
+    prevJourneyItem,
+    openJourneyFromMap,
+    playDayJourney,
+  } = useJourneyState({ allJourneyItems });
+  const { selectedDayId, selectDay: selectUrlDay, editTargetRef, openEditItem, closeEditItem } = useTripUrlState({
+    data,
+    allJourneyItems,
+    loading,
+    onJourneyFromUrl: restoreJourneyFromUrl,
+  });
   const filtered = useMemo(() => filterTripItemsByDay(data, selectedDayId), [data, selectedDayId]);
   // Per-day totals for the day cards, computed over the full dataset (not the
   // current filter) so each card describes its whole day.
   const dayStats = useMemo(() => deriveDayStats(data), [data]);
-  const allJourneyItems = useMemo(() => buildJourneyItems(data), [data]);
-  const journeyItems = useMemo(() => allJourneyItems.filter((item) => {
-    if (journeyFilter === "photos" && item.kind !== "photo") return false;
-    if (journeyFilter === "journal" && item.kind === "photo") return false;
-    if (journeyUploaderFilter && (item.kind !== "photo" || item.primary.uploader_name !== journeyUploaderFilter)) return false;
-    return true;
-  }), [allJourneyItems, journeyFilter, journeyUploaderFilter]);
-  const activeJourneyIndex = useMemo(() => {
-    if (!activeJourneyId) return -1;
-    return journeyItems.findIndex((item) => item.id === activeJourneyId);
-  }, [activeJourneyId, journeyItems]);
-  const journeyOpen = Boolean(activeJourneyId);
   // These render a modal overlay on top of the header/sidebar/map, so those
   // stay `inert` (unfocusable, hidden from assistive tech) underneath rather
   // than merely obscured. The note, media, route, and edit panels are
@@ -124,13 +134,11 @@ export default function Home() {
   const { currentMember, currentUserId, canContribute, isAdmin } = access;
 
   const selectDay = useCallback((dayId: string | null) => {
-    setSelectedDayId(dayId);
     // Switching days is a deliberate change of context, so any lingering
     // photo-popup focus stops steering where Journey Mode starts.
     setLastFocusedPhotoId(null);
-    if (typeof window === "undefined") return;
-    applyTripUrlState(window.location.href, { day: formatDayParam(dayId, data.days) });
-  }, [data.days]);
+    selectUrlDay(dayId);
+  }, [selectUrlDay]);
 
   // Domain hooks own the demo-mode vs. Neon write paths and their status
   // channels, so this component only holds view state and wiring.
@@ -260,39 +268,6 @@ export default function Home() {
     setLastFocusedPhotoId((current) => (current === photoId ? null : current));
   }, []);
 
-  const openJourneyAt = useCallback((itemId: string, mode: "push" | "replace" = "push") => {
-    setActiveJourneyId(itemId);
-    if (typeof window === "undefined") return;
-    applyTripUrlState(window.location.href, { journey: itemId, item: null }, mode);
-  }, []);
-
-  const closeJourney = useCallback(() => {
-    setActiveJourneyId(null);
-    if (typeof window === "undefined") return;
-    applyTripUrlState(window.location.href, { journey: null });
-  }, []);
-
-  const selectJourneyIndex = useCallback((index: number) => {
-    const item = journeyItems[index];
-    if (!item) return;
-    openJourneyAt(item.id, "replace");
-  }, [journeyItems, openJourneyAt]);
-
-  // Tapping a dot in the journey mini-map jumps straight to that item.
-  const selectJourneyItem = useCallback((id: string) => {
-    openJourneyAt(id, "replace");
-  }, [openJourneyAt]);
-
-  // Opening Journey Mode from a main-map photo popup. Clear any active filters so
-  // the chosen photo is guaranteed to be in the sequence, and push history so the
-  // browser back button exits playback.
-  const openJourneyFromMap = useCallback((photoId: string) => {
-    setJourneyIntro(false);
-    setJourneyFilter("all");
-    setJourneyUploaderFilter("");
-    openJourneyAt(`photo:${photoId}`, "push");
-  }, [openJourneyAt]);
-
   // The header Journey button picks its starting item by context: the photo the
   // user last opened on the map wins, then the first item of the selected day,
   // then the start of the trip. The fallbacks matter because the last-clicked
@@ -307,17 +282,7 @@ export default function Home() {
       : undefined;
     setJourneyIntro(!lastFocusedPhotoId && !selectedDayId);
     openJourneyAt((lastFocused ?? dayStart ?? journeyItems[0]).id);
-  }, [journeyItems, lastFocusedPhotoId, openJourneyAt, selectedDayId]);
-
-  // "Play this day" from a day card: clear any active filters so the day's first
-  // moment is guaranteed to be in the sequence, then drop into playback there.
-  const playDayJourney = useCallback((dayId: string) => {
-    setJourneyIntro(false);
-    setJourneyFilter("all");
-    setJourneyUploaderFilter("");
-    const first = allJourneyItems.find((item) => item.dayId === dayId);
-    if (first) openJourneyAt(first.id, "push");
-  }, [allJourneyItems, openJourneyAt]);
+  }, [journeyItems, lastFocusedPhotoId, openJourneyAt, selectedDayId, setJourneyIntro]);
 
   // Bundle for the sidebar/mobile Journey hero + per-day play buttons. The hero
   // samples data.photos for its preview; counts drive its subtitle copy.
@@ -339,67 +304,6 @@ export default function Home() {
     if (nextIndex !== currentIndex) selectDay(sequence[nextIndex]);
   }, [data.days, selectDay, selectedDayId]);
 
-  const nextJourneyItem = useCallback(() => {
-    if (journeyItems.length === 0) return;
-    const currentIndex = activeJourneyIndex >= 0 ? activeJourneyIndex : 0;
-    const nextIndex = (currentIndex + 1) % journeyItems.length;
-    selectJourneyIndex(nextIndex);
-  }, [activeJourneyIndex, journeyItems.length, selectJourneyIndex]);
-
-  const prevJourneyItem = useCallback(() => {
-    if (journeyItems.length === 0) return;
-    const currentIndex = activeJourneyIndex >= 0 ? activeJourneyIndex : 0;
-    const nextIndex = (currentIndex - 1 + journeyItems.length) % journeyItems.length;
-    selectJourneyIndex(nextIndex);
-  }, [activeJourneyIndex, journeyItems.length, selectJourneyIndex]);
-
-  const applyDeepLinkFromUrl = useCallback((href: string) => {
-    const { day, journey, item } = readTripUrlState(href);
-    const dayId = resolveDayParam(day, data.days);
-    setSelectedDayId(dayId);
-
-    const journeyToken = journey && allJourneyItems.some((entry) => entry.id === journey) ? journey : null;
-    setJourneyIntro(false);
-    setActiveJourneyId(journeyToken);
-
-    const itemRef = parseItemToken(item);
-    if (!itemRef) {
-      setEditTargetRef(null);
-      return;
-    }
-    if (itemRef.kind === "photo") {
-      const photo = data.photos.find((entry) => entry.id === itemRef.id);
-      if (photo) {
-        setJourneyFilter("all");
-        setJourneyUploaderFilter("");
-        setActiveJourneyId(`photo:${photo.id}`);
-        setEditTargetRef(null);
-        return;
-      }
-    }
-    const exists = (
-      (itemRef.kind === "photo" && data.photos.some((entry) => entry.id === itemRef.id))
-      || (itemRef.kind === "note" && data.notes.some((entry) => entry.id === itemRef.id))
-      || (itemRef.kind === "place" && data.places.some((entry) => entry.id === itemRef.id))
-      || (itemRef.kind === "route" && data.routeSegments.some((entry) => entry.id === itemRef.id))
-    );
-    setEditTargetRef(exists ? { kind: itemRef.kind, id: itemRef.id } : null);
-  }, [allJourneyItems, data.days, data.notes, data.photos, data.places, data.routeSegments]);
-
-  /* eslint-disable react-hooks/set-state-in-effect -- one-shot sync of selection state from the URL (external system) after the first data load; intentional. */
-  useEffect(() => {
-    if (deepLinkChecked || loading) return;
-    applyDeepLinkFromUrl(window.location.href);
-    setDeepLinkChecked(true);
-  }, [applyDeepLinkFromUrl, deepLinkChecked, loading]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  useEffect(() => {
-    const handler = () => applyDeepLinkFromUrl(window.location.href);
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
-  }, [applyDeepLinkFromUrl]);
-
   // Arrow keys step the day filter while the map view has focus. Journey Mode
   // has its own ArrowLeft/Right handler, and open panels capture typing, so the
   // listener simply isn't attached in those states rather than checking inside.
@@ -418,22 +322,6 @@ export default function Home() {
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [activeJourneyId, authPanelOpen, editTargetRef, panel, profilePanelOpen, stepDay]);
-
-  useEffect(() => {
-    if (!activeJourneyId) return;
-    if (journeyItems.some((item) => item.id === activeJourneyId)) return;
-    // The active item dropped out of the filtered list. If others still match,
-    // snap to the first of them. If the list is now empty but the item still
-    // exists overall, the user just narrowed a filter past everything — keep the
-    // viewer open so its filter controls stay reachable. Only close when the
-    // item is genuinely gone (e.g. deleted via realtime) with nothing left.
-    if (journeyItems[0]) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- reconciles the active journey item when filters/realtime drop it from the list; intentional.
-      openJourneyAt(journeyItems[0].id, "replace");
-    } else if (!allJourneyItems.some((item) => item.id === activeJourneyId)) {
-      closeJourney();
-    }
-  }, [activeJourneyId, allJourneyItems, closeJourney, journeyItems, openJourneyAt]);
 
   // While Journey Mode is open the main map is hidden (display:none) behind the
   // full-screen viewer, so only the mini-map renders a live WebGL context. A
@@ -521,8 +409,7 @@ export default function Home() {
   // buttons to owners/admins, and these handlers reuse the existing data mutations.
   function startEditFromMap(kind: MapItemKind, id: string) {
     closePanel();
-    setEditTargetRef({ kind, id });
-    applyTripUrlState(window.location.href, { item: formatItemToken({ kind, id }), journey: null }, "push");
+    openEditItem(kind, id);
   }
 
   // "Edit details" inside Journey Mode: swap the viewer for the editor panel.
@@ -627,7 +514,7 @@ export default function Home() {
       {panel === "note" ? <AddNotePanel tripSlug={tripSlug} days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} existingPhotos={data.photos} tripSlug={tripSlug} mapAvailable={mapActionsEnabled} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
-      {editTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminStatus.isSaving} onClose={() => { setEditTargetRef(null); applyTripUrlState(window.location.href, { item: null }); }} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
+      {editTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminStatus.isSaving} onClose={closeEditItem} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
       {journeyOpen ? (
         <JourneyPlayback
           trip={data.trip}
