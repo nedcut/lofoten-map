@@ -9,7 +9,8 @@ export default defineConfig({
   },
   test: {
     // Pure functions under lib/ are environment-agnostic; node is fastest.
-    // Switch to "jsdom" only if/when a test needs the DOM (e.g. canvas).
+    // Tests that need the DOM (React hook tests under lib/hooks/) opt in per
+    // file with a `// @vitest-environment jsdom` comment on their first line.
     environment: "node",
     include: ["lib/**/*.test.ts", "app/**/*.test.ts"],
     coverage: {
