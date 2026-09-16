@@ -572,15 +572,15 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
           </div>
         ) : null}
         <div className="mt-4 grid gap-3">
-          <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-teal-700/35 bg-teal-50 px-4 py-5 text-center text-teal-950 transition hover:bg-teal-100">
+          <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-teal-700/35 bg-teal-50 px-4 py-5 text-center text-teal-950 transition hover:bg-teal-100 focus-within:ring-4 focus-within:ring-teal-500/40">
             <Images className="h-7 w-7" />
             <span className="text-base font-black">Choose from camera roll</span>
             <span className="text-xs text-teal-900/85">iPhone, Android, HEIC, JPG, MOV, MP4</span>
-            <input ref={cameraRollInputRef} name="media" type="file" accept="image/*,video/*,.heic,.heif,.mov,.m4v" multiple className="hidden" onChange={handleFileInputChange} />
+            <input ref={cameraRollInputRef} name="media" type="file" accept="image/*,video/*,.heic,.heif,.mov,.m4v" multiple className="sr-only" onChange={handleFileInputChange} />
           </label>
-          <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-700 transition hover:bg-stone-50">
+          <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-700 transition hover:bg-stone-50 focus-within:ring-4 focus-within:ring-stone-300/50">
             <FileImage className="h-4 w-4" /> Browse exported camera files
-            <input type="file" accept="image/*,video/*,.heic,.heif,.mov,.m4v" multiple className="hidden" onChange={handleFileInputChange} />
+            <input type="file" accept="image/*,video/*,.heic,.heif,.mov,.m4v" multiple className="sr-only" onChange={handleFileInputChange} />
           </label>
         </div>
       </div>

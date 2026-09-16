@@ -19,7 +19,7 @@ export function PillButton({ className, children, ...props }: ButtonHTMLAttribut
       type="button"
       className={cn(
         PILL_BASE,
-        "inline-flex items-center gap-2 px-3 py-2 text-xs font-bold text-stone-700 transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex items-center gap-2 px-3 py-2 text-xs font-bold text-stone-700 transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100 disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}

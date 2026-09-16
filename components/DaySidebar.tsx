@@ -316,7 +316,7 @@ export function MemberAdminPanel({ members, requests, currentUserId, message, me
             <option value="member">Member</option>
             <option value="admin">Admin</option>
           </select>
-          <Button tone="fjord" size="sm" disabled={isSaving} className="px-3">
+          <Button type="submit" tone="fjord" size="sm" disabled={isSaving} className="px-3">
             {isSaving ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <UserPlus className="h-4 w-4" />} Add
           </Button>
         </div>

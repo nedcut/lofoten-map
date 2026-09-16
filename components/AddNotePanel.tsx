@@ -59,7 +59,7 @@ export function AddNotePanel({ tripSlug, days, selectedCoordinate, defaultDayId,
   }
 
   return (
-    <Panel className="md:w-96" labelledBy="add-note-title" onClose={handleCancel}>
+    <Panel className="md:w-96" labelledBy="add-note-title" onClose={handleCancel} modal={false}>
       <PanelHeader id="add-note-title" title="Add a trail note" subtitle="Tap the map to choose a location, then save a short note." onClose={handleCancel} closeLabel="Close note panel" />
       <form action={submit} aria-labelledby="add-note-title" className="min-h-0 space-y-3 overflow-y-auto pr-1">
         <InlineMessage>
@@ -83,7 +83,7 @@ export function AddNotePanel({ tripSlug, days, selectedCoordinate, defaultDayId,
             </Select>
           </Field>
         </div>
-        <Button disabled={!hasCoordinate || !hasBody || isSaving} className="w-full">
+        <Button type="submit" disabled={!hasCoordinate || !hasBody || isSaving} className="w-full">
           {isSaving ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : null} Save note
         </Button>
       </form>

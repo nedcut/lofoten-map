@@ -48,7 +48,7 @@ export function AuthPanel({ tripTitle, message, messageTone, isSubmitting, onSig
           <input id="email" name="email" type="email" required placeholder="you@example.com" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-stone-400" />
         </div>
         {message ? <InlineMessage tone={messageTone} className="mb-3">{message}</InlineMessage> : null}
-        <Button disabled={isSubmitting} className="w-full">
+        <Button type="submit" disabled={isSubmitting} className="w-full">
           {isSubmitting ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <LogIn className="h-4 w-4" />} Send sign-in link
         </Button>
       </form>

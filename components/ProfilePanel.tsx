@@ -83,7 +83,7 @@ export function ProfilePanel({ displayName, avatarUrl, email, isSaving, onClose,
         <Field label="Display name" hint={`Leave blank to fall back to ${placeholder}.`}>
           <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder={placeholder} />
         </Field>
-        <Button disabled={isSaving} className="w-full">
+        <Button type="submit" disabled={isSaving} className="w-full">
           {isSaving ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : null} Save profile
         </Button>
       </form>

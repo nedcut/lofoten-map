@@ -246,13 +246,14 @@ export default function Home() {
   const outlierOverlay = useMemo(() => deriveOutlierOverlay(outlierPreview), [outlierPreview]);
   // Notes and places only have mouse-driven map layers; this gives keyboard and
   // screen-reader users a way to reach the same edit path startEditFromMap
-  // wires up for a map-popup click.
+  // wires up for a map-popup click. Same owner-or-admin rule as the popup
+  // controls: notes the viewer owns, places only for admins.
   const notesPlacesEntry = useMemo(() => ({
-    notes: filtered.notes,
-    places: filtered.places,
+    notes: isAdmin ? filtered.notes : filtered.notes.filter((note) => note.user_id === currentUserId),
+    places: isAdmin ? filtered.places : [],
     onOpen: (kind: "note" | "place", id: string) => startEditFromMap(kind, id),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- startEditFromMap is a plain function (not memoized) redefined every render; omitted to avoid invalidating this memo on every render too.
-  }), [filtered.notes, filtered.places]);
+  }), [currentUserId, filtered.notes, filtered.places, isAdmin]);
 
   // A photo only steers the journey start while its popup is open. Guarded so
   // closing a stale popup can't wipe focus from a newer one opened after it.

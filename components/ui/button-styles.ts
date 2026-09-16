@@ -14,7 +14,7 @@ export type ButtonStyleProps = {
   className?: string;
 };
 
-const BASE = "inline-flex items-center justify-center gap-2 rounded-[var(--radius-control)] font-black transition-all duration-150 focus-visible:outline-none focus-visible:ring-4 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
+const BASE = "inline-flex items-center justify-center gap-2 rounded-[var(--radius-control)] font-black transition-all duration-150 focus-visible:outline-none focus-visible:ring-4 active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 disabled:cursor-not-allowed disabled:opacity-50";
 
 const SIZES: Record<ButtonSize, string> = {
   md: "px-4 py-3",

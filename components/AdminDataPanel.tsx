@@ -162,7 +162,7 @@ export function AdminDataPanel(props: AdminDataProps) {
               GPX file
               <input name="gpx" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" disabled={props.isSaving} className="w-full rounded-[var(--radius-control)] border border-stone-300 bg-white px-3 py-2 text-sm font-normal tracking-normal text-stone-950 file:mr-3 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-stone-700 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15 disabled:cursor-not-allowed disabled:opacity-60" />
             </label>
-            <Button tone="fjord" size="sm" disabled={props.isSaving} className="w-full">
+            <Button type="submit" tone="fjord" size="sm" disabled={props.isSaving} className="w-full">
               {props.isSaving ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <Upload className="h-4 w-4" />} Import GPX
             </Button>
           </form>

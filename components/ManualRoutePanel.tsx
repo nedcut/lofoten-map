@@ -47,7 +47,7 @@ export function ManualRoutePanel({ days, defaultDayId, points, distanceMeters, i
   }
 
   return (
-    <Panel className="md:w-96">
+    <Panel className="md:w-96" labelledBy="draw-route-title" modal={false}>
       <PanelHeader id="draw-route-title" title="Draw route" subtitle="Tap the map to place route points in order, then save it to a trip day." onClose={onCancel} closeLabel="Close route editor" />
       <form action={submit} aria-labelledby="draw-route-title" className="min-h-0 space-y-3 overflow-y-auto pr-1">
         <div className="grid grid-cols-2 gap-2 text-center text-xs font-bold uppercase tracking-[0.08em] text-stone-500">
@@ -90,7 +90,7 @@ export function ManualRoutePanel({ days, defaultDayId, points, distanceMeters, i
           <button type="button" onClick={onClear} disabled={points.length === 0 || isSaving} className="rounded-[var(--radius-control)] border border-stone-300 bg-white px-3 text-stone-600 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-45" aria-label="Clear route draft">
             <RotateCcw className="h-4 w-4" />
           </button>
-          <Button disabled={points.length < 2 || isSaving}>
+          <Button type="submit" disabled={points.length < 2 || isSaving}>
             {isSaving ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <Save className="h-4 w-4" />} Save route
           </Button>
         </div>

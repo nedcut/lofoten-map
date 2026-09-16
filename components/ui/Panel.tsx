@@ -12,15 +12,18 @@ import { cn } from "@/lib/utils";
 //
 // `labelledBy` should match the `id` given to this panel's PanelHeader, and
 // `onClose` wires up initial focus, a Tab trap, Escape-to-close, and focus
-// restoration on close via useDialogFocus.
-export function Panel({ className, children, labelledBy, onClose }: { className?: string; children: ReactNode; labelledBy?: string; onClose?: () => void }) {
+// restoration on close via useDialogFocus. Panels that need the map while
+// open (placing a note, drawing a route) pass `modal={false}`: they keep
+// Escape and focus restore but do not trap Tab or hide the page from
+// assistive technology.
+export function Panel({ className, children, labelledBy, onClose, modal = true }: { className?: string; children: ReactNode; labelledBy?: string; onClose?: () => void; modal?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  useDialogFocus(containerRef, { onClose });
+  useDialogFocus(containerRef, { onClose, trapFocus: modal });
   return (
     <div
       ref={containerRef}
       role="dialog"
-      aria-modal="true"
+      aria-modal={modal ? "true" : undefined}
       aria-labelledby={labelledBy}
       className={cn(
         "pointer-events-auto fixed inset-x-3 bottom-3 z-30 max-h-[calc(100dvh-1.5rem)] overflow-hidden rounded-panel border border-stone-200/80 bg-paper/96 text-stone-950 shadow-panel backdrop-blur-xl md:bottom-6 md:left-auto md:right-6",

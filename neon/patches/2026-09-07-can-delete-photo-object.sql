@@ -9,8 +9,10 @@
 drop function if exists public.can_delete_photo_object(text, text);
 
 -- Used only by the authenticated R2 delete route. Mirrors the photos DELETE
--- policy at the object level: a caller may remove an object that one of their
--- own photo rows references, or any object in a trip they administer. An object
+-- policy at the object level: a caller may remove an object only when every
+-- photo row referencing it is their own, or any object in a trip they
+-- administer. Insert/update policies do not constrain image paths, so a row a
+-- member points at someone else's object must not unlock that object. An object
 -- that no row references (an orphan left by a failed upload) may be removed by
 -- any member of that trip, so the client's best-effort rollback keeps working.
 -- Trip membership alone is never enough to delete another member's file.
@@ -39,7 +41,7 @@ as $$
     and exists (select 1 from trip)
     and case
       when exists (select 1 from refs)
-        then exists (select 1 from refs, caller where refs.user_id = caller.id)
+        then not exists (select 1 from refs, caller where refs.user_id is distinct from caller.id)
           or public.is_trip_admin((select id from trip))
       else public.is_trip_member((select id from trip))
     end;

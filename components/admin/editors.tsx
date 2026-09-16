@@ -356,7 +356,7 @@ function EditorActions({ isSaving, saveLabel, deleteLabel, deleteConfirmMessage,
 
 export function SaveButton({ children, isSaving }: { children: string; isSaving: boolean }) {
   return (
-    <Button tone="fjord" size="sm" disabled={isSaving} className="w-full">
+    <Button type="submit" tone="fjord" size="sm" disabled={isSaving} className="w-full">
       {isSaving ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <Save className="h-4 w-4" />} {children}
     </Button>
   );

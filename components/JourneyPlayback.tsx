@@ -205,7 +205,14 @@ export function JourneyPlayback({
   // and focus restore on close. Disabled while the intro/complete overlay is
   // up (the effect above owns focus then) and doesn't take onClose — the
   // window keydown handler below already closes on Escape.
-  useDialogFocus(rootRef, { active: !introOpen && !complete });
+  // The intro overlay takes focus first, so by the time the viewer dialog
+  // activates the "previous" element would be the intro button (or body).
+  // Capture the real opener once on mount and restore to it on close.
+  const openerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }, []);
+  useDialogFocus(rootRef, { active: !introOpen && !complete, restoreTo: openerRef });
 
   function advanceVideoInSlideshow() {
     if (!isPlayingRef.current) return;

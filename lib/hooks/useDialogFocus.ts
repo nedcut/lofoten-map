@@ -25,9 +25,13 @@ function isVisible(element: HTMLElement) {
 
 export function useDialogFocus(
   containerRef: React.RefObject<HTMLElement | null>,
-  options: { onClose?: () => void; active?: boolean } = {},
+  options: { onClose?: () => void; active?: boolean; trapFocus?: boolean; restoreTo?: React.RefObject<HTMLElement | null> } = {},
 ) {
-  const { onClose, active = true } = options;
+  // `trapFocus: false` keeps initial focus, Escape, and restore-on-close but
+  // lets Tab leave the container, for panels that still need the map behind
+  // them. `restoreTo` overrides the auto-captured opener when activation
+  // happens later than the open (e.g. after an intro overlay).
+  const { onClose, active = true, trapFocus = true, restoreTo } = options;
   const previouslyFocused = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -36,6 +40,8 @@ export function useDialogFocus(
     if (!container) return;
 
     previouslyFocused.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Read once at activation; the opener ref is filled before this effect runs.
+    const restoreTarget = restoreTo?.current ?? null;
 
     const getFocusable = () => Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isVisible);
 
@@ -53,7 +59,7 @@ export function useDialogFocus(
         onClose();
         return;
       }
-      if (event.key !== "Tab") return;
+      if (event.key !== "Tab" || !trapFocus) return;
       const items = getFocusable();
       if (items.length === 0) return;
       const first = items[0];
@@ -70,9 +76,9 @@ export function useDialogFocus(
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
-      const toRestore = previouslyFocused.current;
+      const toRestore = restoreTarget ?? previouslyFocused.current;
       if (toRestore && document.contains(toRestore)) toRestore.focus();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose is read fresh each run via the effect re-running when it changes identity; containerRef is a ref.
-  }, [active, onClose]);
+  }, [active, onClose, trapFocus, restoreTo]);
 }
