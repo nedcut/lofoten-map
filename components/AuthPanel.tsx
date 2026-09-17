@@ -50,7 +50,7 @@ export function AuthPanel({ tripTitle, message, messageTone, isSubmitting, pendi
           <label className="mb-3 block text-sm font-bold text-stone-800" htmlFor="code">Code</label>
           <div className="mb-3 flex items-center gap-2 rounded-[var(--radius-control)] border border-stone-300 bg-white px-4 py-3">
             <KeyRound className="h-4 w-4 text-teal-800" />
-            <input id="code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" required autoFocus placeholder="123456" className="min-w-0 flex-1 bg-transparent text-sm tracking-[0.3em] outline-none placeholder:tracking-normal placeholder:text-stone-400" />
+            <input id="code" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="\s*(?:[0-9]\s*){6}" title="Enter the 6-digit code from your email" required autoFocus placeholder="123456" className="min-w-0 flex-1 bg-transparent text-sm tracking-[0.3em] outline-none placeholder:tracking-normal placeholder:text-stone-400" />
           </div>
           {message ? <InlineMessage tone={messageTone} className="mb-3">{message}</InlineMessage> : null}
           <Button type="submit" disabled={isSubmitting} className="w-full">
@@ -88,7 +88,7 @@ export function AuthPanel({ tripTitle, message, messageTone, isSubmitting, pendi
         </div>
         {message ? <InlineMessage tone={messageTone} className="mb-3">{message}</InlineMessage> : null}
         <Button type="submit" disabled={isSubmitting} className="w-full">
-          {isSubmitting ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <LogIn className="h-4 w-4" />} Send sign-in link
+          {isSubmitting ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <LogIn className="h-4 w-4" />} Send one-time code
         </Button>
       </form>
     </div>
