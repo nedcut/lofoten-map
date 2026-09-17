@@ -1,7 +1,7 @@
 "use client";
 
 import mapboxgl from "mapbox-gl";
-import { MapPin, Minus, Plus, RotateCcw, RotateCw } from "lucide-react";
+import { MapPin, Minus, Plus, RotateCcw, RotateCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FeatureCollection, LineString, Point } from "geojson";
 import { LOFOTEN_CENTER, routeFeatureCollection } from "@/lib/geo";
@@ -643,11 +643,15 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   );
 
   return (
-    <div ref={rootRef} className="absolute right-3 top-16 z-40 md:right-6 md:top-auto md:bottom-6" onMouseLeave={queueCollapse}>
+    // data-journey-minimap lets JourneyPlayback's swipe handler ignore touches
+    // that start here, so panning the map doesn't also flip the slide.
+    <div ref={rootRef} data-journey-minimap className="absolute right-3 top-[calc(4rem+env(safe-area-inset-top))] z-40 md:right-6 md:top-auto md:bottom-6" onMouseLeave={queueCollapse}>
       {/* Size controls float above the collapsed map (outside the hover-expand
           zone, so reaching for them doesn't balloon the map mid-click) and
-          move inside the top-right corner once expanded. */}
-      {!expanded ? <div className="absolute -top-9 right-0 flex items-center gap-1">{sizeControls}</div> : null}
+          move inside the top-right corner once expanded. Phones skip the
+          floating pair: it landed on top of the header's filter and Share
+          buttons, and tap-to-expand already offers the sizes inside. */}
+      {!expanded ? <div className="absolute -top-9 right-0 hidden items-center gap-1 md:flex">{sizeControls}</div> : null}
       <div
         className={cn(
           "relative overflow-hidden rounded-2xl border border-white/20 bg-stone-950/70 shadow-2xl transition-all duration-300",
@@ -655,7 +659,16 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
         )}
         onMouseEnter={expand}
       >
-        {expanded ? <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1">{sizeControls}</div> : null}
+        {expanded ? (
+          <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1">
+            {sizeControls}
+            {/* Pointer users leave by moving the mouse away; touch users need
+                a visible way back to the photo. */}
+            <button type="button" onClick={() => setExpanded(false)} className={cn(controlButton, "md:hidden")} aria-label="Close mini-map" title="Close mini-map">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : null}
         <div ref={containerRef} className="h-full w-full" onPointerDown={expand} />
         {!unavailable ? (
           <div className="absolute bottom-1.5 right-1.5 z-10 flex items-center gap-1">

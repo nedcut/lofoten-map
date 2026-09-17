@@ -130,6 +130,11 @@ export function JourneyPlayback({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const modalRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  // Measured width of the progress track, so day labels that would collide
+  // on a narrow screen (eight days across a phone) can be dropped.
+  const [trackWidth, setTrackWidth] = useState(0);
   const isPlayingRef = useRef(isPlaying);
   const activeIndexRef = useRef(activeIndex);
   const uploaderOptions = useMemo(
@@ -144,6 +149,18 @@ export function JourneyPlayback({
     const day = days.find((entry) => entry.id === item.dayId) ?? null;
     return [{ index, day, left: items.length <= 1 ? 0 : (index / (items.length - 1)) * 100 }];
   }), [days, items]);
+  // Which ticks get a "D3" label: walk left to right and only label a tick
+  // when it sits far enough from the last labelled one. Dots always render.
+  const labelledTicks = useMemo(() => {
+    const minGapPx = 26;
+    const labelled = new Set<number>();
+    let lastLabelledPx = -Infinity;
+    for (const tick of dayTicks) {
+      const px = trackWidth > 0 ? (tick.left / 100) * trackWidth : Infinity;
+      if (px - lastLabelledPx >= minGapPx) { labelled.add(tick.index); lastLabelledPx = px; }
+    }
+    return labelled;
+  }, [dayTicks, trackWidth]);
   const activeDayColor = activeItem?.dayId ? dayColors.get(activeItem.dayId) ?? null : null;
   const selectedUploaderId = uploaderOptions.find((option) => option.value === uploaderFilter)?.id ?? "";
 
@@ -319,6 +336,30 @@ export function JourneyPlayback({
     return () => { preloaded.forEach((img) => { img.src = ""; }); };
   }, [activeIndex, items]);
 
+  // The bottom bar's height depends on the caption and attached notes, so the
+  // media area reads it from a CSS variable instead of guessing with a fixed
+  // padding. Without this a long caption on a phone covers the photo.
+  useEffect(() => {
+    const bar = barRef.current;
+    const root = rootRef.current;
+    if (!bar || !root || typeof ResizeObserver === "undefined") return;
+    const publish = () => root.style.setProperty("--journey-bar-height", `${Math.round(bar.getBoundingClientRect().height)}px`);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [activeItem]);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track || typeof ResizeObserver === "undefined") return;
+    const publish = () => setTrackWidth(track.getBoundingClientRect().width);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, [activeItem]);
+
   const filterControls = (
     <>
       <select value={filter} onChange={(event) => onFilterChange(event.target.value as JourneyFilter)} aria-label="Filter journey by type" className="max-w-[8rem] rounded-full border border-white/15 bg-stone-950/45 px-3 py-2 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20">
@@ -400,9 +441,16 @@ export function JourneyPlayback({
   }
 
   function touchStart(event: React.TouchEvent) {
+    noteInteraction();
+    // A horizontal drag on the progress slider, the mini-map, or a text field
+    // is not a swipe: without this, scrubbing the slider also flipped a slide.
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('input[type="range"], [data-journey-minimap], textarea, select')) {
+      touchStartRef.current = null;
+      return;
+    }
     const touch = event.touches[0];
     touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-    noteInteraction();
   }
 
   function touchEnd(event: React.TouchEvent) {
@@ -434,7 +482,7 @@ export function JourneyPlayback({
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_24%_16%,rgba(231,161,61,0.22),transparent_32%),linear-gradient(135deg,#1c1917,#263f38_58%,#0c1715)]" />
       )}
 
-      <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 px-3 py-3 md:px-6 md:py-5">
+      <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] md:px-6 md:py-5">
         <div className="flex min-w-0 items-center gap-2">
           <IconButton onClick={onClose} aria-label="Close journey">
             <X className="h-5 w-5" />
@@ -455,7 +503,7 @@ export function JourneyPlayback({
       {shareStatus ? <div role="status" className="absolute right-4 top-16 z-50 rounded-full bg-white px-3 py-2 text-xs font-bold text-stone-950 shadow-xl">{shareStatus === "copied" ? "Link copied" : shareStatus === "shared" ? "Journey shared" : "Couldn’t share link"}</div> : null}
 
       {introOpen ? (
-        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-intro-title" className="absolute inset-0 z-40 flex items-center justify-center bg-stone-950/72 p-6 backdrop-blur-md">
+        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-intro-title" className="absolute inset-0 z-50 flex items-center justify-center bg-stone-950/72 p-6 backdrop-blur-md">
           <section className="max-w-xl text-center">
             <div className="text-xs font-black uppercase tracking-[0.24em] text-ember-400">A shared travel story</div>
             {/* h2, not h1 — the app already has an h1 for the trip title (DaySidebar),
@@ -469,7 +517,7 @@ export function JourneyPlayback({
       ) : null}
 
       {complete ? (
-        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-complete-title" className="absolute inset-0 z-40 flex items-center justify-center bg-stone-950/76 p-6 backdrop-blur-md">
+        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-complete-title" className="absolute inset-0 z-50 flex items-center justify-center bg-stone-950/76 p-6 backdrop-blur-md">
           <section className="max-w-xl text-center">
             <div className="text-xs font-black uppercase tracking-[0.24em] text-ember-400">End of the journey</div>
             <h2 id="journey-complete-title" className="mt-4 font-serif text-5xl font-semibold">Thanks for coming along.</h2>
@@ -483,7 +531,9 @@ export function JourneyPlayback({
         </div>
       ) : null}
 
-      <div className="relative z-10 flex h-full items-center justify-center px-4 pb-52 pt-20 md:px-16 md:pb-48 md:pt-24">
+      {/* Media fills whatever the header and the measured bottom bar leave
+          free; the 2rem lets it run into the bar's transparent gradient top. */}
+      <div className="relative z-10 flex h-full items-center justify-center px-2 pb-[calc(var(--journey-bar-height,13rem)-2rem)] pt-[calc(4.25rem+env(safe-area-inset-top))] md:px-16 md:pt-24">
         {videoUrl ? (
           <div className="flex h-full w-full items-center justify-center">
             <video
@@ -537,7 +587,7 @@ export function JourneyPlayback({
 
       {/* On desktop the mini-map sits in the bottom-right corner; JourneyMiniMap
           publishes its width so the bar can keep its controls clear of it. */}
-      <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-stone-950 via-stone-950/86 to-transparent px-3 pb-3 pt-16 md:px-6 md:pb-5 md:pr-[calc(var(--journey-minimap-width,18rem)+3rem)]">
+      <div ref={barRef} className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-stone-950 via-stone-950/86 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-12 md:px-6 md:pb-5 md:pt-16 md:pr-[calc(var(--journey-minimap-width,18rem)+3rem)]">
         <div className="mx-auto max-w-5xl">
           <div className="mb-4 max-w-2xl">
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-white/58">
@@ -600,8 +650,11 @@ export function JourneyPlayback({
             )}
           </div>
 
-          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
-            <div className="flex items-center gap-2">
+          {/* Phones get two rows: the full-width track on top (room for every
+              day tick), then play/speed on the left and prev/count/next on
+              the right. From md up it collapses to the single-row grid. */}
+          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-3">
+            <div className="flex items-center gap-2 md:col-start-1 md:row-start-1">
               <button onClick={() => setIsPlaying((value) => !value)} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-stone-950 shadow-lg transition hover:bg-[#fff4d8] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30" aria-label={isPlaying ? "Pause autoplay" : "Start autoplay"}>
                 {isPlaying ? <CirclePause className="h-5 w-5" /> : <CirclePlay className="h-5 w-5" />}
               </button>
@@ -618,7 +671,7 @@ export function JourneyPlayback({
             {/* The track: a tick per day start, labelled "D1…D8" underneath and
                 coloured like the day everywhere else, so scrubbing to a day
                 is a matter of aiming rather than hovering to find out. */}
-            <div className="relative h-11 pt-0.5">
+            <div ref={trackRef} className="relative col-span-3 h-11 pt-0.5 md:col-span-1 md:col-start-2 md:row-start-1">
               <div className="absolute left-0 right-0 top-3.5 h-1 rounded-full bg-white/16">
                 <div className="h-full rounded-full transition-[width] duration-200" style={{ width: `${Math.max(2, progress * 100)}%`, backgroundColor: activeDayColor ?? "#e7a13d" }} />
               </div>
@@ -635,7 +688,9 @@ export function JourneyPlayback({
                     title={`${dayLabel(days, day?.id ?? null)} ${formatDateOnly(day?.date)}`}
                   >
                     <span className={cn("h-4 w-4 rounded-full border-2 border-stone-950 shadow transition-transform", isActiveDay && "scale-110")} style={{ backgroundColor: color }} />
-                    <span className={cn("mt-0.5 text-[10px] font-bold uppercase tabular-nums leading-none", isActiveDay ? "text-white" : "text-white/55")}>{day ? `D${day.day_number}` : "—"}</span>
+                    {labelledTicks.has(index) ? (
+                      <span className={cn("mt-0.5 text-[10px] font-bold uppercase tabular-nums leading-none", isActiveDay ? "text-white" : "text-white/55")}>{day ? `D${day.day_number}` : "—"}</span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -650,7 +705,7 @@ export function JourneyPlayback({
                 aria-valuetext={`${title}, ${dayLabel(days, activeItem.dayId)}`}
               />
             </div>
-            <div className="flex items-center gap-1">
+            <div className="col-span-2 flex items-center justify-end gap-1 md:col-span-1 md:col-start-3 md:row-start-1">
               <IconButton onClick={() => { noteInteraction(); onPrev(); }} className="md:hidden" aria-label="Previous item"><ChevronLeft className="h-5 w-5" /></IconButton>
               <span className="min-w-14 text-center text-xs font-bold text-white/60">{activeIndex + 1} / {items.length}</span>
               <IconButton onClick={() => { noteInteraction(); onNext(); }} className="md:hidden" aria-label="Next item"><ChevronRight className="h-5 w-5" /></IconButton>
