@@ -6,6 +6,7 @@ import { dayColorFor } from "@/lib/day-colors";
 import { friendlyPersonName } from "@/lib/display-name";
 import { noteFeatureCollection, photoFeatureCollection, placeFeatureCollection, routeFeatureCollection } from "@/lib/geo";
 import { PHOTO_CLUSTER_MAX_ZOOM, PHOTO_CLUSTER_RADIUS, photoMarkerPresentation } from "@/lib/map-presentation";
+import { MOBILE_SHEET_HEIGHT_VAR } from "@/components/MobileSheet";
 import { formatDateTime } from "@/lib/utils";
 import type { Day, Note, Photo, Place, RouteSegment } from "@/types/trip";
 
@@ -186,7 +187,7 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
   useEffect(() => {
     if (!map) return;
     const activeMap = map;
-    const markers = new Map<string, mapboxgl.Marker>();
+    const markers = new Map<string, MarkerEntry>();
     const photosById = new Map(photos.map((photo) => [photo.id, photo]));
     let frame = 0;
     // The marker currently being dragged. refreshMarkers runs on every
@@ -308,20 +309,34 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       return closest;
     }
 
-    function createMarkerElement(photo: Photo, count: number, zoom: number) {
+    // How long a departing marker fades before its element is dropped. A
+    // marker that comes back within this window is simply un-faded.
+    const LEAVE_MS = 160;
+
+    type MarkerEntry = {
+      marker: mapboxgl.Marker;
+      element: HTMLButtonElement;
+      badge: HTMLSpanElement | null;
+      photo: Photo;
+      isCluster: boolean;
+      clusterId: number;
+      coordinates: [number, number];
+      leaveTimer: number;
+    };
+
+    function createMarkerElement(photo: Photo) {
       const element = document.createElement("button");
       element.type = "button";
-      element.className = photoMarkerPresentation(zoom, count).className;
+      element.className = "lofoten-photo-marker";
       // The frame and count badge take the colour of the photo's day (see
       // map-overrides.css), matching the day card and route line.
       element.style.setProperty("--day-accent", dayColorFor(dayColors, photo.day_id));
-      const mediaNoun = photo.media_type === "video" ? "video" : "photo";
-      element.setAttribute("aria-label", count > 1 ? `View cluster of ${count} media items` : `View ${photo.caption || `trip ${mediaNoun}`}`);
       const imageUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
       if (imageUrl) {
         const image = document.createElement("img");
         image.src = imageUrl;
         image.alt = "";
+        image.decoding = "async";
         image.draggable = false;
         element.append(image);
       } else {
@@ -330,19 +345,91 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         fallback.textContent = photo.media_type === "video" ? "Video" : "Photo";
         element.append(fallback);
       }
-      if (count > 1) {
-        const badge = document.createElement("span");
-        badge.className = "lofoten-photo-marker-count";
-        badge.textContent = count > 999 ? "999+" : String(count);
-        element.append(badge);
-      }
       return element;
+    }
+
+    // A marker element is keyed by the photo it shows, so the same thumbnail
+    // survives a zoom that merges it into a cluster or splits it back out:
+    // only the badge, label and drag permission change between the states.
+    function applyMarkerState(entry: MarkerEntry, isCluster: boolean, count: number, zoom: number) {
+      const { element, photo } = entry;
+      const presentation = photoMarkerPresentation(zoom, count);
+      element.classList.toggle("lofoten-photo-marker-cluster", presentation.isCluster);
+      element.classList.toggle("lofoten-photo-marker-overview", presentation.isOverview);
+      const mediaNoun = photo.media_type === "video" ? "video" : "photo";
+      element.setAttribute("aria-label", isCluster ? `View cluster of ${count} media items` : `View ${photo.caption || `trip ${mediaNoun}`}`);
+      if (isCluster) {
+        if (!entry.badge) {
+          entry.badge = document.createElement("span");
+          entry.badge.className = "lofoten-photo-marker-count";
+          element.append(entry.badge);
+        }
+        entry.badge.textContent = count > 999 ? "999+" : String(count);
+      } else if (entry.badge) {
+        entry.badge.remove();
+        entry.badge = null;
+      }
+      // Owners and admins can drag a misplaced photo straight to where it
+      // belongs; dropping it saves the new location. Clusters can't move.
+      const draggable = !isCluster && canManagePhoto(photo);
+      entry.marker.setDraggable(draggable);
+      if (draggable) element.title = "Drag to move this photo";
+      else element.removeAttribute("title");
+      entry.isCluster = isCluster;
+    }
+
+    function createEntry(key: string, photo: Photo, coordinates: [number, number]): MarkerEntry {
+      const element = createMarkerElement(photo);
+      const marker = new mapboxgl.Marker({ element, anchor: "center" }).setLngLat(coordinates).addTo(activeMap);
+      const entry: MarkerEntry = { marker, element, badge: null, photo, isCluster: false, clusterId: Number.NaN, coordinates, leaveTimer: 0 };
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (!entry.isCluster) {
+          // Viewers who can't edit have nothing to do in a popup but press
+          // "Relive from here", so a tap goes straight into the viewer.
+          // Owners and admins still get the popup with edit/delete.
+          if (canManagePhoto(photo)) showPhotoPopup(photo, element);
+          else actionsRef.current.onOpenJourney(photo.id);
+          return;
+        }
+        const source = getSource(activeMap, "photos") as mapboxgl.GeoJSONSource | undefined;
+        const target = entry.coordinates;
+        source?.getClusterExpansionZoom(entry.clusterId, (error, zoom) => {
+          if (error || zoom === null || zoom === undefined) return;
+          activeMap.easeTo({ center: target, zoom, duration: 550 });
+        });
+      });
+      marker.on("dragstart", () => {
+        draggingKey = key;
+      });
+      marker.on("dragend", () => {
+        draggingKey = null;
+        const dropped = marker.getLngLat();
+        actionsRef.current.onMovePhoto(photo.id, { lng: dropped.lng, lat: dropped.lat });
+      });
+      // Mapbox defaults custom markers to role="img"; these markers are
+      // genuine controls, so restore the button semantics after creation.
+      element.setAttribute("role", "button");
+      return entry;
+    }
+
+    // On phones the bottom sheet covers the lower part of the canvas, so
+    // markers under it are never visible and needn't exist.
+    function sheetInset() {
+      if (window.innerWidth >= 768) return 0;
+      const height = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(MOBILE_SHEET_HEIGHT_VAR));
+      return Number.isFinite(height) && height > 0 ? height : 0;
+    }
+
+    function dropEntry(key: string, entry: MarkerEntry) {
+      window.clearTimeout(entry.leaveTimer);
+      entry.marker.remove();
+      markers.delete(key);
     }
 
     function refreshMarkers() {
       if (!visibility.photos || !hasLayer(activeMap, "photos-hit")) {
-        for (const marker of markers.values()) marker.remove();
-        markers.clear();
+        for (const [key, entry] of markers) dropEntry(key, entry);
         return;
       }
 
@@ -350,74 +437,56 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       const seen = new Set<string>();
       const canvas = activeMap.getCanvas();
       const zoom = activeMap.getZoom();
+      // Keep markers alive a little beyond the viewport so a pan reveals
+      // thumbnails that are already mounted instead of popping them in at
+      // the edge once the refresh catches up.
+      const margin = 80;
+      const bottomLimit = canvas.clientHeight - sheetInset() + margin;
       for (const feature of features) {
         if (!feature.geometry || feature.geometry.type !== "Point") continue;
         const coordinates = feature.geometry.coordinates as [number, number];
         const projected = activeMap.project(coordinates);
-        if (projected.x < -36 || projected.y < -36 || projected.x > canvas.clientWidth + 36 || projected.y > canvas.clientHeight + 36) continue;
+        if (projected.x < -margin || projected.y < -margin || projected.x > canvas.clientWidth + margin || projected.y > bottomLimit) continue;
         const clusterId = Number(feature.properties?.cluster_id);
         const isCluster = Boolean(feature.properties?.cluster);
+        const count = isCluster ? Number(feature.properties?.point_count) : 1;
         const photo = isCluster
           ? closestPhoto(coordinates)
           : photosById.get(String(feature.properties?.id ?? ""));
         if (!photo) continue;
-        // The count is part of the cluster key: marker elements are created
-        // once and only repositioned after, so a cluster whose membership
-        // changed (e.g. a photo moved into it) must re-render its badge.
-        const key = isCluster ? `cluster-${clusterId}-${Number(feature.properties?.point_count)}` : `photo-${photo.id}`;
+        // Two clusters can (rarely) pick the same nearest photo; the second
+        // falls back to its cluster id rather than being dropped.
+        let key = `photo-${photo.id}`;
+        if (seen.has(key)) key = `cluster-${clusterId}`;
         if (seen.has(key)) continue;
         seen.add(key);
+        // Stack markers by screen position so a thumbnail lower on the screen
+        // (nearer the viewer on the pitched map) overlaps the ones behind it,
+        // and the stacking stays stable as the map rotates or tilts.
+        const depth = Math.max(0, Math.round(projected.y));
 
-        if (!markers.has(key)) {
-          const count = isCluster ? Number(feature.properties?.point_count) : 1;
-          const element = createMarkerElement(photo, count, zoom);
-          element.addEventListener("click", (event) => {
-            event.stopPropagation();
-            if (!isCluster) {
-              // Viewers who can't edit have nothing to do in a popup but press
-              // "Relive from here", so a tap goes straight into the viewer.
-              // Owners and admins still get the popup with edit/delete.
-              if (canManagePhoto(photo)) showPhotoPopup(photo, element);
-              else actionsRef.current.onOpenJourney(photo.id);
-              return;
-            }
-            const source = getSource(activeMap, "photos") as mapboxgl.GeoJSONSource | undefined;
-            source?.getClusterExpansionZoom(clusterId, (error, zoom) => {
-              if (error || zoom === null || zoom === undefined) return;
-              activeMap.easeTo({ center: coordinates, zoom, duration: 550 });
-            });
-          });
-          // Owners and admins can drag a misplaced photo straight to where it
-          // belongs; dropping it saves the new location. Clusters can't move.
-          const { isAdmin: admin, currentUserId: viewerId } = actionsRef.current;
-          const draggable = !isCluster && (admin || Boolean(photo.user_id && photo.user_id === viewerId));
-          const marker = new mapboxgl.Marker({ element, anchor: "center", draggable }).setLngLat(coordinates).addTo(activeMap);
-          if (draggable) {
-            element.title = "Drag to move this photo";
-            marker.on("dragstart", () => {
-              draggingKey = key;
-            });
-            marker.on("dragend", () => {
-              draggingKey = null;
-              const dropped = marker.getLngLat();
-              actionsRef.current.onMovePhoto(photo.id, { lng: dropped.lng, lat: dropped.lat });
-            });
-          }
-          // Mapbox defaults custom markers to role="img"; these markers are
-          // genuine controls, so restore the button semantics after creation.
-          element.setAttribute("role", "button");
-          markers.set(key, marker);
-        } else {
-          const marker = markers.get(key);
-          marker?.getElement().classList.toggle("lofoten-photo-marker-overview", photoMarkerPresentation(zoom, isCluster ? Number(feature.properties?.point_count) : 1).isOverview);
-          if (key !== draggingKey) marker?.setLngLat(coordinates);
+        let entry = markers.get(key);
+        if (!entry) {
+          entry = createEntry(key, photo, coordinates);
+          markers.set(key, entry);
+        } else if (entry.leaveTimer) {
+          window.clearTimeout(entry.leaveTimer);
+          entry.leaveTimer = 0;
+          entry.element.classList.remove("lofoten-photo-marker-leaving");
+        }
+        entry.clusterId = clusterId;
+        entry.coordinates = coordinates;
+        entry.element.style.zIndex = String(depth);
+        if (key !== draggingKey) {
+          applyMarkerState(entry, isCluster, count, zoom);
+          entry.marker.setLngLat(coordinates);
         }
       }
 
-      for (const [key, marker] of markers) {
-        if (seen.has(key) || key === draggingKey) continue;
-        marker.remove();
-        markers.delete(key);
+      for (const [key, entry] of markers) {
+        if (seen.has(key) || key === draggingKey || entry.leaveTimer) continue;
+        entry.element.classList.add("lofoten-photo-marker-leaving");
+        entry.leaveTimer = window.setTimeout(() => dropEntry(key, entry), LEAVE_MS);
       }
     }
 
@@ -427,16 +496,20 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
     }
 
     scheduleRefresh();
+    // Refreshing on every move (coalesced to one pass per animation frame)
+    // means markers scrolling into view and clusters splitting or merging
+    // show up while the map is still in motion, not only once it settles.
+    // Mapbox keeps existing markers glued to their coordinates in between.
+    activeMap.on("move", scheduleRefresh);
     activeMap.on("moveend", scheduleRefresh);
-    activeMap.on("zoomend", scheduleRefresh);
     activeMap.on("sourcedata", scheduleRefresh);
 
     return () => {
       window.cancelAnimationFrame(frame);
+      activeMap.off("move", scheduleRefresh);
       activeMap.off("moveend", scheduleRefresh);
-      activeMap.off("zoomend", scheduleRefresh);
       activeMap.off("sourcedata", scheduleRefresh);
-      for (const marker of markers.values()) marker.remove();
+      for (const [key, entry] of markers) dropEntry(key, entry);
     };
   }, [map, photos, days, dayColors, visibility.photos]);
 
