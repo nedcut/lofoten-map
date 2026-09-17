@@ -106,6 +106,9 @@ const EXPANDED_SIZES = [
   "h-[min(88dvh,54rem)] w-[min(96vw,72rem)]",
 ];
 const SIZE_STORAGE_KEY = "lofoten-minimap-size";
+// Read by JourneyPlayback's bottom bar so the progress controls stop short of
+// the mini-map instead of running underneath it.
+export const MINIMAP_WIDTH_VAR = "--journey-minimap-width";
 const EXPANDED_SIZE_STORAGE_KEY = "lofoten-minimap-size-expanded";
 
 function storedSizeIndex(key: string, presetCount: number) {
@@ -191,6 +194,21 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   const progressRouteData = useMemo(() => routeFeatureCollection(progressedRoutes(routes, days, activeItem)), [activeItem, days, routes]);
   const itemsData = useMemo(() => pointData(items), [items]);
   const activeData = useMemo(() => activePointData(activeItem), [activeItem]);
+
+  // Publish the collapsed width so the playback bar can reserve that much
+  // room. Only the collapsed size counts: the hover-expanded map is transient
+  // and is allowed to cover the controls while the pointer is on it.
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node || expanded || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    const publish = () => root.style.setProperty(MINIMAP_WIDTH_VAR, `${Math.round(node.getBoundingClientRect().width)}px`);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [expanded, sizeIndex]);
+  useEffect(() => () => { document.documentElement.style.removeProperty(MINIMAP_WIDTH_VAR); }, []);
 
   useEffect(() => {
     return () => {

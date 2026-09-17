@@ -51,7 +51,8 @@
   overflow: visible;
   border: 3px solid var(--color-paper);
   border-radius: 12px;
-  background: var(--color-ember-400);
+  /* --day-accent is set per marker by TripLayers from the photo's day. */
+  background: var(--day-accent, var(--color-ember-400));
   padding: 0;
   box-shadow:
     0 2px 5px rgba(28, 25, 23, 0.22),
@@ -209,7 +210,7 @@
   justify-content: center;
   border: 2px solid var(--color-paper);
   border-radius: 999px;
-  background: var(--color-fjord);
+  background: var(--day-accent, var(--color-fjord));
   color: white;
   font-size: 0.7rem;
   font-weight: 800;
@@ -240,10 +241,14 @@
   display: none !important;
 }
 
+/* On phones the bottom sheet floats over the map, so the zoom/compass group
+   and the attribution/logo must sit above it. MobileSheet measures its own
+   collapsed height into --mobile-sheet-height; the fallback matches the
+   sheet's typical collapsed size for the first paint before it's measured. */
 @media (max-width: 767px) {
   .mapboxgl-ctrl-bottom-left,
   .mapboxgl-ctrl-bottom-right {
-    bottom: calc(11.75rem + env(safe-area-inset-bottom)) !important;
+    bottom: calc(var(--mobile-sheet-height, 9.5rem) + 0.75rem + env(safe-area-inset-bottom)) !important;
   }
 
   .mapboxgl-ctrl-bottom-left .mapboxgl-ctrl {
@@ -300,6 +305,7 @@
 }
 
 .lofoten-popup-by { font-weight: 600; color: #57534e; }
+.lofoten-popup-position { color: #0f5f55; font-weight: 700; }
 
 .lofoten-popup-actions {
   display: flex;

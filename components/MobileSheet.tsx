@@ -1,17 +1,24 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
-import { useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, ChevronUp, Play } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { AdminDataPanel } from "@/components/AdminDataPanel";
-import { AdminRequestPanel, DayList, DayListSkeleton, LayersPanel, MemberAdminPanel, NotesPlacesList, QuickActions, SidebarHeader, type SidebarProps } from "@/components/DaySidebar";
+import { AdminRequestPanel, DayList, DayListSkeleton, LayersPanel, MemberAdminPanel, NotesPlacesList, QuickActions, type SidebarProps } from "@/components/DaySidebar";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
+import { dayColorFor } from "@/lib/day-colors";
+import { formatMediaCount } from "@/lib/trip-view-model";
 import { cn } from "@/lib/utils";
 import type { Day } from "@/types/trip";
+
+// Written to the root element so the Mapbox controls (map-overrides.css) and
+// the day-framing padding (page.tsx) can stay clear of the collapsed sheet
+// without hard-coding its height.
+export const MOBILE_SHEET_HEIGHT_VAR = "--mobile-sheet-height";
 
 // Counts for the current map filter, so the collapsed peek can tell you what's
 // visible without expanding the sheet. Notes and places share a marker layer, so
 // they're summed together as journal pins.
-export type PeekCounts = { routes: number; photos: number; notes: number; places: number };
+export type PeekCounts = { routes: number; photos: number; videos: number; notes: number; places: number };
 
 type MobileSheetProps = SidebarProps & { counts: PeekCounts; mapAvailable?: boolean };
 
@@ -32,7 +39,8 @@ function countsLabel(counts: PeekCounts): string {
   const journalPins = counts.notes + counts.places;
   const parts = [];
   if (counts.routes) parts.push(pluralize(counts.routes, "route"));
-  if (counts.photos) parts.push(`${counts.photos} media`);
+  const media = formatMediaCount(counts.photos, counts.videos);
+  if (media) parts.push(media);
   if (journalPins) parts.push(pluralize(journalPins, "pin"));
   return parts.length > 0 ? parts.join(" · ") : "Nothing on the map yet";
 }
@@ -40,7 +48,26 @@ function countsLabel(counts: PeekCounts): string {
 export function MobileSheet(props: MobileSheetProps) {
   const [expanded, setExpanded] = useState(false);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const collapsedRef = useRef<HTMLDivElement | null>(null);
   const selectedDay = props.days.find((day) => day.id === props.selectedDayId) ?? null;
+  const selectedColor = selectedDay ? dayColorFor(props.dayColors, selectedDay.id) : null;
+
+  // Publish the always-visible part of the sheet (peek header + hero row +
+  // quick actions) as a CSS variable. Only that part is measured, so the map
+  // controls don't leap upward when the sheet expands over them anyway.
+  useEffect(() => {
+    const node = collapsedRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    const publish = () => root.style.setProperty(MOBILE_SHEET_HEIGHT_VAR, `${Math.round(node.getBoundingClientRect().height)}px`);
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty(MOBILE_SHEET_HEIGHT_VAR);
+    };
+  }, []);
 
   // Picking a day on mobile collapses the sheet so the filtered map is visible.
   function handleSelectDay(dayId: string | null) {
@@ -80,10 +107,11 @@ export function MobileSheet(props: MobileSheetProps) {
 
       <div className="fixed inset-x-0 bottom-0 z-30">
         <div className="mx-3 mb-[calc(0.75rem+env(safe-area-inset-bottom))] overflow-hidden rounded-panel border border-stone-200/80 bg-paper/96 text-stone-950 shadow-[0_-12px_60px_rgba(46,61,54,0.28)] backdrop-blur-xl">
+          <div ref={collapsedRef}>
           {/* Grab handle + peek header — tap to toggle, swipe sideways or use the
               chevrons to step through days. */}
           <div
-            className="relative flex w-full items-center gap-1 px-2 pb-3 pt-3.5"
+            className="relative flex w-full items-center gap-1 px-2 pb-2 pt-3.5"
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
@@ -103,7 +131,10 @@ export function MobileSheet(props: MobileSheetProps) {
               aria-expanded={expanded}
             >
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-teal-800/80">{dayLabel(selectedDay)}</span>
+                <span className="flex items-center gap-1.5 truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-teal-800/80">
+                  {selectedColor ? <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: selectedColor }} /> : null}
+                  <span className="truncate">{dayLabel(selectedDay)}</span>
+                </span>
                 <span className="block truncate font-bold text-stone-950">{props.mapAvailable === false ? "Map unavailable" : countsLabel(props.counts)}</span>
               </span>
               <ChevronUp className={cn("h-5 w-5 shrink-0 text-stone-500 transition-transform duration-300", expanded && "rotate-180")} />
@@ -118,20 +149,48 @@ export function MobileSheet(props: MobileSheetProps) {
             </button>
           </div>
 
-          {/* Journey hero + quick actions stay reachable even when collapsed, so
-              the trip's marquee feature is visible without expanding the sheet. */}
-          <div className="space-y-3 px-4 pb-3">
-            {props.journey ? (
-              <JourneyHeroCard
-                photos={props.journey.photos}
-                momentCount={props.journey.momentCount}
-                dayCount={props.journey.dayCount}
-                onPlay={props.journey.onPlay}
+          {/* Position dots: one per entry in ["All days", day 1, …]. They make the
+              hidden swipe gesture legible — this is a pager — and show where
+              you are in it. Purely visual; the chevrons are the controls. */}
+          {props.days.length > 0 ? (
+            <div aria-hidden className="flex items-center justify-center gap-1.5 pb-2">
+              {[null, ...props.days].map((day) => {
+                const active = (day?.id ?? null) === props.selectedDayId;
+                const color = day ? dayColorFor(props.dayColors, day.id) : "#57534e";
+                return (
+                  <span
+                    key={day?.id ?? "all"}
+                    className={cn("h-1.5 rounded-full transition-all duration-200", active ? "w-4" : "w-1.5 opacity-40")}
+                    style={{ backgroundColor: color }}
+                  />
+                );
+              })}
+            </div>
+          ) : null}
+
+          {/* Collapsed: a single slim row keeps Relive one tap away without
+              the full hero card eating a quarter of the screen. The full card
+              (with its photo preview) lives in the expanded region. */}
+          <div className="space-y-2 px-3 pb-3">
+            {props.journey && !expanded ? (
+              <button
+                type="button"
+                onClick={props.journey.onPlay}
                 disabled={props.journey.disabled}
-                compact
-              />
+                className="flex w-full items-center gap-3 rounded-xl bg-[#0f3b32] px-3 py-2 text-left text-white shadow-sm transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ember-400 text-stone-950"><Play className="h-4 w-4 fill-current" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold">{props.journey.day ? `Relive Day ${props.journey.day.day_number}` : "Relive the journey"}</span>
+                  <span className="block truncate text-[11px] text-white/75">
+                    {props.journey.momentCount > 0 ? `${props.journey.momentCount} moment${props.journey.momentCount === 1 ? "" : "s"}` : "Watch the trip unfold"}
+                    {props.journey.day?.title ? ` · ${props.journey.day.title}` : ""}
+                  </span>
+                </span>
+              </button>
             ) : null}
             <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} onStartRouteDraw={props.onStartRouteDraw} />
+          </div>
           </div>
 
           {/* Expandable region animates via grid-template-rows 0fr -> 1fr. */}
@@ -139,11 +198,22 @@ export function MobileSheet(props: MobileSheetProps) {
             <div className="overflow-hidden">
               {expanded ? (
                 <div className="max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
-                  <SidebarHeader trip={props.trip} compact />
+                  {props.journey ? (
+                    <JourneyHeroCard
+                      photos={props.journey.photos}
+                      momentCount={props.journey.momentCount}
+                      dayCount={props.journey.dayCount}
+                      day={props.journey.day}
+                      onPlay={props.journey.onPlay}
+                      disabled={props.journey.disabled}
+                      compact
+                    />
+                  ) : null}
+                  {props.trip?.description ? <p className="text-sm leading-6 text-stone-600">{props.trip.description}</p> : null}
                   {props.days.length === 0 && props.trip === null ? (
                     <DayListSkeleton />
                   ) : (
-                    <DayList days={props.days} dayStats={props.dayStats} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} />
+                    <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} showStepButtons={false} />
                   )}
                   {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
                   {props.notesPlaces ? <NotesPlacesList {...props.notesPlaces} /> : null}

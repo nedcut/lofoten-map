@@ -5,17 +5,17 @@ import dynamic from "next/dynamic";
 // into the initial bundle and defeat MapView's dynamic() split.
 import type { Map as MapboxMap } from "mapbox-gl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Loader2, Play, Sparkles, UserRound } from "lucide-react";
+import { AlertCircle, Loader2, Play, Share2, Sparkles, UserRound } from "lucide-react";
 import { collectItemCoordinates, coordinateBounds, routeDistanceMeters } from "@/lib/geo";
 import { AuthPanel } from "@/components/AuthPanel";
-import { DaySidebar } from "@/components/DaySidebar";
-import { MapLegend } from "@/components/MapLegend";
-import { MobileSheet } from "@/components/MobileSheet";
+import { DayDot, DaySidebar } from "@/components/DaySidebar";
+import { MOBILE_SHEET_HEIGHT_VAR, MobileSheet } from "@/components/MobileSheet";
 import { StatusPill } from "@/components/StatusPill";
 import { HeaderPill, PillButton } from "@/components/ui/HeaderPill";
 import type { MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel } from "@/components/EditItemPanel";
 import { deriveTripAccess } from "@/lib/access";
+import { dayColorFor, dayColorMap } from "@/lib/day-colors";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
 import { useTripAuth } from "@/lib/hooks/useTripAuth";
 import { useTripData } from "@/lib/hooks/useTripData";
@@ -28,8 +28,9 @@ import { useTripUrlState } from "@/lib/hooks/useTripUrlState";
 import { buildJourneyItems } from "@/lib/journey";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
 import { getBackendBrowserClient } from "@/lib/backend";
+import { shareJourneyLink, type ShareResult } from "@/lib/share";
 import { deriveDayStats, deriveOutlierOverlay, filterTripItemsByDay, resolveEditTarget } from "@/lib/trip-view-model";
-import { cn } from "@/lib/utils";
+import { cn, formatDateOnly } from "@/lib/utils";
 import type { LngLat, MapClickMode } from "@/types/trip";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
@@ -42,6 +43,16 @@ const AddNotePanel = dynamic(() => import("@/components/AddNotePanel").then((mod
 const ManualRoutePanel = dynamic(() => import("@/components/ManualRoutePanel").then((mod) => mod.ManualRoutePanel));
 const ProfilePanel = dynamic(() => import("@/components/ProfilePanel").then((mod) => mod.ProfilePanel));
 const UploadPhotoPanel = dynamic(() => import("@/components/UploadPhotoPanel").then((mod) => mod.UploadPhotoPanel));
+
+// Padding for fitBounds so framed content stays clear of the chrome. On phones
+// the bottom sheet's measured collapsed height (published by MobileSheet as a
+// CSS variable) replaces a guessed constant.
+function mapFramingPadding() {
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+  if (!isMobile) return { top: 80, right: 80, bottom: 80, left: 80 };
+  const sheet = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(MOBILE_SHEET_HEIGHT_VAR));
+  return { top: 96, right: 48, bottom: (Number.isFinite(sheet) && sheet > 0 ? sheet : 160) + 48, left: 48 };
+}
 
 export default function Home() {
   const backend = useMemo(() => getBackendBrowserClient(), []);
@@ -86,6 +97,7 @@ export default function Home() {
   const [panel, setPanel] = useState<"photo" | "note" | "route" | null>(null);
   const [lastFocusedPhotoId, setLastFocusedPhotoId] = useState<string | null>(null);
   const [outlierPreview, setOutlierPreview] = useState<PhotoOutlier | null>(null);
+  const [shareStatus, setShareStatus] = useState<ShareResult | null>(null);
 
   const allJourneyItems = useMemo(() => buildJourneyItems(data), [data]);
   const {
@@ -117,9 +129,14 @@ export default function Home() {
     onJourneyFromUrl: restoreJourneyFromUrl,
   });
   const filtered = useMemo(() => filterTripItemsByDay(data, selectedDayId), [data, selectedDayId]);
+  const tripTitle = data.trip?.title ?? "Trip Logbook";
   // Per-day totals for the day cards, computed over the full dataset (not the
   // current filter) so each card describes its whole day.
   const dayStats = useMemo(() => deriveDayStats(data), [data]);
+  // One accent colour per day, shared by the day cards, route lines, marker
+  // badges, and the on-map day chip.
+  const dayColors = useMemo(() => dayColorMap(data.days), [data.days]);
+  const selectedDay = useMemo(() => data.days.find((day) => day.id === selectedDayId) ?? null, [data.days, selectedDayId]);
   // These render a modal overlay on top of the header/sidebar/map, so those
   // stay `inert` (unfocusable, hidden from assistive tech) underneath rather
   // than merely obscured. The note, media, route, and edit panels are
@@ -225,7 +242,6 @@ export default function Home() {
     ? { status: access.currentUserAdminRequest?.status ?? null, isSaving: memberStatus.isSaving, message: memberStatus.message, messageTone: memberStatus.tone, onRequestAdmin: requestAdmin }
     : null;
   const routeDraftDistance = useMemo(() => routeDistanceMeters(routeDraftPoints), [routeDraftPoints]);
-  const tripTitle = data.trip?.title ?? "Trip Logbook";
   const mapActionsEnabled = !mapUnavailable;
   const adminData = isAdmin
     ? {
@@ -285,16 +301,34 @@ export default function Home() {
     openJourneyAt((lastFocused ?? dayStart ?? journeyItems[0]).id);
   }, [journeyItems, lastFocusedPhotoId, openJourneyAt, selectedDayId, setJourneyIntro]);
 
-  // Bundle for the sidebar/mobile Journey hero + per-day play buttons. The hero
-  // samples data.photos for its preview; counts drive its subtitle copy.
-  const journeyEntry = useMemo(() => ({
-    photos: data.photos,
-    momentCount: allJourneyItems.length,
-    dayCount: data.days.length,
-    onPlay: startJourney,
-    onPlayDay: playDayJourney,
-    disabled: allJourneyItems.length === 0,
-  }), [data.photos, data.days.length, allJourneyItems.length, startJourney, playDayJourney]);
+  // Bundle for the sidebar/mobile Journey hero + per-day play buttons. With a
+  // day selected the hero describes (and previews) that day, matching what
+  // startJourney will actually do; otherwise it describes the whole trip.
+  const journeyEntry = useMemo(() => {
+    const dayMoments = selectedDayId ? allJourneyItems.filter((item) => item.dayId === selectedDayId).length : allJourneyItems.length;
+    return {
+      photos: selectedDayId ? data.photos.filter((photo) => photo.day_id === selectedDayId) : data.photos,
+      momentCount: dayMoments,
+      dayCount: data.days.length,
+      day: selectedDay,
+      onPlay: startJourney,
+      onPlayDay: playDayJourney,
+      disabled: allJourneyItems.length === 0,
+    };
+  }, [data.photos, data.days.length, allJourneyItems, selectedDay, selectedDayId, startJourney, playDayJourney]);
+
+  // Share whatever is on screen: the URL already encodes the selected day, so
+  // a copied link lands the recipient on the same view.
+  const shareTimerRef = useRef<number | null>(null);
+  const shareView = useCallback(async () => {
+    const text = selectedDay ? `Day ${selectedDay.day_number}${selectedDay.title ? `: ${selectedDay.title}` : ""}` : tripTitle;
+    const result = await shareJourneyLink(navigator, { title: tripTitle, text, url: window.location.href });
+    if (result === "cancelled") return;
+    setShareStatus(result);
+    if (shareTimerRef.current) window.clearTimeout(shareTimerRef.current);
+    shareTimerRef.current = window.setTimeout(() => setShareStatus(null), 2500);
+  }, [selectedDay, tripTitle]);
+  useEffect(() => () => { if (shareTimerRef.current) window.clearTimeout(shareTimerRef.current); }, []);
 
   // Step the map-view day filter forward/backward through ["All days", day 1,
   // day 2, ...], clamped at both ends so repeated presses don't wrap around.
@@ -378,10 +412,7 @@ export default function Home() {
     const coords = collectItemCoordinates(filteredRef.current);
     if (coords.length === 0) return;
 
-    const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
-    const padding = isMobile
-      ? { top: 96, right: 48, bottom: 220, left: 48 }
-      : { top: 80, right: 80, bottom: 80, left: 80 };
+    const padding = mapFramingPadding();
 
     const bounds = coordinateBounds(coords);
     if (!bounds) return;
@@ -456,9 +487,7 @@ export default function Home() {
     ];
     const bounds = coordinateBounds(coords);
     if (!bounds) return;
-    const isMobile = window.innerWidth < 768;
-    const padding = isMobile ? { top: 96, right: 48, bottom: 220, left: 48 } : { top: 80, right: 80, bottom: 80, left: 80 };
-    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800 });
+    map.fitBounds([bounds.sw, bounds.ne], { padding: mapFramingPadding(), maxZoom: 14, duration: 800 });
   }
 
   async function deleteFromMap(kind: MapItemKind, id: string) {
@@ -475,9 +504,13 @@ export default function Home() {
           <Sparkles className="h-3.5 w-3.5 shrink-0 text-ember-500" /> <span className="truncate">{tripTitle}</span>
         </HeaderPill>
         <div className="flex items-center gap-2">
-          <HeaderPill className="hidden sm:block">{backend ? (user ? (currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only") : "Viewing as guest") : "Local demo mode"}</HeaderPill>
+          {backend && user ? <HeaderPill className="hidden sm:block">{currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only"}</HeaderPill> : null}
+          {!backend ? <HeaderPill className="hidden sm:block">Local demo mode</HeaderPill> : null}
           <PillButton onClick={startJourney} disabled={journeyItems.length === 0} aria-label="Relive the journey">
             <Play className="h-3.5 w-3.5 fill-current text-ember-500" /> <span className="hidden sm:inline">Relive</span>
+          </PillButton>
+          <PillButton onClick={shareView} aria-label={selectedDay ? `Share Day ${selectedDay.day_number}` : "Share this trip"} title="Copy a link to this view">
+            <Share2 className="h-3.5 w-3.5 text-teal-700" /> <span className="hidden sm:inline">Share</span>
           </PillButton>
           {backend && user && currentMember && profilesAvailable ? (
             <PillButton onClick={() => setProfilePanelOpen(true)} aria-label="Edit your profile" className="py-1 pl-1 pr-3">
@@ -493,22 +526,36 @@ export default function Home() {
             </PillButton>
           ) : null}
           {backend && user ? <PillButton onClick={signOut}>Sign out</PillButton> : null}
-          {backend && !authLoading && !user ? <PillButton onClick={() => setAuthPanelOpen(true)}>Sign in</PillButton> : null}
+          {backend && !authLoading && !user ? (
+            // Viewing is open to everyone; the label says what signing in
+            // is actually for instead of a separate "guest" status chip.
+            <PillButton onClick={() => setAuthPanelOpen(true)}>Sign in<span className="hidden sm:inline"> to add photos</span></PillButton>
+          ) : null}
         </div>
       </div>
       <div inert={overlayOpen} className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
+        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
-            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
+            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} days={data.days} dayColors={dayColors} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
             {!mapUnavailable ? <RouteDraftLayer map={map} points={routeDraftPoints} /> : null}
-            {!mapUnavailable ? <MapLegend visibility={layerVisibility} /> : null}
+            {/* Which day the map is filtered to. Sits under the header on
+                phones (the map runs full-bleed there) and in the map's own
+                top-left corner on desktop. Hidden while a placement prompt
+                occupies the same spot. */}
+            {!mapUnavailable && selectedDay && clickMode === "idle" ? (
+              <div className="pointer-events-none absolute left-3 top-16 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-full border border-stone-200/80 bg-paper/92 py-1.5 pl-3 pr-4 text-xs font-bold text-stone-900 shadow-control backdrop-blur md:left-4 md:top-4">
+                <DayDot color={dayColorFor(dayColors, selectedDay.id)} className="h-3 w-3" />
+                <span className="truncate">Day {selectedDay.day_number}{selectedDay.date ? ` · ${formatDateOnly(selectedDay.date)}` : ""}{selectedDay.title ? ` · ${selectedDay.title}` : ""}</span>
+              </div>
+            ) : null}
           </MapView>
         </div>
       </div>
-      {!panel ? <div inert={overlayOpen}><MobileSheet trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div> : null}
+      {!panel ? <div inert={overlayOpen}><MobileSheet trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.filter((photo) => photo.media_type !== "video").length, videos: filtered.photos.filter((photo) => photo.media_type === "video").length, notes: filtered.notes.length, places: filtered.places.length }} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div> : null}
       {loading ? <StatusPill><Loader2 className="h-4 w-4 motion-safe:animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
+      {shareStatus && !error ? <StatusPill>{shareStatus === "copied" ? "Link copied" : shareStatus === "shared" ? "Link shared" : "Couldn’t copy the link"}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
       {backend && !authLoading && !user && authPanelOpen ? <AuthPanel tripTitle={data.trip?.title ?? null} message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
       {backend && user && currentMember && profilesAvailable && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}

@@ -3,15 +3,19 @@
 import { Play } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import type { Photo } from "@/types/trip";
+import type { Day, Photo } from "@/types/trip";
 
 type Props = {
-  // The full photo set; the card samples a few with usable URLs for the preview.
+  // The photo set to sample the preview from: the whole trip, or just the
+  // selected day's photos when a day is active.
   photos: Photo[];
   // How many items the journey will play, and across how many days — drives the
   // subtitle ("142 moments across 8 days").
   momentCount: number;
   dayCount: number;
+  // When a day is selected the card offers that day specifically ("Relive
+  // Day 2 · 69 moments · Horseid") — the same thing pressing it will do.
+  day?: Day | null;
   onPlay: () => void;
   disabled?: boolean;
   // Mobile renders a shorter hero so it doesn't crowd out the day list.
@@ -35,7 +39,7 @@ function shuffle<T>(items: T[]): T[] {
   return copy;
 }
 
-export function JourneyHeroCard({ photos, momentCount, dayCount, onPlay, disabled = false, compact = false }: Props) {
+export function JourneyHeroCard({ photos, momentCount, dayCount, day = null, onPlay, disabled = false, compact = false }: Props) {
   // Only still photos with a resolved URL are slideshow-worthy (videos have no
   // reliable poster here). Memoised so the shuffle effect's dependency is stable
   // across renders that don't change the photo set.
@@ -102,9 +106,13 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, onPlay, disable
     return () => window.clearInterval(id);
   }, [visible, preview.length]);
 
-  const subtitle = momentCount > 0
-    ? `${momentCount} moment${momentCount === 1 ? "" : "s"}${dayCount > 0 ? ` across ${dayCount} day${dayCount === 1 ? "" : "s"}` : ""}`
-    : "Watch the trip unfold across the map";
+  const moments = momentCount > 0 ? `${momentCount} moment${momentCount === 1 ? "" : "s"}` : null;
+  const title = day ? `Relive Day ${day.day_number}` : "Relive the journey";
+  const subtitle = day
+    ? [moments, day.title].filter(Boolean).join(" · ") || "Watch this day unfold on the map"
+    : moments
+      ? `${moments}${dayCount > 0 ? ` across ${dayCount} day${dayCount === 1 ? "" : "s"}` : ""}`
+      : "Watch the trip unfold across the map";
 
   return (
     <button
@@ -112,6 +120,7 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, onPlay, disable
       type="button"
       onClick={onPlay}
       disabled={disabled}
+      aria-label={`${title}${subtitle ? ` — ${subtitle}` : ""}`}
       className={cn(
         // shrink-0: the slideshow layers are all absolutely positioned, so the
         // button has no intrinsic height — without this, the flex-column sidebar
@@ -140,18 +149,12 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, onPlay, disable
       {/* Scrim keeps the label readable over any photo. */}
       <span className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(15,40,33,0.15),rgba(15,40,33,0.78))]" aria-hidden />
 
-      {preview.length > 0 ? (
-        <span className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-black/40 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] backdrop-blur-sm">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#5DCAA5]" /> Live preview
-        </span>
-      ) : null}
-
       <span className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-3 p-4">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ember-400 text-stone-950 shadow-lg transition-transform duration-200 group-hover:scale-105">
           <Play className="h-5 w-5 fill-current" />
         </span>
         <span className="min-w-0">
-          <span className="block font-serif text-lg font-semibold leading-tight">Relive the journey</span>
+          <span className="block font-serif text-lg font-semibold leading-tight">{title}</span>
           <span className="block truncate text-xs text-white/85">{subtitle}</span>
         </span>
       </span>
