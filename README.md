@@ -128,6 +128,7 @@ components/           map, journey, upload, profile, and admin interfaces
 lib/backend.ts        Neon Auth + Data API browser client
 lib/object-store*.ts  public R2 URLs, presigned uploads, and guarded deletion
 lib/hooks/            auth, data loading, 30-second polling, and mutations
+cloudflare/           media-worker: Cloudflare Worker serving public R2 objects with CORS and path validation
 neon/                 target schema plus export/import/verification runbook
 supabase/              historical source schema and rollback artifact
 types/                 shared trip data types
@@ -142,6 +143,10 @@ an upload or deleting an object. R2 secrets are used only on the server.
 1. Create a Neon project, enable Neon Auth and the Neon Data API, then apply
    [`neon/schema.sql`](neon/schema.sql). Configure the app origins as trusted
    Auth/CORS origins and enable email OTP and/or Google OAuth.
+   For a database created from an earlier `schema.sql`, also apply each file
+   in [`neon/patches/`](neon/patches/) in date order; the `psql` command is
+   shown at the top of each patch file, for example:
+   `psql "$TARGET_DATABASE_URL" --no-psqlrc --set=ON_ERROR_STOP=1 --file=neon/patches/2026-09-07-can-delete-photo-object.sql`.
 2. Create one R2 bucket and an S3-compatible API token scoped to that bucket.
    Configure its browser CORS policy and public media origin.
 3. Add all shared-mode variables from `.env.example` locally and in Vercel.

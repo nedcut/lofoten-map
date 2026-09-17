@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { objectKey, parseNamespace, validObjectPath } = await import("@/lib/object-store-server");
+const { authorizeObjectRequest, objectKey, parseNamespace, validObjectPath } = await import("@/lib/object-store-server");
 
 describe("validObjectPath", () => {
   it.each([
@@ -49,5 +49,35 @@ describe("objectKey", () => {
   it("joins namespace and path with a single slash", () => {
     expect(objectKey("trip-photos", "slug/abc.jpg")).toBe("trip-photos/slug/abc.jpg");
     expect(objectKey("avatars", "user/thumbs/a.webp")).toBe("avatars/user/thumbs/a.webp");
+  });
+});
+
+describe("authorizeObjectRequest", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  function requestWithToken() {
+    return new Request("http://localhost/api/storage/delete", { headers: { authorization: "Bearer t" } });
+  }
+
+  it("throws when the delete RPC does not exist in the database", async () => {
+    vi.stubEnv("NEXT_PUBLIC_NEON_DATA_API_URL", "https://data.example.test/");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ code: "PGRST202", message: "Could not find the function public.can_delete_photo_object(check_path, check_trip_slug) in the schema cache" }),
+      { status: 404, headers: { "content-type": "application/json" } },
+    )));
+    await expect(authorizeObjectRequest(requestWithToken(), "trip-photos", "slug/abc.jpg", "delete"))
+      .rejects.toThrow(/can_delete_photo_object/);
+  });
+
+  it("denies on other RPC failures", async () => {
+    vi.stubEnv("NEXT_PUBLIC_NEON_DATA_API_URL", "https://data.example.test");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ code: "42501", message: "permission denied for function can_delete_photo_object" }),
+      { status: 401, headers: { "content-type": "application/json" } },
+    )));
+    await expect(authorizeObjectRequest(requestWithToken(), "trip-photos", "slug/abc.jpg", "delete")).resolves.toBe(false);
   });
 });
