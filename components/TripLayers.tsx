@@ -2,11 +2,12 @@
 
 import mapboxgl from "mapbox-gl";
 import { useEffect, useMemo, useRef } from "react";
+import { dayColorFor } from "@/lib/day-colors";
 import { friendlyPersonName } from "@/lib/display-name";
 import { noteFeatureCollection, photoFeatureCollection, placeFeatureCollection, routeFeatureCollection } from "@/lib/geo";
 import { PHOTO_CLUSTER_MAX_ZOOM, PHOTO_CLUSTER_RADIUS, photoMarkerPresentation } from "@/lib/map-presentation";
 import { formatDateTime } from "@/lib/utils";
-import type { Note, Photo, Place, RouteSegment } from "@/types/trip";
+import type { Day, Note, Photo, Place, RouteSegment } from "@/types/trip";
 
 function escapeHtml(value: unknown) {
   return String(value ?? "")
@@ -72,6 +73,10 @@ type Props = {
   photos: Photo[];
   notes: Note[];
   places: Place[];
+  days: Day[];
+  // Day id → accent colour, shared with the sidebar so a route or marker
+  // badge on the map matches the card for its day.
+  dayColors: Map<string, string>;
   visibility: { routes: boolean; photos: boolean; notes: boolean };
   currentUserId: string | null;
   isAdmin: boolean;
@@ -89,14 +94,14 @@ type Props = {
   outlierPreview: { photo: { lng: number; lat: number }; suggested: { lng: number; lat: number }; neighbors: Array<{ lng: number; lat: number }> } | null;
 };
 
-export function TripLayers({ map, routes, photos, notes, places, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId, outlierPreview }: Props) {
+export function TripLayers({ map, routes, photos, notes, places, days, dayColors, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId, outlierPreview }: Props) {
   // Popup click handlers are attached once (keyed on [map]); this ref lets those
   // long-lived closures read the latest permissions/callbacks without re-binding.
   const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto });
   useEffect(() => {
     actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto };
   }, [currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto]);
-  const routeData = useMemo(() => routeFeatureCollection(routes), [routes]);
+  const routeData = useMemo(() => routeFeatureCollection(routes, dayColors), [dayColors, routes]);
   const photoData = useMemo(() => photoFeatureCollection(photos), [photos]);
   const noteData = useMemo(() => noteFeatureCollection(notes), [notes]);
   const placeData = useMemo(() => placeFeatureCollection(places), [places]);
@@ -111,7 +116,20 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       if (!getSource(map, "routes")) {
         map.addSource("routes", { type: "geojson", data: routeData });
         map.addLayer({ id: "routes-shadow", type: "line", source: "routes", paint: { "line-color": "#26423b", "line-width": 8, "line-opacity": 0.28 } });
-        map.addLayer({ id: "routes-line", type: "line", source: "routes", paint: { "line-color": ["match", ["get", "mode"], "ferry", "#2b8aa0", "bus", "#d0872f", "#0f766e"], "line-width": 4, "line-opacity": 0.95 } });
+        // Colour says which day; the dash pattern says how it was travelled
+        // (ferry crossings dashed, bus legs dotted, everything else solid).
+        map.addLayer({
+          id: "routes-line",
+          type: "line",
+          source: "routes",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": ["coalesce", ["get", "color"], "#0f766e"],
+            "line-width": 4,
+            "line-opacity": 0.95,
+            "line-dasharray": ["match", ["get", "mode"], "ferry", ["literal", [2, 1.6]], "bus", ["literal", [0.3, 1.6]], ["literal", [1, 0]]],
+          },
+        });
       } else {
         (getSource(map, "routes") as mapboxgl.GeoJSONSource).setData(routeData);
       }
@@ -230,6 +248,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
         photo.caption ? dateLabel : "",
         uploader ? `by ${uploader}` : "",
       ].filter(Boolean).join(" · ");
+      const position = photoPositionLabel(photo);
       const imageUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
       const mediaLabel = photo.media_type === "video" ? "video" : "photo";
       const image = imageUrl
@@ -237,7 +256,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
         : photo.media_type === "video"
           ? `<div class="lofoten-popup-image lofoten-popup-video-fallback">Video</div>`
           : "";
-      const content = `<div class="lofoten-popup-card lofoten-popup-card-photo">${image}<div class="lofoten-popup-body"><span class="lofoten-popup-tag lofoten-popup-tag-photo">${mediaLabel}</span><div class="lofoten-popup-title">${escapeHtml(title)}</div>${meta ? `<div class="lofoten-popup-meta">${escapeHtml(meta)}</div>` : ""}</div></div>`;
+      const content = `<div class="lofoten-popup-card lofoten-popup-card-photo">${image}<div class="lofoten-popup-body"><span class="lofoten-popup-tag lofoten-popup-tag-photo">${mediaLabel}</span><div class="lofoten-popup-title">${escapeHtml(title)}</div>${meta ? `<div class="lofoten-popup-meta">${escapeHtml(meta)}</div>` : ""}${position ? `<div class="lofoten-popup-meta lofoten-popup-position">${escapeHtml(position)}</div>` : ""}</div></div>`;
       const popup = new mapboxgl.Popup({ offset: 34, className: "lofoten-popup", maxWidth: "17rem" })
         .setLngLat([photo.lng, photo.lat])
         .setHTML(content)
@@ -251,6 +270,26 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
         actionsRef.current.onPhotoBlur(photo.id);
         if (triggerElement && document.contains(triggerElement)) triggerElement.focus();
       });
+    }
+
+    // "12 of 69 on Day 2": where this photo falls in its day's timeline. The
+    // effect's `photos` prop is the current map filter, which always contains
+    // the whole of any day it contains at all.
+    function photoPositionLabel(photo: Photo) {
+      if (!photo.day_id) return null;
+      const day = days.find((entry) => entry.id === photo.day_id);
+      if (!day) return null;
+      const siblings = photos
+        .filter((item) => item.day_id === photo.day_id)
+        .sort((a, b) => (a.taken_at || a.created_at).localeCompare(b.taken_at || b.created_at));
+      const index = siblings.findIndex((item) => item.id === photo.id);
+      if (index < 0) return null;
+      return `${index + 1} of ${siblings.length} on Day ${day.day_number}`;
+    }
+
+    function canManagePhoto(photo: Photo) {
+      const { isAdmin: admin, currentUserId: viewerId } = actionsRef.current;
+      return admin || Boolean(photo.user_id && photo.user_id === viewerId);
     }
 
     function closestPhoto(coordinates: [number, number]) {
@@ -273,6 +312,9 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       const element = document.createElement("button");
       element.type = "button";
       element.className = photoMarkerPresentation(zoom, count).className;
+      // The frame and count badge take the colour of the photo's day (see
+      // map-overrides.css), matching the day card and route line.
+      element.style.setProperty("--day-accent", dayColorFor(dayColors, photo.day_id));
       const mediaNoun = photo.media_type === "video" ? "video" : "photo";
       element.setAttribute("aria-label", count > 1 ? `View cluster of ${count} media items` : `View ${photo.caption || `trip ${mediaNoun}`}`);
       const imageUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
@@ -332,7 +374,11 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
           element.addEventListener("click", (event) => {
             event.stopPropagation();
             if (!isCluster) {
-              showPhotoPopup(photo, element);
+              // Viewers who can't edit have nothing to do in a popup but press
+              // "Relive from here", so a tap goes straight into the viewer.
+              // Owners and admins still get the popup with edit/delete.
+              if (canManagePhoto(photo)) showPhotoPopup(photo, element);
+              else actionsRef.current.onOpenJourney(photo.id);
               return;
             }
             const source = getSource(activeMap, "photos") as mapboxgl.GeoJSONSource | undefined;
@@ -392,7 +438,7 @@ export function TripLayers({ map, routes, photos, notes, places, visibility, cur
       activeMap.off("sourcedata", scheduleRefresh);
       for (const marker of markers.values()) marker.remove();
     };
-  }, [map, photos, visibility.photos]);
+  }, [map, photos, days, dayColors, visibility.photos]);
 
   useEffect(() => {
     if (!map) return;

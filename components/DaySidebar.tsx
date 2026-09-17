@@ -1,13 +1,14 @@
 "use client";
 
-import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, MapPin, Mountain, PenLine, Play, Route, ShieldCheck, UserPlus, Users, X } from "lucide-react";
-import { useState } from "react";
+import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, MapPin, Mountain, PenLine, Play, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { AdminDataPanel, type AdminDataProps } from "@/components/AdminDataPanel";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
 import { Button } from "@/components/ui/Button";
 import { InlineMessage } from "@/components/ui/InlineMessage";
 import { SectionCard } from "@/components/ui/SectionCard";
-import type { TripDayStats } from "@/lib/trip-view-model";
+import { dayColorFor } from "@/lib/day-colors";
+import { formatDayStats, type TripDayStats } from "@/lib/trip-view-model";
 import { cn, formatDateOnly } from "@/lib/utils";
 import type { AdminRequest, AdminRequestStatus, Day, Note, Photo, Place, Trip, TripMember } from "@/types/trip";
 
@@ -23,6 +24,9 @@ export type JourneyEntry = {
   photos: Photo[];
   momentCount: number;
   dayCount: number;
+  // The selected day, when there is one: the hero then offers to relive just
+  // that day and previews its photos.
+  day: Day | null;
   onPlay: () => void;
   onPlayDay: (dayId: string) => void;
   disabled?: boolean;
@@ -32,6 +36,7 @@ export type SidebarProps = {
   trip: Trip | null;
   days: Day[];
   dayStats?: Map<string, DayStats>;
+  dayColors: Map<string, string>;
   selectedDayId: string | null;
   onSelectDay: (dayId: string | null) => void;
   onStepDay: (direction: 1 | -1) => void;
@@ -150,27 +155,29 @@ export function QuickActions({ onStartPhotoUpload, onStartAddNote, onStartRouteD
   );
 }
 
-// "29 media · 2 pins · 7.4 km" — only the parts a day actually has.
-function dayStatsLabel(stats: DayStats | undefined): string | null {
-  if (!stats) return null;
-  const km = stats.distanceMeters / 1000;
-  const parts = [
-    stats.media ? `${stats.media} media` : null,
-    stats.journal ? `${stats.journal} pin${stats.journal === 1 ? "" : "s"}` : null,
-    km >= 0.1 ? `${km.toFixed(km < 10 ? 1 : 0)} km` : null,
-  ].filter(Boolean);
-  return parts.length > 0 ? parts.join(" · ") : null;
+// The little colour dot that ties a day card to its route line and markers.
+export function DayDot({ color, className }: { color: string; className?: string }) {
+  return <span aria-hidden className={cn("inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white", className)} style={{ backgroundColor: color }} />;
 }
 
-export function DayList({ days, dayStats, selectedDayId, onSelectDay, onStepDay, onPlayDay }: Pick<SidebarProps, "days" | "dayStats" | "selectedDayId" | "onSelectDay" | "onStepDay"> & { onPlayDay?: (dayId: string) => void }) {
+type DayListProps = Pick<SidebarProps, "days" | "dayStats" | "dayColors" | "selectedDayId" | "onSelectDay" | "onStepDay"> & {
+  onPlayDay?: (dayId: string) => void;
+  // The mobile sheet already has a day stepper in its peek header, so it
+  // hides this one rather than showing two.
+  showStepButtons?: boolean;
+};
+
+export function DayList({ days, dayStats, dayColors, selectedDayId, onSelectDay, onStepDay, onPlayDay, showStepButtons = true }: DayListProps) {
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2 text-sm font-bold text-stone-900">
         <CalendarDays className="h-4 w-4 text-teal-700" /> Trip days
-        <span className="ml-auto flex items-center gap-1">
-          <button onClick={() => onStepDay(-1)} aria-label="Previous day" title="Previous day (←)" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white/75 text-stone-600 transition hover:border-stone-300 hover:bg-white hover:text-stone-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:scale-[0.95] md:h-7 md:w-7"><ChevronLeft className="h-4 w-4" /></button>
-          <button onClick={() => onStepDay(1)} aria-label="Next day" title="Next day (→)" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white/75 text-stone-600 transition hover:border-stone-300 hover:bg-white hover:text-stone-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:scale-[0.95] md:h-7 md:w-7"><ChevronRight className="h-4 w-4" /></button>
-        </span>
+        {showStepButtons ? (
+          <span className="ml-auto flex items-center gap-1">
+            <button onClick={() => onStepDay(-1)} aria-label="Previous day" title="Previous day (←)" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white/75 text-stone-600 transition hover:border-stone-300 hover:bg-white hover:text-stone-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:scale-[0.95] md:h-7 md:w-7"><ChevronLeft className="h-4 w-4" /></button>
+            <button onClick={() => onStepDay(1)} aria-label="Next day" title="Next day (→)" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-white/75 text-stone-600 transition hover:border-stone-300 hover:bg-white hover:text-stone-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20 active:scale-[0.95] md:h-7 md:w-7"><ChevronRight className="h-4 w-4" /></button>
+          </span>
+        ) : null}
       </div>
       <div className="space-y-2">
         <button
@@ -188,25 +195,34 @@ export function DayList({ days, dayStats, selectedDayId, onSelectDay, onStepDay,
           const stats = dayStats?.get(day.id);
           // Only days with something to show get a play button — an empty day
           // would just drop the viewer onto someone else's moment.
-          const canPlay = Boolean(onPlayDay) && Boolean(stats && (stats.media > 0 || stats.journal > 0));
+          const canPlay = Boolean(onPlayDay) && Boolean(stats && (stats.photos > 0 || stats.videos > 0 || stats.journal > 0));
+          const color = dayColorFor(dayColors, day.id);
+          const selected = selectedDayId === day.id;
+          const statsLabel = formatDayStats(stats);
           return (
             <div key={day.id} className="group relative">
               <button
                 onClick={() => onSelectDay(day.id)}
-                aria-pressed={selectedDayId === day.id}
+                aria-pressed={selected}
+                // The left edge carries the day's colour; selection thickens it
+                // and tints the card so the active day reads at a glance.
+                style={{ borderLeftColor: color }}
                 className={cn(
-                  "w-full rounded-xl border px-4 py-3 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20",
+                  "w-full rounded-xl border border-l-4 px-4 py-3 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20",
                   canPlay && "pr-14",
-                  selectedDayId === day.id ? "border-teal-700/35 bg-teal-50 shadow-sm" : "border-stone-200 bg-white/75 hover:border-stone-300 hover:bg-white",
+                  selected ? "border-teal-700/35 bg-teal-50 shadow-sm" : "border-stone-200 bg-white/75 hover:border-stone-300 hover:bg-white",
                 )}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-bold text-stone-950">Day {day.day_number}: {day.title ?? "Open trail"}</span>
+                  <span className="flex min-w-0 items-start gap-2 font-bold text-stone-950">
+                    <DayDot color={color} className="mt-[0.45em]" />
+                    <span className="min-w-0">Day {day.day_number}: {day.title ?? "Open trail"}</span>
+                  </span>
                   {day.date ? <span className="shrink-0 rounded-full bg-teal-700/10 px-2 py-0.5 text-xs font-bold text-teal-800">{formatDateOnly(day.date)}</span> : null}
                 </div>
                 {day.summary ? <div className="mt-1 text-[13px] leading-5 text-stone-500">{day.summary}</div> : null}
-                {dayStatsLabel(stats) ? (
-                  <div className="mt-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-teal-900/80">{dayStatsLabel(stats)}</div>
+                {statsLabel ? (
+                  <div className="mt-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-teal-900/80">{statsLabel}</div>
                 ) : null}
               </button>
               {canPlay ? (
@@ -243,17 +259,53 @@ export function DayListSkeleton() {
   );
 }
 
+// Each toggle row doubles as the legend: the swatch shows how that layer is
+// drawn on the map, so there's no separate legend to open. Keep the swatches
+// in step with the paint properties in TripLayers and map-overrides.css.
+const LAYER_ROWS: Array<{ key: keyof LayerVisibility; label: string; hint: string; swatch: ReactNode }> = [
+  {
+    key: "routes",
+    label: "Routes",
+    hint: "coloured by day · ferries dashed",
+    swatch: (
+      <span aria-hidden className="flex items-center gap-1">
+        <span className="h-1 w-4 rounded-full bg-fjord" />
+        <span className="h-1 w-4 rounded-full border-t-4 border-dashed border-fjord/80 bg-transparent" />
+      </span>
+    ),
+  },
+  {
+    key: "photos",
+    label: "Photos & videos",
+    hint: "thumbnails on the map",
+    swatch: <span aria-hidden className="h-3.5 w-3.5 rounded-[4px] border-2 border-paper bg-ember-400 shadow-sm" />,
+  },
+  {
+    key: "notes",
+    label: "Notes & places",
+    hint: "journal pins",
+    swatch: (
+      <span aria-hidden className="flex items-center gap-1">
+        <span className="h-3 w-3 rounded-full bg-[#f6d28f] ring-2 ring-[#7c4a14]/60" />
+        <span className="h-3 w-3 rounded-full bg-[#c8e4d4] ring-2 ring-[#0f5f55]/60" />
+      </span>
+    ),
+  },
+];
+
 export function LayersPanel({ layerVisibility, onLayerVisibilityChange }: Pick<SidebarProps, "layerVisibility" | "onLayerVisibilityChange">) {
   return (
     <SectionCard icon={Map} title="Layers">
-      {([
-        ["routes", "Routes", Route],
-        ["photos", "Media", Camera],
-        ["notes", "Notes & places", FileText],
-      ] as const).map(([key, label, Icon]) => (
-        <label key={key} className="flex cursor-pointer items-center justify-between rounded-[var(--radius-control)] bg-paper-tint px-3 py-2 text-sm text-stone-800 transition hover:bg-[#f1e8d8]">
-          <span className="flex items-center gap-2"><Icon className="h-4 w-4 text-teal-700" /> {label}</span>
-          <input type="checkbox" checked={layerVisibility[key]} onChange={(event) => onLayerVisibilityChange({ ...layerVisibility, [key]: event.target.checked })} className="h-4 w-4 accent-teal-700" />
+      {LAYER_ROWS.map(({ key, label, hint, swatch }) => (
+        <label key={key} className="flex cursor-pointer items-center justify-between gap-3 rounded-[var(--radius-control)] bg-paper-tint px-3 py-2 text-sm text-stone-800 transition hover:bg-[#f1e8d8]">
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="flex w-9 shrink-0 justify-center">{swatch}</span>
+            <span className="min-w-0">
+              <span className="block font-semibold">{label}</span>
+              <span className="block text-xs text-stone-500">{hint}</span>
+            </span>
+          </span>
+          <input type="checkbox" checked={layerVisibility[key]} onChange={(event) => onLayerVisibilityChange({ ...layerVisibility, [key]: event.target.checked })} className="h-4 w-4 shrink-0 accent-teal-700" />
         </label>
       ))}
     </SectionCard>
@@ -392,6 +444,7 @@ export function DaySidebar(props: SidebarProps) {
           photos={props.journey.photos}
           momentCount={props.journey.momentCount}
           dayCount={props.journey.dayCount}
+          day={props.journey.day}
           onPlay={props.journey.onPlay}
           disabled={props.journey.disabled}
         />
@@ -400,7 +453,7 @@ export function DaySidebar(props: SidebarProps) {
       {props.days.length === 0 && props.trip === null ? (
         <DayListSkeleton />
       ) : (
-        <DayList days={props.days} dayStats={props.dayStats} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} />
+        <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} />
       )}
       {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
       {props.notesPlaces ? <NotesPlacesList {...props.notesPlaces} /> : null}

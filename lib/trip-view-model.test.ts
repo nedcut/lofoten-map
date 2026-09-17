@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { demoDays, demoTripData } from "./demo-trip";
-import { deriveDayStats, deriveOutlierOverlay, filterTripItemsByDay, resolveEditTarget } from "./trip-view-model";
+import { deriveDayStats, deriveOutlierOverlay, filterTripItemsByDay, formatDayStats, formatDistanceByMode, formatMediaCount, resolveEditTarget } from "./trip-view-model";
 import type { PhotoOutlier } from "./photo-outliers";
 
 describe("filterTripItemsByDay", () => {
@@ -28,9 +28,15 @@ describe("filterTripItemsByDay", () => {
 describe("deriveDayStats", () => {
   it("combines media, journal pins, and route distance by day", () => {
     const stats = deriveDayStats(demoTripData);
-    expect(stats.get(demoDays[0].id)).toEqual({ media: 1, journal: 1, distanceMeters: 0 });
-    expect(stats.get(demoDays[1].id)).toEqual({ media: 1, journal: 0, distanceMeters: 6200 });
-    expect(stats.get(demoDays[2].id)).toEqual({ media: 1, journal: 1, distanceMeters: 0 });
+    expect(stats.get(demoDays[0].id)).toEqual({ photos: 1, videos: 0, journal: 1, distanceMeters: 0, distanceByMode: {} });
+    expect(stats.get(demoDays[1].id)).toEqual({ photos: 1, videos: 0, journal: 0, distanceMeters: 6200, distanceByMode: { hike: 6200 } });
+    expect(stats.get(demoDays[2].id)).toEqual({ photos: 1, videos: 0, journal: 1, distanceMeters: 0, distanceByMode: {} });
+  });
+
+  it("counts videos separately from photos", () => {
+    const data = { ...demoTripData, photos: [demoTripData.photos[0], { ...demoTripData.photos[0], id: "video", media_type: "video" as const }] };
+    const stats = deriveDayStats(data);
+    expect(stats.get(demoDays[0].id)).toMatchObject({ photos: 1, videos: 1 });
   });
 
   it("ignores unassigned items and treats missing route distance as zero", () => {
@@ -43,7 +49,28 @@ describe("deriveDayStats", () => {
     };
     const stats = deriveDayStats(data);
     expect(stats.has("null")).toBe(false);
-    expect(stats.get(demoDays[1].id)).toEqual({ media: 0, journal: 0, distanceMeters: 0 });
+    expect(stats.get(demoDays[1].id)).toEqual({ photos: 0, videos: 0, journal: 0, distanceMeters: 0, distanceByMode: {} });
+  });
+});
+
+describe("day stats labels", () => {
+  it("names photos and videos instead of 'media'", () => {
+    expect(formatMediaCount(14, 0)).toBe("14 photos");
+    expect(formatMediaCount(1, 1)).toBe("1 photo · 1 video");
+    expect(formatMediaCount(0, 0)).toBeNull();
+  });
+
+  it("splits distance by travel mode and hides negligible legs", () => {
+    expect(formatDistanceByMode({ hike: 15_000, ferry: 75_400 }, 90_400)).toBe("15 km hike · 75 km ferry");
+    expect(formatDistanceByMode({ other: 3_900 }, 3_900)).toBe("3.9 km");
+    expect(formatDistanceByMode({}, 2_100)).toBe("2.1 km");
+    expect(formatDistanceByMode({ hike: 40 }, 40)).toBeNull();
+  });
+
+  it("assembles the full day line from the parts a day has", () => {
+    expect(formatDayStats({ photos: 12, videos: 2, journal: 1, distanceMeters: 6200, distanceByMode: { hike: 6200 } })).toBe("12 photos · 2 videos · 1 pin · 6.2 km hike");
+    expect(formatDayStats({ photos: 0, videos: 0, journal: 0, distanceMeters: 0, distanceByMode: {} })).toBeNull();
+    expect(formatDayStats(undefined)).toBeNull();
   });
 });
 

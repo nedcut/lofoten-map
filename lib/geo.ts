@@ -101,7 +101,10 @@ export function collectItemCoordinates({ routes, photos, notes, places }: DayIte
   return coords;
 }
 
-export function routeFeatureCollection(routes: RouteSegment[]): FeatureCollection<LineString> {
+// `dayColors` (day id → hex) lets the line layer colour each segment by the
+// day it belongs to; segments with no day, or when no map is given, carry no
+// colour and the layer falls back to its default.
+export function routeFeatureCollection(routes: RouteSegment[], dayColors?: Map<string, string>): FeatureCollection<LineString> {
   return {
     type: "FeatureCollection",
     features: routes.map((route) => {
@@ -118,6 +121,7 @@ export function routeFeatureCollection(routes: RouteSegment[]): FeatureCollectio
           day_id: route.day_id,
           mode: route.mode,
           distance_km: routeDistanceKm,
+          color: (route.day_id && dayColors?.get(route.day_id)) || null,
         },
       };
       return feature;

@@ -1,15 +1,16 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Loader2, MapPinned, Pencil, RotateCcw, Save, Share2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Loader2, MapPinned, Pencil, Plus, RotateCcw, Save, Share2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { friendlyPersonName, personFilterOptions } from "@/lib/display-name";
-import { formatDateOnly, formatDateTime } from "@/lib/utils";
+import { cn, formatDateOnly, formatDateTime } from "@/lib/utils";
 import { journeyItemTitle, type JourneyAttachedItem, type JourneyItem } from "@/lib/journey";
 import { syncJourneyVideo, videoFallbackDurationMs } from "@/lib/journey-video";
+import { dayColorMap } from "@/lib/day-colors";
 import { shareJourneyLink, type ShareResult } from "@/lib/share";
 import type { Day, Photo, RouteSegment, Trip } from "@/types/trip";
 
@@ -47,6 +48,9 @@ type Props = {
   onUpdatePhoto: (photoId: string, input: PhotoUpdate) => Promise<void>;
   onEditPhoto: (photoId: string) => void;
 };
+
+// Autoplay speeds the single speed button cycles through.
+const SPEEDS = [1, 1.5, 2] as const;
 
 function itemDate(item: JourneyItem) {
   if (item.kind === "photo") return item.primary.taken_at || item.primary.created_at;
@@ -132,6 +136,15 @@ export function JourneyPlayback({
     () => personFilterOptions(allItems.map((item) => item.kind === "photo" ? item.primary.uploader_name : null)),
     [allItems],
   );
+  const dayColors = useMemo(() => dayColorMap(days), [days]);
+  // Where each day starts along the progress track, for the labelled ticks.
+  const dayTicks = useMemo(() => items.flatMap((item, index) => {
+    const isDayStart = index === 0 || item.dayId !== items[index - 1]?.dayId;
+    if (!isDayStart) return [];
+    const day = days.find((entry) => entry.id === item.dayId) ?? null;
+    return [{ index, day, left: items.length <= 1 ? 0 : (index / (items.length - 1)) * 100 }];
+  }), [days, items]);
+  const activeDayColor = activeItem?.dayId ? dayColors.get(activeItem.dayId) ?? null : null;
   const selectedUploaderId = uploaderOptions.find((option) => option.value === uploaderFilter)?.id ?? "";
 
   /* eslint-disable react-hooks/set-state-in-effect -- resets the caption editor to mirror the active item (external selection); intentional sync, not a render cascade. */
@@ -470,7 +483,7 @@ export function JourneyPlayback({
         </div>
       ) : null}
 
-      <div className="relative z-10 flex h-full items-center justify-center px-4 pb-36 pt-20 md:px-16 md:pb-28 md:pt-24">
+      <div className="relative z-10 flex h-full items-center justify-center px-4 pb-52 pt-20 md:px-16 md:pb-48 md:pt-24">
         {videoUrl ? (
           <div className="flex h-full w-full items-center justify-center">
             <video
@@ -522,7 +535,9 @@ export function JourneyPlayback({
         <ChevronRight className="h-6 w-6" />
       </IconButton>
 
-      <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-stone-950 via-stone-950/86 to-transparent px-3 pb-3 pt-16 md:px-6 md:pb-5">
+      {/* On desktop the mini-map sits in the bottom-right corner; JourneyMiniMap
+          publishes its width so the bar can keep its controls clear of it. */}
+      <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-stone-950 via-stone-950/86 to-transparent px-3 pb-3 pt-16 md:px-6 md:pb-5 md:pr-[calc(var(--journey-minimap-width,18rem)+3rem)]">
         <div className="mx-auto max-w-5xl">
           <div className="mb-4 max-w-2xl">
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-white/58">
@@ -531,7 +546,7 @@ export function JourneyPlayback({
               {activeItem.kind === "photo" && activeItem.primary.uploader_name ? <span>by {friendlyPersonName(activeItem.primary.uploader_name)}</span> : null}
               {!activeItem.coord ? <span>location unknown</span> : null}
             </div>
-            {activeItem.kind === "photo" ? (
+            {activeItem.kind === "photo" && !activeItem.primary.caption && !canEditCaption && activeItem.attached.length === 0 ? null : activeItem.kind === "photo" ? (
               <div className="max-h-[40vh] overflow-y-auto rounded-xl border border-white/15 bg-stone-950/45 p-3 backdrop-blur md:max-w-xl">
                 {editingCaption ? (
                   <div className="space-y-2">
@@ -545,12 +560,22 @@ export function JourneyPlayback({
                   </div>
                 ) : (
                   <div className="flex items-start gap-3">
-                    <p className="min-w-0 flex-1 text-sm leading-6 text-white">{activeItem.primary.caption || "No caption yet."}</p>
+                    {activeItem.primary.caption ? (
+                      <p className="min-w-0 flex-1 text-sm leading-6 text-white">{activeItem.primary.caption}</p>
+                    ) : (
+                      // Only reachable by people who can edit (see the guard
+                      // above), so the empty state is an action, not a shrug.
+                      <button type="button" onClick={() => setEditingCaption(true)} className="inline-flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-bold text-white/80 transition hover:text-white">
+                        <Plus className="h-4 w-4" /> Add a caption
+                      </button>
+                    )}
                     {canEditCaption ? (
                       <div className="flex shrink-0 items-center gap-1.5">
-                        <IconButton size="sm" onClick={() => setEditingCaption(true)} aria-label="Edit caption" title="Edit caption" className="rounded-lg bg-white/10 hover:bg-white/20">
-                          <Pencil className="h-4 w-4" />
-                        </IconButton>
+                        {activeItem.primary.caption ? (
+                          <IconButton size="sm" onClick={() => setEditingCaption(true)} aria-label="Edit caption" title="Edit caption" className="rounded-lg bg-white/10 hover:bg-white/20">
+                            <Pencil className="h-4 w-4" />
+                          </IconButton>
+                        ) : null}
                         <IconButton size="sm" onClick={() => onEditPhoto(activeItem.primary.id)} aria-label="Edit photo details (location, day, time)" title="Edit details — location, day, time" className="rounded-lg bg-white/10 hover:bg-white/20">
                           <MapPinned className="h-4 w-4" />
                         </IconButton>
@@ -580,28 +605,38 @@ export function JourneyPlayback({
               <button onClick={() => setIsPlaying((value) => !value)} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-stone-950 shadow-lg transition hover:bg-[#fff4d8] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30" aria-label={isPlaying ? "Pause autoplay" : "Start autoplay"}>
                 {isPlaying ? <CirclePause className="h-5 w-5" /> : <CirclePlay className="h-5 w-5" />}
               </button>
-              <div className="flex items-center gap-1.5" title="Autoplay speed">
-                <Gauge className="hidden h-3.5 w-3.5 shrink-0 text-white/45 sm:block" />
-                <input type="range" min={0.5} max={2.5} step={0.5} value={speed} onChange={(event) => setSpeed(Number(event.target.value))} className="w-14 cursor-pointer accent-ember-400 sm:w-20" aria-label="Autoplay speed" />
-                <span className="w-7 text-[11px] font-bold tabular-nums text-white/60">{speed}×</span>
-              </div>
+              <button
+                type="button"
+                onClick={() => setSpeed((current) => SPEEDS[(SPEEDS.indexOf(current as typeof SPEEDS[number]) + 1) % SPEEDS.length])}
+                className="inline-flex h-8 items-center gap-1 rounded-full bg-white/10 px-2.5 text-[11px] font-bold tabular-nums text-white/80 transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25"
+                aria-label={`Autoplay speed ${speed}×, press to change`}
+                title="Autoplay speed"
+              >
+                <Gauge className="hidden h-3.5 w-3.5 shrink-0 text-white/60 sm:block" /> {speed}×
+              </button>
             </div>
-            <div className="relative h-9">
-              <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-white/16">
-                <div className="h-full rounded-full bg-ember-400" style={{ width: `${Math.max(2, progress * 100)}%` }} />
+            {/* The track: a tick per day start, labelled "D1…D8" underneath and
+                coloured like the day everywhere else, so scrubbing to a day
+                is a matter of aiming rather than hovering to find out. */}
+            <div className="relative h-11 pt-0.5">
+              <div className="absolute left-0 right-0 top-3.5 h-1 rounded-full bg-white/16">
+                <div className="h-full rounded-full transition-[width] duration-200" style={{ width: `${Math.max(2, progress * 100)}%`, backgroundColor: activeDayColor ?? "#e7a13d" }} />
               </div>
-              {items.map((item, index) => {
-                const isDayStart = index === 0 || item.dayId !== items[index - 1]?.dayId;
-                if (!isDayStart) return null;
+              {dayTicks.map(({ index, day, left }) => {
+                const isActiveDay = activeItem.dayId === (day?.id ?? null);
+                const color = day ? dayColors.get(day.id) ?? "#ffffff" : "#ffffff";
                 return (
                   <button
-                    key={`${item.dayId ?? "unsorted"}:${index}`}
+                    key={`${day?.id ?? "unsorted"}:${index}`}
                     onClick={() => onSelectIndex(index)}
-                    className="absolute top-1/2 z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-stone-950 bg-white shadow"
-                    style={{ left: `${items.length <= 1 ? 0 : (index / (items.length - 1)) * 100}%` }}
-                    aria-label={`Jump to ${dayLabel(days, item.dayId)}`}
-                    title={`${dayLabel(days, item.dayId)} ${formatDateOnly(days.find((day) => day.id === item.dayId)?.date)}`}
-                  />
+                    className="absolute top-0 z-10 flex -translate-x-1/2 flex-col items-center"
+                    style={{ left: `${left}%` }}
+                    aria-label={`Jump to ${dayLabel(days, day?.id ?? null)}`}
+                    title={`${dayLabel(days, day?.id ?? null)} ${formatDateOnly(day?.date)}`}
+                  >
+                    <span className={cn("h-4 w-4 rounded-full border-2 border-stone-950 shadow transition-transform", isActiveDay && "scale-110")} style={{ backgroundColor: color }} />
+                    <span className={cn("mt-0.5 text-[10px] font-bold uppercase tabular-nums leading-none", isActiveDay ? "text-white" : "text-white/55")}>{day ? `D${day.day_number}` : "—"}</span>
+                  </button>
                 );
               })}
               <input
@@ -610,7 +645,7 @@ export function JourneyPlayback({
                 max={Math.max(0, items.length - 1)}
                 value={activeIndex}
                 onChange={(event) => onSelectIndex(Number(event.target.value))}
-                className="absolute inset-0 h-9 w-full cursor-pointer opacity-0"
+                className="absolute inset-x-0 top-0 h-7 w-full cursor-pointer opacity-0"
                 aria-label="Journey progress"
                 aria-valuetext={`${title}, ${dayLabel(days, activeItem.dayId)}`}
               />
