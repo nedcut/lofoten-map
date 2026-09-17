@@ -16,7 +16,9 @@ export async function POST(request: Request) {
     await removeObjects(namespace, paths);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not delete objects.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // S3 client errors can name the bucket, endpoint, or other keys. Keep the
+    // detail in the server log and return a generic message to the caller.
+    console.error("[storage/delete]", error);
+    return NextResponse.json({ error: "Could not delete objects." }, { status: 500 });
   }
 }

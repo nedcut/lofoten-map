@@ -8,8 +8,8 @@ import type { LayerVisibility } from "@/components/DaySidebar";
 // Legend entries map 1:1 to the layer colors defined in TripLayers. Keep the
 // swatch colors in sync with the paint properties there.
 const ENTRIES: Array<{ key: keyof LayerVisibility; label: string; swatch: string }> = [
-  { key: "routes", label: "Routes", swatch: "bg-[#0f766e]" },
-  { key: "photos", label: "Photos", swatch: "bg-[#fffdf6] ring-2 ring-[#e7a13d]" },
+  { key: "routes", label: "Routes", swatch: "bg-fjord" },
+  { key: "photos", label: "Media", swatch: "bg-paper ring-2 ring-ember-400" },
   { key: "notes", label: "Notes", swatch: "bg-[#f6d28f] ring-2 ring-[#7c4a14]/60" },
   { key: "notes", label: "Places", swatch: "bg-[#c8e4d4] ring-2 ring-[#0f5f55]/60" },
 ];
@@ -21,7 +21,7 @@ export function MapLegend({ visibility }: { visibility: LayerVisibility }) {
 
   return (
     <div className="pointer-events-auto absolute bottom-4 left-4 z-10 hidden sm:block">
-      <div className="overflow-hidden rounded-xl border border-stone-200/80 bg-[rgba(255,253,246,0.92)] shadow-[0_12px_30px_rgba(46,61,54,0.18)] backdrop-blur">
+      <div className="overflow-hidden rounded-xl border border-stone-200/80 bg-paper/92 shadow-control backdrop-blur">
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}

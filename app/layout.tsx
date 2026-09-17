@@ -16,8 +16,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   themeColor: "#e7efe8",
+  viewportFit: "cover",
 };
 
 // Origins of the Neon API and R2 public media endpoint. Preconnecting warms the

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BackendClient, BackendUser } from "@/lib/backend";
 import { resolveMemberAvatars, resolvePhotoUrls } from "@/lib/object-store";
+import { reuseIfEqual } from "@/lib/trip-data-equal";
 import { isMissingSchemaObjectError } from "@/lib/schema-errors";
 import type { AdminRequest, Photo, RouteSegment, TripData, TripMember } from "@/types/trip";
 
@@ -24,18 +25,28 @@ export function useTripData({ backend, user, authLoading, tripSlug, initialData 
   const [adminRequestsAvailable, setAdminRequestsAvailable] = useState(true);
   const [profilesAvailable, setProfilesAvailable] = useState(true);
   const loadInFlightRef = useRef<Promise<void> | null>(null);
+  // True while the current error/notice was set by a silent poll. A later
+  // successful silent poll clears only those, never a message a mutation set.
+  const pollMessageRef = useRef(false);
 
   const loadData = useCallback((options?: { silent?: boolean }): Promise<void> => {
     if (!backend) return Promise.resolve();
     if (loadInFlightRef.current) return loadInFlightRef.current;
 
     const request = (async () => {
-      if (!options?.silent) setLoading(true);
-      setError(null);
-      setNotice(null);
+      // A silent background poll must not wipe a message the user is still
+      // reading, such as a failed save reported by a mutation moments ago.
+      if (!options?.silent) {
+        setLoading(true);
+        setError(null);
+        setNotice(null);
+        pollMessageRef.current = false;
+      }
+      let pollMessage = false;
       try {
         const { data: trip, error: tripError } = await backend.from("trips").select("*").eq("slug", tripSlug).maybeSingle();
         if (tripError || !trip) {
+          pollMessage = true;
           setError(tripError
             ? `We could not load the trip right now. Try refreshing, or ask an admin to check access. ${tripError.message}`
             : "The trip is not set up yet. Ask an admin to finish creating it, then refresh.");
@@ -62,16 +73,18 @@ export function useTripData({ backend, user, authLoading, tripSlug, initialData 
           : members;
         if (adminRequestsMissing || profilesMissing) {
           const stale = [adminRequestsMissing ? "Admin access requests" : null, profilesMissing ? "Member profiles" : null].filter(Boolean).join(" and ");
+          pollMessage = true;
           setNotice(`${stale} are temporarily unavailable. Apply the latest database migrations, then refresh.`);
         }
         const failure = [days.error, routes.error, photos.error, notes.error, places.error, membersResult.error, adminRequestsMissing ? null : adminRequests.error].find(Boolean);
         if (failure) {
+          pollMessage = true;
           setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
         } else {
           const resolvedPhotos = resolvePhotoUrls((photos.data ?? []) as Photo[]);
           const memberRows = ((membersResult.data ?? []) as Partial<TripMember>[]).map((member) => ({ avatar_path: null, ...member })) as TripMember[];
           const resolvedMembers = resolveMemberAvatars(memberRows);
-          setData({
+          const next: TripData = {
             trip,
             days: days.data ?? [],
             routeSegments: (routes.data ?? []) as RouteSegment[],
@@ -80,11 +93,21 @@ export function useTripData({ backend, user, authLoading, tripSlug, initialData 
             places: places.data ?? [],
             members: resolvedMembers,
             adminRequests: adminRequestsMissing ? [] : (adminRequests.data ?? []) as AdminRequest[],
-          });
+          };
+          // Keep the previous object when nothing changed. Every marker effect
+          // and memo downstream keys on identity, so an unconditional replace
+          // would tear down and rebuild the map layers on every 30s poll.
+          setData((current) => reuseIfEqual(current, next));
+          if (options?.silent && pollMessageRef.current && !pollMessage) {
+            setError(null);
+            setNotice(null);
+          }
         }
       } catch (loadError) {
+        pollMessage = true;
         setError(loadError instanceof Error ? `We could not sync the trip right now. Try refreshing. ${loadError.message}` : "We could not sync the trip right now. Try refreshing.");
       } finally {
+        if (options?.silent) pollMessageRef.current = pollMessage;
         if (!options?.silent) setLoading(false);
       }
     })();

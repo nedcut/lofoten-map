@@ -112,12 +112,11 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, onPlay, disable
       type="button"
       onClick={onPlay}
       disabled={disabled}
-      aria-label="Relive the journey"
       className={cn(
         // shrink-0: the slideshow layers are all absolutely positioned, so the
         // button has no intrinsic height — without this, the flex-column sidebar
         // shrinks it to a sliver when its content overflows.
-        "group relative w-full shrink-0 overflow-hidden rounded-[1.1rem] border border-stone-200/80 bg-[#0f3b32] text-left text-white shadow-[0_16px_40px_rgba(46,61,54,0.28)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_48px_rgba(46,61,54,0.34)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#e7a13d]/50 active:translate-y-0 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60",
+        "group relative w-full shrink-0 overflow-hidden rounded-[1.1rem] border border-stone-200/80 bg-[#0f3b32] text-left text-white shadow-[0_16px_40px_rgba(46,61,54,0.28)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_48px_rgba(46,61,54,0.34)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember-400/50 active:translate-y-0 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60",
         compact ? "h-[112px]" : "h-[150px]",
       )}
     >
@@ -148,7 +147,7 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, onPlay, disable
       ) : null}
 
       <span className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-3 p-4">
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e7a13d] text-stone-950 shadow-lg transition-transform duration-200 group-hover:scale-105">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ember-400 text-stone-950 shadow-lg transition-transform duration-200 group-hover:scale-105">
           <Play className="h-5 w-5 fill-current" />
         </span>
         <span className="min-w-0">

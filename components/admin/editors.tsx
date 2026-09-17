@@ -1,6 +1,8 @@
 "use client";
 
 import { Loader2, MapPin, Save, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import type { Day, Note, Photo, Place, RouteMode, RouteSegment, Trip } from "@/types/trip";
 
 // The per-row admin edit forms (days, routes, notes, places, photos) plus the
@@ -192,14 +194,14 @@ export function NewDayEditor({ days, isSaving, onCreate }: { days: Day[]; isSavi
   }
 
   return (
-    <form action={submit} className="space-y-2 rounded-lg border border-teal-700/20 bg-teal-50 p-2">
+    <form action={submit} className="space-y-2 rounded-[var(--radius-control)] border border-teal-700/20 bg-teal-50 p-2">
       <div className="text-xs font-bold uppercase tracking-[0.08em] text-teal-900">Add day</div>
       <div className="grid grid-cols-[5rem_1fr] gap-2">
-        <input name="day_number" type="number" min="1" defaultValue={nextDayNumber} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-        <input name="date" type="date" className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+        <Field label="Day number" hideLabel><Input name="day_number" type="number" min="1" defaultValue={nextDayNumber} /></Field>
+        <Field label="Date" hideLabel><Input name="date" type="date" /></Field>
       </div>
-      <input name="title" placeholder="Day title" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-      <textarea name="summary" placeholder="Summary" className="min-h-14 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+      <Field label="Day title" hideLabel><Input name="title" placeholder="Day title" /></Field>
+      <Field label="Summary" hideLabel><Textarea name="summary" placeholder="Summary" className="min-h-14" /></Field>
       <SaveButton isSaving={isSaving}>Add day</SaveButton>
     </form>
   );
@@ -216,13 +218,13 @@ export function DayEditor({ day, isSaving, onSave, onDelete }: { day: Day; isSav
   }
 
   return (
-    <form action={submit} className="space-y-2 rounded-lg border border-stone-200 bg-white p-2">
+    <form action={submit} className="space-y-2 rounded-[var(--radius-control)] border border-stone-200 bg-white p-2">
       <div className="grid grid-cols-[5rem_1fr] gap-2">
-        <input name="day_number" type="number" min="1" defaultValue={day.day_number} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-        <input name="date" type="date" defaultValue={day.date ?? ""} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+        <Field label="Day number" hideLabel><Input name="day_number" type="number" min="1" defaultValue={day.day_number} /></Field>
+        <Field label="Date" hideLabel><Input name="date" type="date" defaultValue={day.date ?? ""} /></Field>
       </div>
-      <input name="title" defaultValue={day.title ?? ""} placeholder="Day title" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-      <textarea name="summary" defaultValue={day.summary ?? ""} placeholder="Summary" className="min-h-16 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+      <Field label="Day title" hideLabel><Input name="title" defaultValue={day.title ?? ""} placeholder="Day title" /></Field>
+      <Field label="Summary" hideLabel><Textarea name="summary" defaultValue={day.summary ?? ""} placeholder="Summary" className="min-h-16" /></Field>
       <EditorActions isSaving={isSaving} saveLabel="Save day" deleteLabel="Delete day" deleteConfirmMessage={dayDeleteMessage(day)} onDelete={onDelete} />
     </form>
   );
@@ -239,15 +241,17 @@ export function RouteEditor({ route, days, isSaving, onSave, onDelete }: { route
   }
 
   return (
-    <form action={submit} className="space-y-2 rounded-lg border border-stone-200 bg-white p-2">
-      <input name="name" defaultValue={route.name ?? ""} placeholder="Route name" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+    <form action={submit} className="space-y-2 rounded-[var(--radius-control)] border border-stone-200 bg-white p-2">
+      <Field label="Route name" hideLabel><Input name="name" defaultValue={route.name ?? ""} placeholder="Route name" /></Field>
       <div className="grid grid-cols-2 gap-2">
-        <select name="day_id" defaultValue={route.day_id ?? ""} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">{dayOptions(days)}</select>
-        <select name="mode" defaultValue={route.mode} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">
-          {routeModes.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
-        </select>
+        <Field label="Day" hideLabel><Select name="day_id" defaultValue={route.day_id ?? ""}>{dayOptions(days)}</Select></Field>
+        <Field label="Mode" hideLabel>
+          <Select name="mode" defaultValue={route.mode}>
+            {routeModes.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+          </Select>
+        </Field>
       </div>
-      <input name="source" defaultValue={route.source ?? ""} placeholder="Source" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+      <Field label="Source" hideLabel><Input name="source" defaultValue={route.source ?? ""} placeholder="Source" /></Field>
       <EditorActions isSaving={isSaving} saveLabel="Save route" deleteLabel="Delete route" deleteConfirmMessage={`Delete route "${routeLabel(route)}"?`} onDelete={onDelete} />
     </form>
   );
@@ -263,10 +267,10 @@ export function NoteEditor({ note, days, isSaving, onSave, onDelete }: { note: N
   }
 
   return (
-    <form action={submit} className="space-y-2 rounded-lg border border-stone-200 bg-white p-2">
-      <select name="day_id" defaultValue={note.day_id ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">{dayOptions(days)}</select>
-      <input name="author_name" defaultValue={note.author_name ?? ""} placeholder="Author" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-      <textarea name="body" defaultValue={note.body} className="min-h-16 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+    <form action={submit} className="space-y-2 rounded-[var(--radius-control)] border border-stone-200 bg-white p-2">
+      <Field label="Day" hideLabel><Select name="day_id" defaultValue={note.day_id ?? ""}>{dayOptions(days)}</Select></Field>
+      <Field label="Author" hideLabel><Input name="author_name" defaultValue={note.author_name ?? ""} placeholder="Author" /></Field>
+      <Field label="Note" hideLabel><Textarea name="body" defaultValue={note.body} className="min-h-16" /></Field>
       <EditorActions isSaving={isSaving} saveLabel="Save note" deleteLabel="Delete note" deleteConfirmMessage={`Delete note "${noteLabel(note)}"?`} onDelete={onDelete} />
     </form>
   );
@@ -285,16 +289,16 @@ export function PlaceEditor({ place, days, isSaving, onSave, onDelete }: { place
   }
 
   return (
-    <form action={submit} className="space-y-2 rounded-lg border border-stone-200 bg-white p-2">
+    <form action={submit} className="space-y-2 rounded-[var(--radius-control)] border border-stone-200 bg-white p-2">
       <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.08em] text-stone-500"><MapPin className="h-3.5 w-3.5 text-teal-700" /> Place</div>
-      <input name="name" defaultValue={place.name} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-      <select name="day_id" defaultValue={place.day_id ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">{dayOptions(days)}</select>
+      <Field label="Name" hideLabel><Input name="name" defaultValue={place.name} /></Field>
+      <Field label="Day" hideLabel><Select name="day_id" defaultValue={place.day_id ?? ""}>{dayOptions(days)}</Select></Field>
       <div className="grid grid-cols-2 gap-2">
-        <input name="lat" type="number" step="any" defaultValue={place.lat} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-        <input name="lng" type="number" step="any" defaultValue={place.lng} className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+        <Field label="Latitude" hideLabel><Input name="lat" type="number" step="any" defaultValue={place.lat} /></Field>
+        <Field label="Longitude" hideLabel><Input name="lng" type="number" step="any" defaultValue={place.lng} /></Field>
       </div>
-      <input name="place_type" defaultValue={place.place_type ?? ""} placeholder="Type" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-      <textarea name="description" defaultValue={place.description ?? ""} placeholder="Description" className="min-h-16 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+      <Field label="Type" hideLabel><Input name="place_type" defaultValue={place.place_type ?? ""} placeholder="Type" /></Field>
+      <Field label="Description" hideLabel><Textarea name="description" defaultValue={place.description ?? ""} placeholder="Description" className="min-h-16" /></Field>
       <EditorActions isSaving={isSaving} saveLabel="Save place" deleteLabel="Delete place" deleteConfirmMessage={`Delete place "${placeLabel(place)}"?`} onDelete={onDelete} />
     </form>
   );
@@ -313,31 +317,22 @@ export function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo
   }
 
   return (
-    <form action={submit} className="grid grid-cols-[4rem_minmax(0,1fr)] gap-2 rounded-lg border border-stone-200 bg-white p-2">
+    <form action={submit} className="grid grid-cols-[4rem_minmax(0,1fr)] gap-2 rounded-[var(--radius-control)] border border-stone-200 bg-white p-2">
       <div className="h-16 overflow-hidden rounded-md bg-stone-100">
-        {photo.media_type === "video" && !photo.thumbnail_url
-          ? <div className="flex h-full items-center justify-center text-xs font-bold text-stone-500">Video</div>
+        {photo.thumbnail_url || photo.image_url
           // eslint-disable-next-line @next/next/no-img-element -- Existing remote URLs come from user uploads.
-          : <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />}
+          ? <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+          : <div className="flex h-full items-center justify-center text-xs font-bold text-stone-500">{photo.media_type === "video" ? "Video" : "Photo"}</div>}
       </div>
       <div className="min-w-0 space-y-2">
-        <select name="day_id" defaultValue={photo.day_id ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15">{dayOptions(days)}</select>
-        <input name="uploader_name" defaultValue={photo.uploader_name ?? ""} placeholder="Uploader" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+        <Field label="Day" hideLabel><Select name="day_id" defaultValue={photo.day_id ?? ""}>{dayOptions(days)}</Select></Field>
+        <Field label="Uploader" hideLabel><Input name="uploader_name" defaultValue={photo.uploader_name ?? ""} placeholder="Uploader" /></Field>
         <div className="grid grid-cols-2 gap-2">
-          <label className="space-y-1 text-[11px] font-bold uppercase tracking-[0.08em] text-stone-500">
-            Latitude
-            <input name="lat" type="number" step="any" defaultValue={photo.lat ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-normal tracking-normal text-stone-950 outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-          </label>
-          <label className="space-y-1 text-[11px] font-bold uppercase tracking-[0.08em] text-stone-500">
-            Longitude
-            <input name="lng" type="number" step="any" defaultValue={photo.lng ?? ""} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-normal tracking-normal text-stone-950 outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-          </label>
+          <Field label="Latitude"><Input name="lat" type="number" step="any" defaultValue={photo.lat ?? ""} /></Field>
+          <Field label="Longitude"><Input name="lng" type="number" step="any" defaultValue={photo.lng ?? ""} /></Field>
         </div>
-        <label className="block space-y-1 text-[11px] font-bold uppercase tracking-[0.08em] text-stone-500">
-          Taken time
-          <input name="taken_at" type="datetime-local" defaultValue={datetimeLocalValue(photo.taken_at)} className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-normal tracking-normal text-stone-950 outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
-        </label>
-        <textarea name="caption" defaultValue={photo.caption ?? ""} placeholder="Caption" className="min-h-14 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-teal-700 focus:ring-4 focus:ring-teal-700/15" />
+        <Field label="Taken time"><Input name="taken_at" type="datetime-local" defaultValue={datetimeLocalValue(photo.taken_at)} /></Field>
+        <Field label="Caption" hideLabel><Textarea name="caption" defaultValue={photo.caption ?? ""} placeholder="Caption" className="min-h-14" /></Field>
         <EditorActions isSaving={isSaving} saveLabel="Save photo" deleteLabel="Delete photo" deleteConfirmMessage={`Delete ${photoLabel(photo)}? The uploaded image file will also be removed when storage cleanup succeeds.`} onDelete={onDelete} />
       </div>
     </form>
@@ -352,21 +347,21 @@ function EditorActions({ isSaving, saveLabel, deleteLabel, deleteConfirmMessage,
   return (
     <div className="grid grid-cols-[1fr_auto] gap-2">
       <SaveButton isSaving={isSaving}>{saveLabel}</SaveButton>
-      <button type="button" onClick={deleteItem} disabled={isSaving} className="inline-flex items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 text-rose-700 transition hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-rose-200/70 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50" aria-label={deleteLabel} title={deleteLabel}>
+      <Button type="button" variant="danger" onClick={deleteItem} disabled={isSaving} className="px-3" aria-label={deleteLabel} title={deleteLabel}>
         <Trash2 className="h-4 w-4" />
-      </button>
+      </Button>
     </div>
   );
 }
 
 export function SaveButton({ children, isSaving }: { children: string; isSaving: boolean }) {
   return (
-    <button disabled={isSaving} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-3 py-2.5 text-sm font-black text-white transition hover:bg-teal-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">
-      {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {children}
-    </button>
+    <Button type="submit" tone="fjord" size="sm" disabled={isSaving} className="w-full">
+      {isSaving ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <Save className="h-4 w-4" />} {children}
+    </Button>
   );
 }
 
 export function EmptyRow({ label }: { label: string }) {
-  return <div className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs text-stone-500">{label}</div>;
+  return <div className="rounded-[var(--radius-control)] border border-stone-200 bg-white px-3 py-2 text-xs text-stone-500">{label}</div>;
 }

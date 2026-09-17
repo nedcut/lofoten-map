@@ -15,13 +15,19 @@ from `supabase/schema.sql`, with these deliberate platform translations:
   `image_path`, `thumbnail_path`, and `avatar_path` remain object-key strings for
   the R2 layer.
 
-The schema also exposes two narrowly scoped authenticated RPCs for the server:
+The schema also exposes three narrowly scoped authenticated RPCs for the server:
 
 - `current_user_id()` intentionally returns the raw Neon Auth subject as text
   for API-route compatibility.
 - `is_my_avatar_path(path)` allows an exact match against one of the caller's
   stored legacy avatar paths. It exists so old avatar keys containing Supabase
   UUIDs remain readable after identity remapping.
+- `can_delete_photo_object(trip_slug, path)` mirrors the photos DELETE policy
+  for R2 object keys: owners and admins may remove referenced objects, and any
+  member may remove an orphan that no photo row references.
+
+Incremental changes for databases that already ran `schema.sql` live in
+`patches/`, named by date. Apply them with `psql` in order.
 
 Every `SECURITY DEFINER` function uses an empty search path. `PUBLIC` and
 `anonymous` execute privileges are explicitly revoked before execute is granted

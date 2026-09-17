@@ -4,38 +4,33 @@ import dynamic from "next/dynamic";
 // Types only — a value import of mapbox-gl here would pull the whole library
 // into the initial bundle and defeat MapView's dynamic() split.
 import type { Map as MapboxMap } from "mapbox-gl";
-import { collectItemCoordinates, coordinateBounds, routeDistanceMeters, routeGeometry } from "@/lib/geo";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2, Play, Sparkles, UserRound } from "lucide-react";
+import { collectItemCoordinates, coordinateBounds, routeDistanceMeters } from "@/lib/geo";
 import { AuthPanel } from "@/components/AuthPanel";
 import { DaySidebar } from "@/components/DaySidebar";
 import type { JourneyFilter } from "@/components/JourneyPlayback";
 import { MapLegend } from "@/components/MapLegend";
 import { MobileSheet } from "@/components/MobileSheet";
 import { StatusPill } from "@/components/StatusPill";
+import { HeaderPill, PillButton } from "@/components/ui/HeaderPill";
 import type { MapItemKind } from "@/components/TripLayers";
 import { EditItemPanel } from "@/components/EditItemPanel";
 import { deriveTripAccess } from "@/lib/access";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
-import { friendlyPersonName } from "@/lib/display-name";
 import { useTripAuth } from "@/lib/hooks/useTripAuth";
 import { useTripData } from "@/lib/hooks/useTripData";
 import { useProfile } from "@/lib/hooks/useProfile";
 import { useMembership } from "@/lib/hooks/useMembership";
 import { useTripMutations } from "@/lib/hooks/useTripMutations";
+import { useTripCreation } from "@/lib/hooks/useTripCreation";
 import { buildJourneyItems } from "@/lib/journey";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
-import { clearNoteDraft } from "@/lib/offline-drafts";
-import { addNote, addRoute, prependPhotos } from "@/lib/local-trip-store";
-import { prepareMediaFiles } from "@/lib/media-processing";
-import { uploadPhotoBatch } from "@/lib/photo-upload";
 import { getBackendBrowserClient } from "@/lib/backend";
-import { resolvePhotoUrls } from "@/lib/object-store";
 import { applyTripUrlState, formatDayParam, formatItemToken, parseItemToken, readTripUrlState, resolveDayParam } from "@/lib/trip-url";
 import { deriveDayStats, deriveOutlierOverlay, filterTripItemsByDay, resolveEditTarget } from "@/lib/trip-view-model";
 import { cn } from "@/lib/utils";
-import type { LngLat, MapClickMode, RouteMode } from "@/types/trip";
-import type { PhotoUploadItemInput, PhotoUploadProgress, PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
+import type { LngLat, MapClickMode } from "@/types/trip";
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
 // These also value-import mapbox-gl (markers, popups, the mini map), so they
@@ -47,7 +42,6 @@ const AddNotePanel = dynamic(() => import("@/components/AddNotePanel").then((mod
 const ManualRoutePanel = dynamic(() => import("@/components/ManualRoutePanel").then((mod) => mod.ManualRoutePanel));
 const ProfilePanel = dynamic(() => import("@/components/ProfilePanel").then((mod) => mod.ProfilePanel));
 const UploadPhotoPanel = dynamic(() => import("@/components/UploadPhotoPanel").then((mod) => mod.UploadPhotoPanel));
-const UPLOAD_CONCURRENCY = 4;
 
 export default function Home() {
   const backend = useMemo(() => getBackendBrowserClient(), []);
@@ -99,7 +93,6 @@ export default function Home() {
   const [journeyFilter, setJourneyFilter] = useState<JourneyFilter>("all");
   const [journeyUploaderFilter, setJourneyUploaderFilter] = useState("");
   const [journeyIntro, setJourneyIntro] = useState(false);
-  const [saving, setSaving] = useState(false);
 
   const filtered = useMemo(() => filterTripItemsByDay(data, selectedDayId), [data, selectedDayId]);
   // Per-day totals for the day cards, computed over the full dataset (not the
@@ -117,6 +110,12 @@ export default function Home() {
     return journeyItems.findIndex((item) => item.id === activeJourneyId);
   }, [activeJourneyId, journeyItems]);
   const journeyOpen = Boolean(activeJourneyId);
+  // These render a modal overlay on top of the header/sidebar/map, so those
+  // stay `inert` (unfocusable, hidden from assistive tech) underneath rather
+  // than merely obscured. The note, media, route, and edit panels are
+  // deliberately excluded: they sit beside the map and need its clicks for
+  // placement and drawing, so they trap keyboard focus but leave the map live.
+  const overlayOpen = Boolean(authPanelOpen || profilePanelOpen || journeyOpen);
 
   const access = useMemo(
     () => deriveTripAccess({ backendEnabled: Boolean(backend), userId: user?.id ?? null, members: data.members, adminRequests: data.adminRequests }),
@@ -133,8 +132,8 @@ export default function Home() {
     applyTripUrlState(window.location.href, { day: formatDayParam(dayId, data.days) });
   }, [data.days]);
 
-  // Domain mutation hooks. Each owns its own status channel and the demo-mode
-  // vs. Supabase write paths, keeping this component focused on view state.
+  // Domain hooks own the demo-mode vs. Neon write paths and their status
+  // channels, so this component only holds view state and wiring.
   const { isSaving: profileSaving, saveProfile } = useProfile({
     backend,
     user,
@@ -172,6 +171,29 @@ export default function Home() {
     selectedDayId,
     selectDay,
     setGlobalError: setError,
+  });
+
+  const closePanel = useCallback(() => {
+    setPanel(null);
+    setClickMode("idle");
+    setPendingCoordinate(null);
+    setRouteDraftPoints([]);
+  }, []);
+
+  const { saving, saveNote, savePhotos, saveRoute } = useTripCreation({
+    backend,
+    user,
+    currentMember,
+    isAdmin,
+    data,
+    setData,
+    loadData,
+    tripSlug,
+    pendingCoordinate,
+    routeDraftPoints,
+    onSaved: closePanel,
+    setError,
+    setNotice,
   });
 
   // Resolve the popup-selected item live from data, so the editor reflects updates
@@ -222,6 +244,16 @@ export default function Home() {
     : null;
   // Map-friendly shape of the previewed outlier (drops photos with no coords).
   const outlierOverlay = useMemo(() => deriveOutlierOverlay(outlierPreview), [outlierPreview]);
+  // Notes and places only have mouse-driven map layers; this gives keyboard and
+  // screen-reader users a way to reach the same edit path startEditFromMap
+  // wires up for a map-popup click. Same owner-or-admin rule as the popup
+  // controls: notes the viewer owns, places only for admins.
+  const notesPlacesEntry = useMemo(() => ({
+    notes: isAdmin ? filtered.notes : filtered.notes.filter((note) => note.user_id === currentUserId),
+    places: isAdmin ? filtered.places : [],
+    onOpen: (kind: "note" | "place", id: string) => startEditFromMap(kind, id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- startEditFromMap is a plain function (not memoized) redefined every render; omitted to avoid invalidating this memo on every render too.
+  }), [currentUserId, filtered.notes, filtered.places, isAdmin]);
 
   // A photo only steers the journey start while its popup is open. Guarded so
   // closing a stale popup can't wipe focus from a newer one opened after it.
@@ -467,10 +499,10 @@ export default function Home() {
     if (!bounds) return;
 
     if (bounds.diagonalMeters < 1) {
-      map.easeTo({ center: bounds.center, zoom: 13.5, padding, duration: 800, essential: true });
+      map.easeTo({ center: bounds.center, zoom: 13.5, padding, duration: 800 });
       return;
     }
-    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800, essential: true });
+    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800 });
   }, [map, selectedDayId]);
 
   function startPanel(next: "photo" | "note" | "route") {
@@ -484,13 +516,6 @@ export default function Home() {
       setRouteDraftPoints([]);
       setClickMode(next === "photo" && mapActionsEnabled ? "place-photo" : next === "note" ? "add-note" : "idle");
     }
-  }
-
-  function closePanel() {
-    setPanel(null);
-    setClickMode("idle");
-    setPendingCoordinate(null);
-    setRouteDraftPoints([]);
   }
 
   // Opened from a map popup. RLS enforces who may write; the popup only shows the
@@ -525,7 +550,6 @@ export default function Home() {
         zoom: Math.max(map.getZoom(), 13.5),
         offset: isMobile ? [0, -120] : [-160, 0],
         duration: 900,
-        essential: true,
       });
     }, 120);
   }
@@ -547,7 +571,7 @@ export default function Home() {
     if (!bounds) return;
     const isMobile = window.innerWidth < 768;
     const padding = isMobile ? { top: 96, right: 48, bottom: 220, left: 48 } : { top: 80, right: 80, bottom: 80, left: 80 };
-    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800, essential: true });
+    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800 });
   }
 
   async function deleteFromMap(kind: MapItemKind, id: string) {
@@ -556,198 +580,20 @@ export default function Home() {
     await deleteDataItem(table, id);
   }
 
-  async function saveNote(input: { body: string; authorName: string; dayId: string | null }) {
-    if (!pendingCoordinate || !input.body || !data.trip) return;
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    let didSave = false;
-    try {
-      const row = { trip_id: data.trip.id, day_id: input.dayId, user_id: user?.id ?? null, author_name: input.authorName || "Friend", lat: pendingCoordinate.lat, lng: pendingCoordinate.lng, body: input.body, note_type: "note" };
-      if (backend) {
-        if (!user) {
-          setError("Sign in before saving notes.");
-          return;
-        }
-        const { error: insertError } = await backend.from("notes").insert(row);
-        if (insertError) setError(insertError.message);
-        else {
-          await loadData();
-          didSave = true;
-        }
-      } else {
-        setData((current) => addNote(current, { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }));
-        didSave = true;
-      }
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save note.");
-    } finally {
-      setSaving(false);
-      if (didSave) {
-        clearNoteDraft(tripSlug);
-        closePanel();
-      }
-    }
-  }
-
-  async function savePhotos(inputs: PhotoUploadItemInput[], onProgress: (progress: PhotoUploadProgress) => void): Promise<PhotoUploadSaveResult | void> {
-    if (inputs.length === 0 || !data.trip) return;
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    // Uploader is the signed-in user — no name field needed in the upload flow.
-    // friendlyPersonName keeps the stored byline from being a raw email when
-    // the member never set a display name (reads are public).
-    const uploaderName = currentMember?.display_name || friendlyPersonName(user?.email) || "Friend";
-    let didSave = false;
-    const savedClientIds: string[] = [];
-    const failedClientIds: string[] = [];
-    let completedUploads = 0;
-    const markUploadComplete = () => {
-      completedUploads += 1;
-      onProgress({ completed: completedUploads, total: inputs.length });
-    };
-    try {
-      if (!backend) {
-        const rows = await Promise.all(inputs.map(async (input) => {
-          const prepared = await prepareMediaFiles(input.file);
-          const row = {
-            id: crypto.randomUUID(),
-            trip_id: data.trip!.id,
-            day_id: input.dayId,
-            user_id: user?.id ?? null,
-            uploader_name: uploaderName,
-            content_hash: input.contentHash,
-            media_type: input.mediaType,
-            // Demo mode has no Storage: preview straight from local blob URLs and
-            // leave the storage paths empty (never read in this branch).
-            image_path: "",
-            thumbnail_path: null,
-            image_url: URL.createObjectURL(prepared.imageFile),
-            thumbnail_url: prepared.thumbnailFile ? URL.createObjectURL(prepared.thumbnailFile) : null,
-            lat: input.coordinate.lat,
-            lng: input.coordinate.lng,
-            taken_at: input.exif?.takenAt ?? null,
-            caption: input.caption,
-            exif_found: input.exif?.exifFound ?? false,
-            created_at: new Date().toISOString(),
-          };
-          markUploadComplete();
-          return row;
-        }));
-        setData((current) => prependPhotos(current, rows));
-        savedClientIds.push(...inputs.map((input) => input.clientId));
-        didSave = true;
-      } else {
-        if (!user) {
-          setError("Sign in before uploading media.");
-          return;
-        }
-        const outcome = await uploadPhotoBatch({
-          backend,
-          trip: { id: data.trip.id, slug: data.trip.slug },
-          existingPhotos: data.photos,
-          uploaderName,
-          inputs,
-          concurrency: UPLOAD_CONCURRENCY,
-          onItemComplete: markUploadComplete,
-        });
-        savedClientIds.push(...outcome.savedClientIds);
-        failedClientIds.push(...outcome.failedClientIds);
-        if (outcome.insertErrorMessage) setError(outcome.insertErrorMessage);
-        if (outcome.inserted) {
-          // Patch the returned rows into local state instead of refetching
-          // every table; the realtime echo of this insert upserts by id, so
-          // the two paths converge instead of duplicating.
-          const resolved = resolvePhotoUrls(outcome.insertedRows);
-          const insertedIds = new Set(resolved.map((row) => row.id));
-          setData((current) => ({ ...current, photos: [...resolved, ...current.photos.filter((photo) => !insertedIds.has(photo.id))] }));
-          didSave = true;
-        }
-        if (outcome.failures.length > 0) {
-          setError(`${outcome.failures.length} media item${outcome.failures.length === 1 ? "" : "s"} failed to upload. ${outcome.failures.slice(0, 2).join(" ")}`);
-          didSave = false;
-        } else if (outcome.warnings.length > 0) {
-          setNotice(`${outcome.uploadedCount} media item${outcome.uploadedCount === 1 ? "" : "s"} uploaded. ${outcome.warnings.length} thumbnail${outcome.warnings.length === 1 ? "" : "s"} could not be created, but the originals are saved.`);
-        }
-      }
-      return { savedClientIds, failedClientIds };
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not upload photos.");
-      return { savedClientIds, failedClientIds: inputs.filter((input) => !savedClientIds.includes(input.clientId)).map((input) => input.clientId) };
-    } finally {
-      setSaving(false);
-      if (didSave) closePanel();
-    }
-  }
-
-  async function saveRoute(input: { name: string; dayId: string | null; mode: RouteMode }) {
-    if (routeDraftPoints.length < 2 || !data.trip) return;
-    if (backend && !isAdmin) {
-      setError("Only trip admins can save routes.");
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    let didSave = false;
-    try {
-      const geometry = routeGeometry(routeDraftPoints);
-      const row = {
-        trip_id: data.trip.id,
-        day_id: input.dayId,
-        name: input.name || "Manual route",
-        source: "manual",
-        mode: input.mode,
-        geometry_geojson: geometry,
-        distance_meters: routeDistanceMeters(routeDraftPoints),
-        elevation_gain_meters: null,
-      };
-
-      if (backend) {
-        if (!user) {
-          setError("Sign in before saving routes.");
-          return;
-        }
-        const { error: insertError } = await backend.from("route_segments").insert(row);
-        if (insertError) setError(insertError.message);
-        else {
-          await loadData();
-          didSave = true;
-        }
-      } else {
-        setData((current) => addRoute(current, { ...row, id: crypto.randomUUID(), created_at: new Date().toISOString() }));
-        didSave = true;
-      }
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save route.");
-    } finally {
-      setSaving(false);
-      if (didSave) closePanel();
-    }
-  }
-
-
   return (
-    <main className="relative h-dvh overflow-hidden bg-[#e7efe8] text-stone-950">
+    <main className="relative h-dvh overflow-hidden bg-mist text-stone-950">
       <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(135deg,rgba(255,253,246,0.92),rgba(211,229,222,0.5)_44%,rgba(234,198,132,0.26))]" />
-      <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 px-3 py-3 md:px-6">
-        <div className="pointer-events-auto flex max-w-[min(18rem,calc(100vw-11rem))] items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-sm font-black shadow-lg backdrop-blur sm:max-w-none">
-          <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#d0872f]" /> <span className="truncate">{tripTitle}</span>
-        </div>
+      <div inert={overlayOpen} className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] md:px-6">
+        <HeaderPill className="flex max-w-[min(18rem,calc(100vw-11rem))] items-center gap-2 text-sm font-black text-stone-950 sm:max-w-none">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-ember-500" /> <span className="truncate">{tripTitle}</span>
+        </HeaderPill>
         <div className="flex items-center gap-2">
-          <div className="pointer-events-auto hidden rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-4 py-2 text-xs font-semibold text-stone-700 shadow-lg backdrop-blur sm:block">{backend ? (user ? (currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only") : "Viewing as guest") : "Local demo mode"}</div>
-          <button
-            onClick={startJourney}
-            disabled={journeyItems.length === 0}
-            aria-label="Relive the journey"
-            className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Play className="h-3.5 w-3.5 fill-current text-[#d0872f]" /> <span className="hidden sm:inline">Relive</span>
-          </button>
+          <HeaderPill className="hidden sm:block">{backend ? (user ? (currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only") : "Viewing as guest") : "Local demo mode"}</HeaderPill>
+          <PillButton onClick={startJourney} disabled={journeyItems.length === 0} aria-label="Relive the journey">
+            <Play className="h-3.5 w-3.5 fill-current text-ember-500" /> <span className="hidden sm:inline">Relive</span>
+          </PillButton>
           {backend && user && currentMember && profilesAvailable ? (
-            <button onClick={() => setProfilePanelOpen(true)} aria-label="Edit your profile" className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] py-1 pl-1 pr-3 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">
+            <PillButton onClick={() => setProfilePanelOpen(true)} aria-label="Edit your profile" className="py-1 pl-1 pr-3">
               <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-stone-200">
                 {currentMember.avatar_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -757,14 +603,14 @@ export default function Home() {
                 )}
               </span>
               <span className="hidden sm:inline">Profile</span>
-            </button>
+            </PillButton>
           ) : null}
-          {backend && user ? <button onClick={signOut} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign out</button> : null}
-          {backend && !authLoading && !user ? <button onClick={() => setAuthPanelOpen(true)} className="pointer-events-auto rounded-full border border-stone-200/80 bg-[rgba(255,253,246,0.9)] px-3 py-2 text-xs font-bold text-stone-700 shadow-lg backdrop-blur transition hover:bg-white hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50 active:scale-[0.97]">Sign in</button> : null}
+          {backend && user ? <PillButton onClick={signOut}>Sign out</PillButton> : null}
+          {backend && !authLoading && !user ? <PillButton onClick={() => setAuthPanelOpen(true)}>Sign in</PillButton> : null}
         </div>
       </div>
-      <div className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
+      <div inert={overlayOpen} className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
+        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
             {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
@@ -773,11 +619,11 @@ export default function Home() {
           </MapView>
         </div>
       </div>
-      {!panel ? <MobileSheet trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /> : null}
-      {loading ? <StatusPill><Loader2 className="h-4 w-4 animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
+      {!panel ? <div inert={overlayOpen}><MobileSheet trip={data.trip} days={data.days} dayStats={dayStats} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.length, notes: filtered.notes.length, places: filtered.places.length }} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div> : null}
+      {loading ? <StatusPill><Loader2 className="h-4 w-4 motion-safe:animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
-      {backend && !authLoading && !user && authPanelOpen ? <AuthPanel message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
+      {backend && !authLoading && !user && authPanelOpen ? <AuthPanel tripTitle={data.trip?.title ?? null} message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} onSignIn={signIn} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
       {backend && user && currentMember && profilesAvailable && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
       {panel === "note" ? <AddNotePanel tripSlug={tripSlug} days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} existingPhotos={data.photos} tripSlug={tripSlug} mapAvailable={mapActionsEnabled} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}

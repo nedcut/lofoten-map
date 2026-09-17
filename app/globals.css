@@ -7,10 +7,27 @@
 @theme inline {
   --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-serif: ui-serif, Georgia, "Times New Roman", serif;
+
+  /* Brand palette — cream/teal/amber. Consolidated from ~40 hard-coded
+     hex/rgba sites across components and map-overrides.css. */
+  --color-paper: #fffdf6;
+  --color-paper-tint: #f7f1e7;
+  --color-ember-300: #f0ae4b;
+  --color-ember-400: #e7a13d;
+  --color-ember-500: #d0872f;
+  --color-ember-600: #b8761a;
+  --color-ember-700: #8a5414;
+  --color-fjord: #0f766e;
+  --color-mist: #e7efe8;
+
+  /* Two radii, two shadows: panels/cards/sheets vs. buttons/pills/inputs. */
+  --radius-panel: 1.35rem;
+  --radius-control: 0.5rem;
+  --shadow-panel: 0 24px 80px rgba(46, 61, 54, 0.22);
+  --shadow-control: 0 12px 30px rgba(46, 61, 54, 0.18);
 }
 
 :root {
-  --background: #e7efe8;
   --foreground: #1c1917;
 }
 
@@ -18,7 +35,7 @@
 html, body { height: 100%; }
 body {
   margin: 0;
-  background: #e7efe8;
+  background: var(--color-mist);
   color: var(--foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;

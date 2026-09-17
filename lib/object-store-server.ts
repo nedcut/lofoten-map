@@ -62,6 +62,18 @@ async function rpc(token: string, functionName: string, body: Record<string, unk
   return response.json();
 }
 
+// New photo uploads are content-addressed by lib/photo-upload.ts:
+//   <trip-slug>/<sha256 hex>.<ext>        original
+//   <trip-slug>/thumbs/<sha256 hex>.jpg   thumbnail
+// Presigning only these shapes keeps a member from parking arbitrary keys in
+// the trip's namespace. Legacy UUID keys still exist for old rows, but they
+// are only ever deleted, never re-uploaded, so they are not matched here.
+const CONTENT_ADDRESSED_PHOTO_PATH = /^[^/]+\/(thumbs\/[0-9a-f]{64}\.jpg|[0-9a-f]{64}\.[a-z0-9]{1,8})$/;
+
+export function isContentAddressedPhotoPath(path: string): boolean {
+  return CONTENT_ADDRESSED_PHOTO_PATH.test(path);
+}
+
 export async function authorizeObjectRequest(
   request: Request,
   namespace: ObjectNamespace,
@@ -73,7 +85,14 @@ export async function authorizeObjectRequest(
   const ownerSegment = path.split("/", 1)[0];
 
   if (namespace === PHOTO_BUCKET) {
-    return await rpc(token, "is_trip_member_by_slug", { check_trip_slug: ownerSegment }) === true;
+    if (operation === "upload") {
+      if (!isContentAddressedPhotoPath(path)) return false;
+      return await rpc(token, "is_trip_member_by_slug", { check_trip_slug: ownerSegment }) === true;
+    }
+    // Deletion is bound to the photo rows, not just trip membership, so a
+    // member cannot remove another member's files through this route. The RPC
+    // mirrors the photos DELETE policy; see neon/schema.sql.
+    return await rpc(token, "can_delete_photo_object", { check_trip_slug: ownerSegment, check_path: path }) === true;
   }
 
   if (await rpc(token, "current_user_id", {}) === ownerSegment) return true;

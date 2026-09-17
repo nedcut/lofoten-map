@@ -30,7 +30,9 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ url: await presignPut({ namespace, path, contentType, cacheControl, contentLength }) });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not prepare upload.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // S3 client errors can name the bucket, endpoint, or other keys. Keep the
+    // detail in the server log and return a generic message to the caller.
+    console.error("[storage/presign]", error);
+    return NextResponse.json({ error: "Could not prepare upload." }, { status: 500 });
   }
 }
