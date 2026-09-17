@@ -437,16 +437,25 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       const seen = new Set<string>();
       const canvas = activeMap.getCanvas();
       const zoom = activeMap.getZoom();
-      // Keep markers alive a little beyond the viewport so a pan reveals
-      // thumbnails that are already mounted instead of popping them in at
-      // the edge once the refresh catches up.
+      // queryRenderedFeatures only returns viewport features, so new markers
+      // cannot be created in this band. Already-mounted ones are kept so a
+      // pan reveals thumbnails that are already in the DOM instead of
+      // popping them in at the edge.
       const margin = 80;
       const bottomLimit = canvas.clientHeight - sheetInset() + margin;
+      const inKeepAliveArea = (projected: { x: number; y: number }) =>
+        projected.x >= -margin &&
+        projected.y >= -margin &&
+        projected.x <= canvas.clientWidth + margin &&
+        projected.y <= bottomLimit;
+      const setMarkerDepth = (entry: MarkerEntry, projected: { y: number }) => {
+        entry.element.style.setProperty("--marker-depth", String(Math.max(0, Math.round(projected.y))));
+      };
       for (const feature of features) {
         if (!feature.geometry || feature.geometry.type !== "Point") continue;
         const coordinates = feature.geometry.coordinates as [number, number];
         const projected = activeMap.project(coordinates);
-        if (projected.x < -margin || projected.y < -margin || projected.x > canvas.clientWidth + margin || projected.y > bottomLimit) continue;
+        if (!inKeepAliveArea(projected)) continue;
         const clusterId = Number(feature.properties?.cluster_id);
         const isCluster = Boolean(feature.properties?.cluster);
         const count = isCluster ? Number(feature.properties?.point_count) : 1;
@@ -460,11 +469,6 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         if (seen.has(key)) key = `cluster-${clusterId}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        // Stack markers by screen position so a thumbnail lower on the screen
-        // (nearer the viewer on the pitched map) overlaps the ones behind it,
-        // and the stacking stays stable as the map rotates or tilts.
-        const depth = Math.max(0, Math.round(projected.y));
-
         let entry = markers.get(key);
         if (!entry) {
           entry = createEntry(key, photo, coordinates);
@@ -476,7 +480,9 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         }
         entry.clusterId = clusterId;
         entry.coordinates = coordinates;
-        entry.element.style.zIndex = String(depth);
+        // Screen Y as a CSS variable so nearer thumbnails overlap ones behind
+        // without an inline z-index that would beat hover/focus.
+        setMarkerDepth(entry, projected);
         if (key !== draggingKey) {
           applyMarkerState(entry, isCluster, count, zoom);
           entry.marker.setLngLat(coordinates);
@@ -484,7 +490,18 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       }
 
       for (const [key, entry] of markers) {
-        if (seen.has(key) || key === draggingKey || entry.leaveTimer) continue;
+        if (seen.has(key) || key === draggingKey) continue;
+        const projected = activeMap.project(entry.coordinates);
+        if (inKeepAliveArea(projected)) {
+          if (entry.leaveTimer) {
+            window.clearTimeout(entry.leaveTimer);
+            entry.leaveTimer = 0;
+            entry.element.classList.remove("lofoten-photo-marker-leaving");
+          }
+          setMarkerDepth(entry, projected);
+          continue;
+        }
+        if (entry.leaveTimer) continue;
         entry.element.classList.add("lofoten-photo-marker-leaving");
         entry.leaveTimer = window.setTimeout(() => dropEntry(key, entry), LEAVE_MS);
       }
