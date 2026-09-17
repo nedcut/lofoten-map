@@ -12,6 +12,8 @@ export function useTripAuth(backend: BackendClient | null) {
   const [authMessageTone, setAuthMessageTone] = useState<AuthTone>("info");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authPanelOpen, setAuthPanelOpen] = useState(false);
+  // Email that has been sent a one-time code and is waiting for it to be entered.
+  const [pendingOtpEmail, setPendingOtpEmail] = useState<string | null>(null);
 
   useEffect(() => {
     if (!backend) return;
@@ -34,7 +36,10 @@ export function useTripAuth(backend: BackendClient | null) {
       setAuthLoading(false);
       setAuthMessage(null);
       setAuthMessageTone("info");
-      if (session?.user) setAuthPanelOpen(false);
+      if (session?.user) {
+        setAuthPanelOpen(false);
+        setPendingOtpEmail(null);
+      }
     });
     return () => {
       mounted = false;
@@ -48,12 +53,16 @@ export function useTripAuth(backend: BackendClient | null) {
     setAuthMessage(null);
     setAuthMessageTone("info");
     try {
-      const { error: signInError } = await backend.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: window.location.origin },
-      });
-      setAuthMessageTone(signInError ? "error" : "info");
-      setAuthMessage(signInError ? signInError.message : "Check your email for a sign-in link.");
+      // Neon Auth emails a 6-digit code (not a magic link); verifyCode finishes the sign-in.
+      const { error: signInError } = await backend.auth.signInWithOtp({ email });
+      if (signInError) {
+        setAuthMessageTone("error");
+        setAuthMessage(signInError.message);
+        return;
+      }
+      setPendingOtpEmail(email);
+      setAuthMessageTone("info");
+      setAuthMessage(`We emailed a 6-digit code to ${email}. Enter it below to sign in.`);
     } catch (signInError) {
       setAuthMessageTone("error");
       setAuthMessage(signInError instanceof Error ? signInError.message : "Could not start email sign-in.");
@@ -61,6 +70,35 @@ export function useTripAuth(backend: BackendClient | null) {
       setAuthSubmitting(false);
     }
   }, [backend]);
+
+  const verifyCode = useCallback(async (code: string) => {
+    if (!backend || !pendingOtpEmail) return;
+    setAuthSubmitting(true);
+    setAuthMessage(null);
+    setAuthMessageTone("info");
+    try {
+      const { data, error: verifyError } = await backend.auth.verifyOtp({ email: pendingOtpEmail, token: code.replace(/\s+/g, ""), type: "email" });
+      if (verifyError || !data.session) {
+        setAuthMessageTone("error");
+        setAuthMessage(verifyError?.message ?? "That code did not work. Check it and try again.");
+        return;
+      }
+      setUser(data.session.user);
+      setPendingOtpEmail(null);
+      setAuthPanelOpen(false);
+    } catch (verifyError) {
+      setAuthMessageTone("error");
+      setAuthMessage(verifyError instanceof Error ? verifyError.message : "Could not verify the code.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }, [backend, pendingOtpEmail]);
+
+  const cancelCodeEntry = useCallback(() => {
+    setPendingOtpEmail(null);
+    setAuthMessage(null);
+    setAuthMessageTone("info");
+  }, []);
 
   const signInWithGoogle = useCallback(async () => {
     if (!backend) return;
@@ -102,7 +140,10 @@ export function useTripAuth(backend: BackendClient | null) {
     authSubmitting,
     authPanelOpen,
     setAuthPanelOpen,
+    pendingOtpEmail,
     signIn,
+    verifyCode,
+    cancelCodeEntry,
     signInWithGoogle,
     signOut,
   };
