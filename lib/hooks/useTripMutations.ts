@@ -21,6 +21,7 @@ import {
   patchTrip,
   type DeletableTable,
 } from "@/lib/local-trip-store";
+import { backendPreviewWriteBlock } from "@/lib/preview-read-only";
 import { useStatusMessage } from "./useStatusMessage";
 
 interface Options {
@@ -61,6 +62,11 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
 
   const runAdminOperation = useCallback(
     async (operation: () => Promise<void>) => {
+      const blocked = backendPreviewWriteBlock(Boolean(backend));
+      if (blocked) {
+        reportError(blocked);
+        return;
+      }
       setSaving(true);
       reset();
       setGlobalError(null);
@@ -72,7 +78,7 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
         setSaving(false);
       }
     },
-    [setSaving, reset, setGlobalError, reportError],
+    [backend, setSaving, reset, setGlobalError, reportError],
   );
 
   const updateTrip = useCallback(

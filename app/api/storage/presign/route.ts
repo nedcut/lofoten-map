@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { authorizeObjectRequest, parseNamespace, presignPut, validObjectPath } from "@/lib/object-store-server";
+import { isPreviewReadOnly, PREVIEW_READ_ONLY_MESSAGE } from "@/lib/preview-read-only";
 
 const ALLOWED_CONTENT_TYPES = /^(image\/(jpeg|png|webp|heic|heif)|video\/(mp4|quicktime))$/i;
 const MAX_OBJECT_BYTES = 50 * 1024 * 1024;
 
 export async function POST(request: Request) {
   try {
+    if (isPreviewReadOnly()) {
+      return NextResponse.json({ error: PREVIEW_READ_ONLY_MESSAGE }, { status: 403 });
+    }
     const body = await request.json() as Record<string, unknown>;
     const namespace = parseNamespace(body.namespace);
     const path = body.path;
