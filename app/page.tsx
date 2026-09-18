@@ -17,6 +17,7 @@ import { EditItemPanel } from "@/components/EditItemPanel";
 import { deriveTripAccess } from "@/lib/access";
 import { dayColorFor, dayColorMap } from "@/lib/day-colors";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
+import { isPreviewReadOnly } from "@/lib/preview-read-only";
 import { useTripAuth } from "@/lib/hooks/useTripAuth";
 import { useTripData } from "@/lib/hooks/useTripData";
 import { useProfile } from "@/lib/hooks/useProfile";
@@ -148,10 +149,20 @@ export default function Home() {
   const overlayOpen = Boolean(authPanelOpen || profilePanelOpen || journeyOpen);
 
   const access = useMemo(
-    () => deriveTripAccess({ backendEnabled: Boolean(backend), userId: user?.id ?? null, members: data.members, adminRequests: data.adminRequests }),
+    () => deriveTripAccess({
+      backendEnabled: Boolean(backend),
+      userId: user?.id ?? null,
+      members: data.members,
+      adminRequests: data.adminRequests,
+      readOnly: isPreviewReadOnly(),
+    }),
     [backend, data.adminRequests, data.members, user?.id],
   );
   const { currentMember, currentUserId, canContribute, isAdmin } = access;
+  const previewReadOnly = Boolean(backend) && isPreviewReadOnly();
+  // Owner/admin map and journey edits key off this id; drop it in read-only
+  // preview so a signed-in member cannot drag, caption, or delete live data.
+  const mutationUserId = canContribute ? currentUserId : null;
 
   const selectDay = useCallback((dayId: string | null) => {
     // Switching days is a deliberate change of context, so any lingering
@@ -276,11 +287,11 @@ export default function Home() {
   // wires up for a map-popup click. Same owner-or-admin rule as the popup
   // controls: notes the viewer owns, places only for admins.
   const notesPlacesEntry = useMemo(() => ({
-    notes: isAdmin ? filtered.notes : filtered.notes.filter((note) => note.user_id === currentUserId),
+    notes: isAdmin ? filtered.notes : filtered.notes.filter((note) => note.user_id === mutationUserId),
     places: isAdmin ? filtered.places : [],
     onOpen: (kind: "note" | "place", id: string) => startEditFromMap(kind, id),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- startEditFromMap is a plain function (not memoized) redefined every render; omitted to avoid invalidating this memo on every render too.
-  }), [currentUserId, filtered.notes, filtered.places, isAdmin]);
+  }), [filtered.notes, filtered.places, isAdmin, mutationUserId]);
 
   // A photo only steers the journey start while its popup is open. Guarded so
   // closing a stale popup can't wipe focus from a newer one opened after it.
@@ -507,7 +518,8 @@ export default function Home() {
           <Sparkles className="h-3.5 w-3.5 shrink-0 text-ember-500" /> <span className="truncate">{tripTitle}</span>
         </HeaderPill>
         <div className="flex items-center gap-2">
-          {backend && user ? <HeaderPill className="hidden sm:block">{currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only"}</HeaderPill> : null}
+          {backend && user && !previewReadOnly ? <HeaderPill className="hidden sm:block">{currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only"}</HeaderPill> : null}
+          {previewReadOnly ? <HeaderPill className="hidden sm:block">Preview · view only</HeaderPill> : null}
           {!backend ? <HeaderPill className="hidden sm:block">Local demo mode</HeaderPill> : null}
           <PillButton onClick={startJourney} disabled={journeyItems.length === 0} aria-label="Relive the journey">
             <Play className="h-3.5 w-3.5 fill-current text-ember-500" /> <span className="hidden sm:inline">Relive</span>
@@ -515,7 +527,7 @@ export default function Home() {
           <PillButton onClick={shareView} aria-label={selectedDay ? `Share Day ${selectedDay.day_number}` : "Share this trip"} title="Copy a link to this view">
             <Share2 className="h-3.5 w-3.5 text-teal-700" /> <span className="hidden sm:inline">Share</span>
           </PillButton>
-          {backend && user && currentMember && profilesAvailable ? (
+          {backend && user && currentMember && profilesAvailable && canContribute ? (
             <PillButton onClick={() => setProfilePanelOpen(true)} aria-label="Edit your profile" className="py-1 pl-1 pr-3">
               <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-stone-200">
                 {currentMember.avatar_url ? (
@@ -532,7 +544,7 @@ export default function Home() {
           {backend && !authLoading && !user ? (
             // Viewing is open to everyone; the label says what signing in
             // is actually for instead of a separate "guest" status chip.
-            <PillButton onClick={() => setAuthPanelOpen(true)}>Sign in<span className="hidden sm:inline"> to add photos</span></PillButton>
+            <PillButton onClick={() => setAuthPanelOpen(true)}>Sign in{previewReadOnly ? "" : <span className="hidden sm:inline"> to add photos</span>}</PillButton>
           ) : null}
         </div>
       </div>
@@ -540,7 +552,7 @@ export default function Home() {
         <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
-            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} days={data.days} dayColors={dayColors} visibility={layerVisibility} currentUserId={currentUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
+            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} days={data.days} dayColors={dayColors} visibility={layerVisibility} currentUserId={mutationUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
             {!mapUnavailable ? <RouteDraftLayer map={map} points={routeDraftPoints} /> : null}
             {/* Which day the map is filtered to. Sits under the header on
                 phones (the map runs full-bleed there) and in the map's own
@@ -561,7 +573,7 @@ export default function Home() {
       {shareStatus && !error ? <StatusPill>{shareStatus === "copied" ? "Link copied" : shareStatus === "shared" ? "Link shared" : "Couldn’t copy the link"}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
       {backend && !authLoading && !user && authPanelOpen ? <AuthPanel tripTitle={data.trip?.title ?? null} message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} pendingOtpEmail={pendingOtpEmail} onSignIn={signIn} onVerifyCode={verifyCode} onCancelCodeEntry={cancelCodeEntry} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
-      {backend && user && currentMember && profilesAvailable && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
+      {backend && user && currentMember && profilesAvailable && canContribute && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
       {panel === "note" ? <AddNotePanel tripSlug={tripSlug} days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} existingPhotos={data.photos} tripSlug={tripSlug} mapAvailable={mapActionsEnabled} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
@@ -577,7 +589,7 @@ export default function Home() {
           routes={data.routeSegments}
           filter={journeyFilter}
           uploaderFilter={journeyUploaderFilter}
-          currentUserId={currentUserId}
+          currentUserId={mutationUserId}
           isAdmin={isAdmin}
           isSaving={adminStatus.isSaving}
           onFilterChange={setJourneyFilter}

@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { authorizeObjectRequest, parseNamespace, removeObjects, validObjectPath } from "@/lib/object-store-server";
 import { isMissingSchemaObjectError } from "@/lib/schema-errors";
+import { isPreviewReadOnly, PREVIEW_READ_ONLY_MESSAGE } from "@/lib/preview-read-only";
 
 const DELETE_RPC = "can_delete_photo_object";
 const DELETE_RPC_PATCH = "neon/patches/2026-09-07-can-delete-photo-object.sql";
 
 export async function POST(request: Request) {
   try {
+    if (isPreviewReadOnly()) {
+      return NextResponse.json({ error: PREVIEW_READ_ONLY_MESSAGE }, { status: 403 });
+    }
     const body = await request.json() as Record<string, unknown>;
     const namespace = parseNamespace(body.namespace);
     const paths = body.paths;
