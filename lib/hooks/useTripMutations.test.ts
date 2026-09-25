@@ -62,6 +62,7 @@ function renderMutations(backend: BackendClient | null, initial: TripData = demo
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("useTripMutations", () => {
@@ -87,6 +88,22 @@ describe("useTripMutations", () => {
       expect(setGlobalError).not.toHaveBeenCalledWith(expect.any(String));
       // In backend mode local state is refreshed by loadData, not patched.
       expect(result.current.data).toBe(demoTripData);
+    });
+
+    it("refuses shared-backend writes on a Vercel preview", async () => {
+      vi.stubEnv("VERCEL_ENV", "preview");
+      const { backend, calls } = createFakeBackend();
+      const { result, loadData, setGlobalError } = renderMutations(backend);
+
+      await act(async () => {
+        await result.current.mutations.updateNote(noteId, input);
+      });
+
+      expect(calls).toEqual([]);
+      expect(loadData).not.toHaveBeenCalled();
+      expect(setGlobalError).toHaveBeenLastCalledWith(
+        "This preview is view-only. Open the live app to add or edit trip data.",
+      );
     });
 
     it("surfaces a backend error and leaves local state untouched", async () => {

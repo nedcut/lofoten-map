@@ -10,6 +10,7 @@ import { prepareMediaFiles } from "@/lib/media-processing";
 import { resolvePhotoUrls } from "@/lib/object-store";
 import { clearNoteDraft } from "@/lib/offline-drafts";
 import { uploadPhotoBatch } from "@/lib/photo-upload";
+import { backendPreviewWriteBlock } from "@/lib/preview-read-only";
 import type { LngLat, RouteMode, TripData, TripMember } from "@/types/trip";
 import type { PhotoUploadItemInput, PhotoUploadProgress, PhotoUploadSaveResult } from "@/components/UploadPhotoPanel";
 
@@ -60,6 +61,11 @@ export function useTripCreation({
 
   const saveNote = useCallback(async (input: { body: string; authorName: string; dayId: string | null }) => {
     if (!pendingCoordinate || !input.body || !data.trip) return;
+    const blocked = backendPreviewWriteBlock(Boolean(backend));
+    if (blocked) {
+      setError(blocked);
+      return;
+    }
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -97,6 +103,11 @@ export function useTripCreation({
     onProgress: (progress: PhotoUploadProgress) => void,
   ): Promise<PhotoUploadSaveResult | void> => {
     if (inputs.length === 0 || !data.trip) return;
+    const blocked = backendPreviewWriteBlock(Boolean(backend));
+    if (blocked) {
+      setError(blocked);
+      return { savedClientIds: [], failedClientIds: inputs.map((input) => input.clientId) };
+    }
     const trip = data.trip;
     setSaving(true);
     setError(null);
@@ -189,6 +200,11 @@ export function useTripCreation({
 
   const saveRoute = useCallback(async (input: { name: string; dayId: string | null; mode: RouteMode }) => {
     if (routeDraftPoints.length < 2 || !data.trip) return;
+    const blocked = backendPreviewWriteBlock(Boolean(backend));
+    if (blocked) {
+      setError(blocked);
+      return;
+    }
     if (backend && !isAdmin) {
       setError("Only trip admins can save routes.");
       return;

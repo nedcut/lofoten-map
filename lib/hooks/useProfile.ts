@@ -5,6 +5,7 @@ import type { BackendClient, BackendUser } from "@/lib/backend";
 import type { Trip, TripMember } from "@/types/trip";
 import { prepareAvatarFile } from "@/lib/avatar-processing";
 import { AVATAR_BUCKET, deleteObjects, IMMUTABLE_CACHE_SECONDS, uploadObject } from "@/lib/object-store";
+import { backendPreviewWriteBlock } from "@/lib/preview-read-only";
 
 interface Options {
   backend: BackendClient | null;
@@ -35,6 +36,11 @@ export function useProfile({ backend, user, currentMember, trip, loadData, onErr
   const saveProfile = useCallback(
     async (input: { displayName: string; avatarFile: File | null; removeAvatar: boolean }) => {
       if (!backend || !trip || !user) return;
+      const blocked = backendPreviewWriteBlock(true);
+      if (blocked) {
+        onError(blocked);
+        return;
+      }
       setIsSaving(true);
       try {
         // Default to whatever avatar the member already has; only the two write

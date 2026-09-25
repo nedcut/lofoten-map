@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -36,6 +36,10 @@ beforeEach(() => {
   mocks.removeObjects.mockReset().mockResolvedValue(undefined);
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("POST /api/storage/delete", () => {
   it.each([
     ["bad namespace", { namespace: "secrets", paths }],
@@ -47,6 +51,17 @@ describe("POST /api/storage/delete", () => {
     const response = await post(body);
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Invalid storage delete request." });
+    expect(mocks.authorizeObjectRequest).not.toHaveBeenCalled();
+    expect(mocks.removeObjects).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 on Vercel preview deployments without calling storage", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const response = await post({ namespace: "trip-photos", paths });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: "This preview is view-only. Open the live app to add or edit trip data.",
+    });
     expect(mocks.authorizeObjectRequest).not.toHaveBeenCalled();
     expect(mocks.removeObjects).not.toHaveBeenCalled();
   });
