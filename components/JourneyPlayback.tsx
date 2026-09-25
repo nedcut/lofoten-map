@@ -334,20 +334,37 @@ export function JourneyPlayback({
 
   // Warm the browser cache for the neighbouring photos so next/prev swaps in an
   // already-decoded image instead of stalling on a fresh full-size download.
+  // Downloads survive a step while their photo is still in the window (the
+  // active one included), so stepping forward doesn't abort and restart the
+  // photo two ahead that is now one ahead.
+  const preloadsRef = useRef(new Map<string, HTMLImageElement>());
   useEffect(() => {
-    const urls = [1, -1, 2]
+    const urls = new Set([0, 1, -1, 2]
       .map((offset) => items[activeIndex + offset])
       .filter((item) => item?.kind === "photo" && item.primary.media_type !== "video")
       .map((item) => (item as Extract<JourneyItem, { kind: "photo" }>).primary.image_url)
-      .filter((url): url is string => Boolean(url));
-    const preloaded = urls.map((url) => {
+      .filter((url): url is string => Boolean(url)));
+    const preloads = preloadsRef.current;
+    for (const [url, img] of preloads) {
+      if (urls.has(url)) continue;
+      img.src = "";
+      preloads.delete(url);
+    }
+    for (const url of urls) {
+      if (preloads.has(url)) continue;
       const img = new window.Image();
       img.decoding = "async";
       img.src = url;
-      return img;
-    });
-    return () => { preloaded.forEach((img) => { img.src = ""; }); };
+      preloads.set(url, img);
+    }
   }, [activeIndex, items]);
+  useEffect(() => {
+    const preloads = preloadsRef.current;
+    return () => {
+      preloads.forEach((img) => { img.src = ""; });
+      preloads.clear();
+    };
+  }, []);
 
   // The bottom bar's height depends on the caption and attached notes, so the
   // media area reads it from a CSS variable instead of guessing with a fixed

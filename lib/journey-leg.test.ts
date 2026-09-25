@@ -34,6 +34,19 @@ describe("legBetween", () => {
     expect(legBetween({ lng: 13, lat: 67.9 }, null, [trail])).toBeNull();
   });
 
+  it("still snaps endpoints that sit just outside a route's bounding box", () => {
+    // A due-east trail: its bounding box has zero height, so any offset
+    // north (or past its west end) falls outside the box itself.
+    const east = route([[13.0, 67.9], [13.05, 67.9]]);
+    const kmPerLngDegree = 111.195 * Math.cos((67.9 * Math.PI) / 180);
+    const westOfStart = { lng: 13.0 - 0.24 / kmPerLngDegree, lat: 67.9 };
+    const northOfMiddle = { lng: 13.025, lat: 67.9 + 0.24 / 111.195 };
+    expect(legBetween(westOfStart, northOfMiddle, [east])?.onRoute).toBe(true);
+    // Beyond the snap threshold the trail is ignored, as before.
+    const farNorth = { lng: 13.025, lat: 67.9 + 0.3 / 111.195 };
+    expect(legBetween(westOfStart, farNorth, [east])?.onRoute).toBe(false);
+  });
+
   it("returns null when the endpoints are effectively the same place", () => {
     const here = { lng: 13.0, lat: 67.9 };
     expect(legBetween(here, { lng: 13.0, lat: 67.90001 }, [trail])).toBeNull();

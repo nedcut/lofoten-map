@@ -31,6 +31,34 @@ function routeLine(route: RouteSegment): Feature<LineString> {
   return { type: "Feature", geometry, properties: {} };
 }
 
+// [minLng, minLat, maxLng, maxLat] per route geometry, computed once. Rows
+// are replaced (not mutated) on edit, so the geometry object is a stable key.
+const routeBounds = new WeakMap<LineString, [number, number, number, number]>();
+
+function boundsOf(geometry: LineString) {
+  let bounds = routeBounds.get(geometry);
+  if (!bounds) {
+    bounds = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const [lng, lat] of geometry.coordinates) {
+      if (lng < bounds[0]) bounds[0] = lng;
+      if (lat < bounds[1]) bounds[1] = lat;
+      if (lng > bounds[2]) bounds[2] = lng;
+      if (lat > bounds[3]) bounds[3] = lat;
+    }
+    routeBounds.set(geometry, bounds);
+  }
+  return bounds;
+}
+
+// Whether `point` lies within `km` of the box. Degrees are converted with a
+// generous margin so the check can only ever keep a route it could skip,
+// never skip one nearestPointOnLine would accept.
+function nearBounds(point: LngLat, [minLng, minLat, maxLng, maxLat]: [number, number, number, number], km: number) {
+  const latMargin = (km / 110) * 1.1;
+  const lngMargin = latMargin / Math.max(Math.cos((Math.min(89, Math.abs(point.lat) + latMargin) * Math.PI) / 180), 0.01);
+  return point.lng >= minLng - lngMargin && point.lng <= maxLng + lngMargin && point.lat >= minLat - latMargin && point.lat <= maxLat + latMargin;
+}
+
 function lineOf(coordinates: Position[]): Feature<LineString> {
   return { type: "Feature", geometry: { type: "LineString", coordinates }, properties: {} };
 }
@@ -50,6 +78,10 @@ export function legBetween(prev: LngLat | null, next: LngLat | null, routes: Rou
   for (const route of routes) {
     const line = routeLine(route);
     if (line.geometry.coordinates.length < 2) continue;
+    // nearestPointOnLine walks every segment of a (often multi-thousand-point
+    // GPX) track; skip routes that cannot come within the snap threshold.
+    const bounds = boundsOf(line.geometry);
+    if (!nearBounds(prev, bounds, SNAP_THRESHOLD_KM) || !nearBounds(next, bounds, SNAP_THRESHOLD_KM)) continue;
     const snapStart = nearestPointOnLine(line, start, { units: "kilometers" });
     const snapEnd = nearestPointOnLine(line, end, { units: "kilometers" });
     const startDist = snapStart.properties.dist ?? Number.POSITIVE_INFINITY;
