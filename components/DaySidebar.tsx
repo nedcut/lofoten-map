@@ -1,8 +1,9 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, MapPin, Mountain, PenLine, Play, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { AdminDataPanel, type AdminDataProps } from "@/components/AdminDataPanel";
+import type { AdminDataProps } from "@/components/AdminDataPanel";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
 import { Button } from "@/components/ui/Button";
 import { InlineMessage } from "@/components/ui/InlineMessage";
@@ -13,6 +14,8 @@ import { cn, formatDateOnly } from "@/lib/utils";
 import type { AdminRequest, AdminRequestStatus, Day, Note, Photo, Place, Trip, TripMember } from "@/types/trip";
 
 export type LayerVisibility = { photos: boolean; notes: boolean; routes: boolean };
+
+const AdminDataPanel = dynamic(() => import("@/components/AdminDataPanel").then((mod) => mod.AdminDataPanel));
 
 // Per-day totals shown on the day cards so picking a day is informed: how much
 // media it holds, how many journal pins, and how far its routes run.
