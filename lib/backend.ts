@@ -43,6 +43,11 @@ export function getBackendBrowserClient(): BackendClient | null {
     return browserClient;
   }
 
-  browserClient = createNeonBrowserClient(authUrl, dataApiUrl);
+  // Preview reads stay on this origin because Neon intermittently omits CORS
+  // headers for preview origins. The route only forwards GETs for trip tables.
+  const readUrl = typeof window !== "undefined" && process.env.NEXT_PUBLIC_VERCEL_ENV === "preview"
+    ? new URL("/api/preview-data", window.location.origin).toString()
+    : dataApiUrl;
+  browserClient = createNeonBrowserClient(authUrl, readUrl);
   return browserClient;
 }

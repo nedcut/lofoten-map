@@ -65,9 +65,9 @@ popups, upload flow, and administrative tools remain touch-friendly.
   short-lived presigned R2 URLs from authenticated Next.js API routes; R2
   credentials never reach the browser.
 - **Vercel preview:** when those shared-mode endpoints are set, preview deploys
-  load the live trip but stay view-only. Editing, uploads, and storage writes
-  are blocked so a preview cannot change production. Vercel sets `VERCEL_ENV`
-  (and `NEXT_PUBLIC_VERCEL_ENV`) to `preview` automatically.
+  load the live trip through a same-origin, GET-only route and stay view-only.
+  The app blocks editing, uploads, and storage writes on previews. Vercel sets
+  `VERCEL_ENV` (and `NEXT_PUBLIC_VERCEL_ENV`) to `preview` automatically.
 
 ## Tech stack
 
