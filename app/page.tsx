@@ -287,7 +287,8 @@ export default function Home() {
   // wires up for a map-popup click. Same owner-or-admin rule as the popup
   // controls: notes the viewer owns, places only for admins.
   const notesPlacesEntry = useMemo(() => ({
-    notes: isAdmin ? filtered.notes : filtered.notes.filter((note) => note.user_id === mutationUserId),
+    // A null id would otherwise match every ownerless note.
+    notes: isAdmin ? filtered.notes : mutationUserId ? filtered.notes.filter((note) => note.user_id === mutationUserId) : [],
     places: isAdmin ? filtered.places : [],
     onOpen: (kind: "note" | "place", id: string) => startEditFromMap(kind, id),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- startEditFromMap is a plain function (not memoized) redefined every render; omitted to avoid invalidating this memo on every render too.
@@ -578,7 +579,8 @@ export default function Home() {
       {panel === "note" ? <AddNotePanel tripSlug={tripSlug} days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} existingPhotos={data.photos} tripSlug={tripSlug} mapAvailable={mapActionsEnabled} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
-      {editTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminStatus.isSaving} onClose={closeEditItem} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
+      {/* ?item= links restore the editor for anyone; only open it for viewers who can save. */}
+      {editTarget && canContribute ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminStatus.isSaving} onClose={closeEditItem} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
       {journeyOpen ? (
         <JourneyPlayback
           trip={data.trip}
