@@ -541,10 +541,11 @@ export default function Home() {
             </PillButton>
           ) : null}
           {backend && user ? <PillButton onClick={signOut}>Sign out</PillButton> : null}
-          {backend && !authLoading && !user ? (
+          {backend && !authLoading && !user && !previewReadOnly ? (
             // Viewing is open to everyone; the label says what signing in
             // is actually for instead of a separate "guest" status chip.
-            <PillButton onClick={() => setAuthPanelOpen(true)}>Sign in{previewReadOnly ? "" : <span className="hidden sm:inline"> to add photos</span>}</PillButton>
+            // Previews hide it: signing in there can't unlock any edits.
+            <PillButton onClick={() => setAuthPanelOpen(true)}>Sign in<span className="hidden sm:inline"> to add photos</span></PillButton>
           ) : null}
         </div>
       </div>

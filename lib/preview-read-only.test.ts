@@ -7,6 +7,9 @@ afterEach(() => {
 
 describe("isPreviewReadOnly", () => {
   it("is off in local and production environments", () => {
+    // Clear both so a shell that already has VERCEL_ENV=preview can't leak in.
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("NEXT_PUBLIC_VERCEL_ENV", "");
     expect(isPreviewReadOnly()).toBe(false);
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("NEXT_PUBLIC_VERCEL_ENV", "production");

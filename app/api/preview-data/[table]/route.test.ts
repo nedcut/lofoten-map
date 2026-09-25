@@ -40,6 +40,8 @@ describe("GET /api/preview-data/[table]", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     vi.stubEnv("NEXT_PUBLIC_NEON_DATA_API_URL", "https://data.example.test/neondb/rest/v1");
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("NEXT_PUBLIC_VERCEL_ENV", "");
 
     expect((await get()).status).toBe(404);
     vi.stubEnv("VERCEL_ENV", "preview");
