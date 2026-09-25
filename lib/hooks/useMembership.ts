@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import type { BackendClient } from "@/lib/backend";
 import type { Trip } from "@/types/trip";
+import { backendPreviewWriteBlock } from "@/lib/preview-read-only";
 import { useStatusMessage } from "./useStatusMessage";
 
 type MemberRole = "admin" | "member";
@@ -27,6 +28,11 @@ export function useMembership({ backend, trip, loadData }: Options) {
   const runMemberOperation = useCallback(
     async (operation: () => PromiseLike<{ error: { message: string } | null }>, successMessage: string) => {
       if (!backend || !trip) return;
+      const blocked = backendPreviewWriteBlock(true);
+      if (blocked) {
+        setError(blocked);
+        return;
+      }
       setSaving(true);
       reset();
       try {

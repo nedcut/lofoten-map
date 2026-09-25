@@ -97,6 +97,34 @@ describe("deriveTripAccess", () => {
     expect(access.currentUserAdminRequest?.id).toBe("new");
   });
 
+  it("keeps demo mode editable even when a preview read-only flag is set", () => {
+    const access = deriveTripAccess({
+      backendEnabled: false,
+      userId: null,
+      members: [],
+      adminRequests: [],
+      readOnly: true,
+    });
+    expect(access.canContribute).toBe(true);
+    expect(access.isAdmin).toBe(true);
+  });
+
+  it("hides member and admin writes on a shared-backend preview", () => {
+    const current = member({ user_id: "admin-1", role: "admin" });
+    const access = deriveTripAccess({
+      backendEnabled: true,
+      userId: "admin-1",
+      members: [current],
+      adminRequests: [request({ user_id: "user-1" })],
+      readOnly: true,
+    });
+    expect(access.currentMember).toBe(current);
+    expect(access.canContribute).toBe(false);
+    expect(access.isAdmin).toBe(false);
+    expect(access.showMemberAdminControls).toBe(false);
+    expect(access.showAdminRequestControls).toBe(false);
+  });
+
   it("returns pending admin requests newest first for admin review", () => {
     const access = deriveTripAccess({
       backendEnabled: true,

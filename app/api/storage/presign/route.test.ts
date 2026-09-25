@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -42,6 +42,10 @@ beforeEach(() => {
   mocks.presignPut.mockReset().mockResolvedValue("https://r2.example/signed");
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("POST /api/storage/presign", () => {
   it.each([
     ["bad namespace", { namespace: "secrets" }],
@@ -64,6 +68,17 @@ describe("POST /api/storage/presign", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Invalid cache policy." });
     expect(mocks.authorizeObjectRequest).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 on Vercel preview deployments without calling storage", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const response = await post(validBody);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: "This preview is view-only. Open the live app to add or edit trip data.",
+    });
+    expect(mocks.authorizeObjectRequest).not.toHaveBeenCalled();
+    expect(mocks.presignPut).not.toHaveBeenCalled();
   });
 
   it("returns 403 when the caller is not authorized", async () => {
