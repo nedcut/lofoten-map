@@ -18,6 +18,7 @@ import { deriveTripAccess } from "@/lib/access";
 import { dayColorFor, dayColorMap } from "@/lib/day-colors";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
 import { isPreviewReadOnly } from "@/lib/preview-read-only";
+import { useBackendClient } from "@/lib/hooks/useBackendClient";
 import { useTripAuth } from "@/lib/hooks/useTripAuth";
 import { useTripData } from "@/lib/hooks/useTripData";
 import { useProfile } from "@/lib/hooks/useProfile";
@@ -28,7 +29,6 @@ import { useJourneyState } from "@/lib/hooks/useJourneyState";
 import { useTripUrlState } from "@/lib/hooks/useTripUrlState";
 import { buildJourneyItems } from "@/lib/journey";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
-import { getBackendBrowserClient } from "@/lib/backend";
 import { shareJourneyLink, type ShareResult } from "@/lib/share";
 import { deriveDayStats, deriveOutlierOverlay, filterTripItemsByDay, resolveEditTarget } from "@/lib/trip-view-model";
 import { cn, formatDateOnly } from "@/lib/utils";
@@ -56,7 +56,9 @@ function mapFramingPadding() {
 }
 
 export default function Home() {
-  const backend = useMemo(() => getBackendBrowserClient(), []);
+  // The Neon SDK loads after hydration. `backendConfigured` (known on the first
+  // render) decides live vs. demo mode; `backend` is null until the SDK arrives.
+  const { backend, configured: backendConfigured, loadError: backendLoadError } = useBackendClient();
   const tripSlug = process.env.NEXT_PUBLIC_TRIP_SLUG ?? "lofoten-2026";
   const {
     user,
@@ -72,7 +74,7 @@ export default function Home() {
     cancelCodeEntry,
     signInWithGoogle,
     signOut,
-  } = useTripAuth(backend);
+  } = useTripAuth(backend, backendConfigured);
   const {
     data,
     setData,
@@ -86,10 +88,11 @@ export default function Home() {
     profilesAvailable,
   } = useTripData({
     backend,
+    backendConfigured,
     user,
     authLoading,
     tripSlug,
-    initialData: backend ? emptyTripData : demoTripData,
+    initialData: backendConfigured ? emptyTripData : demoTripData,
   });
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const [layerVisibility, setLayerVisibility] = useState({ photos: true, notes: true, routes: true });
@@ -150,16 +153,16 @@ export default function Home() {
 
   const access = useMemo(
     () => deriveTripAccess({
-      backendEnabled: Boolean(backend),
+      backendEnabled: backendConfigured,
       userId: user?.id ?? null,
       members: data.members,
       adminRequests: data.adminRequests,
       readOnly: isPreviewReadOnly(),
     }),
-    [backend, data.adminRequests, data.members, user?.id],
+    [backendConfigured, data.adminRequests, data.members, user?.id],
   );
   const { currentMember, currentUserId, canContribute, isAdmin } = access;
-  const previewReadOnly = Boolean(backend) && isPreviewReadOnly();
+  const previewReadOnly = backendConfigured && isPreviewReadOnly();
   // Owner/admin map and journey edits key off this id; drop it in read-only
   // preview so a signed-in member cannot drag, caption, or delete live data.
   const mutationUserId = canContribute ? currentUserId : null;
@@ -521,7 +524,7 @@ export default function Home() {
         <div className="flex items-center gap-2">
           {backend && user && !previewReadOnly ? <HeaderPill className="hidden sm:block">{currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only"}</HeaderPill> : null}
           {previewReadOnly ? <HeaderPill className="hidden sm:block">Preview · view only</HeaderPill> : null}
-          {!backend ? <HeaderPill className="hidden sm:block">Local demo mode</HeaderPill> : null}
+          {!backendConfigured ? <HeaderPill className="hidden sm:block">Local demo mode</HeaderPill> : null}
           <PillButton onClick={startJourney} disabled={journeyItems.length === 0} aria-label="Relive the journey">
             <Play className="h-3.5 w-3.5 fill-current text-ember-500" /> <span className="hidden sm:inline">Relive</span>
           </PillButton>
@@ -570,10 +573,11 @@ export default function Home() {
         </div>
       </div>
       {!panel ? <div inert={overlayOpen}><MobileSheet trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.filter((photo) => photo.media_type !== "video").length, videos: filtered.photos.filter((photo) => photo.media_type === "video").length, notes: filtered.notes.length, places: filtered.places.length }} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div> : null}
-      {loading ? <StatusPill><Loader2 className="h-4 w-4 motion-safe:animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
+      {loading && !backendLoadError ? <StatusPill><Loader2 className="h-4 w-4 motion-safe:animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {shareStatus && !error ? <StatusPill>{shareStatus === "copied" ? "Link copied" : shareStatus === "shared" ? "Link shared" : "Couldn’t copy the link"}</StatusPill> : null}
       {error ? <StatusPill tone="error" onDismiss={() => setError(null)}><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {error}</StatusPill> : null}
+      {backendLoadError && !error ? <StatusPill tone="error"><AlertCircle className="h-4 w-4 shrink-0 text-rose-600" /> {backendLoadError}</StatusPill> : null}
       {backend && !authLoading && !user && authPanelOpen ? <AuthPanel tripTitle={data.trip?.title ?? null} message={authMessage} messageTone={authMessageTone} isSubmitting={authSubmitting} pendingOtpEmail={pendingOtpEmail} onSignIn={signIn} onVerifyCode={verifyCode} onCancelCodeEntry={cancelCodeEntry} onSignInWithGoogle={signInWithGoogle} onClose={() => setAuthPanelOpen(false)} /> : null}
       {backend && user && currentMember && profilesAvailable && canContribute && profilePanelOpen ? <ProfilePanel displayName={currentMember.display_name} avatarUrl={currentMember.avatar_url} email={user.email ?? null} isSaving={profileSaving} onClose={() => setProfilePanelOpen(false)} onSave={saveProfile} /> : null}
       {panel === "note" ? <AddNotePanel tripSlug={tripSlug} days={data.days} selectedCoordinate={pendingCoordinate} defaultDayId={selectedDayId} isSaving={saving} onCancel={closePanel} onSave={saveNote} /> : null}

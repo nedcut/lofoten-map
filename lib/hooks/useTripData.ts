@@ -11,15 +11,18 @@ const POLL_INTERVAL_MS = 30_000;
 
 type Options = {
   backend: BackendClient | null;
+  // True when a client is configured but may still be loading; the trip is
+  // "loading" from the first render instead of flashing an empty state.
+  backendConfigured?: boolean;
   user: BackendUser | null;
   authLoading: boolean;
   tripSlug: string;
   initialData: TripData;
 };
 
-export function useTripData({ backend, user, authLoading, tripSlug, initialData }: Options) {
+export function useTripData({ backend, backendConfigured = Boolean(backend), user, authLoading, tripSlug, initialData }: Options) {
   const [data, setData] = useState<TripData>(initialData);
-  const [loading, setLoading] = useState(Boolean(backend));
+  const [loading, setLoading] = useState(Boolean(backend) || backendConfigured);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [adminRequestsAvailable, setAdminRequestsAvailable] = useState(true);

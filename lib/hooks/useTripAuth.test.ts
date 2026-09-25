@@ -93,3 +93,18 @@ describe("useTripAuth email code sign-in", () => {
     expect(result.current.authMessage).toBeNull();
   });
 });
+
+describe("useTripAuth while the client is still loading", () => {
+  it("stays loading until the lazily-loaded client restores the session", async () => {
+    const backend = fakeBackend();
+    const view = renderHook(({ client }) => useTripAuth(client, true), {
+      initialProps: { client: null as BackendClient | null },
+    });
+    // Signed-out controls key off !authLoading, so they must not flash here.
+    expect(view.result.current.authLoading).toBe(true);
+
+    view.rerender({ client: backend });
+    await waitFor(() => expect(view.result.current.authLoading).toBe(false));
+    expect(backend.auth.getSession).toHaveBeenCalledTimes(1);
+  });
+});
