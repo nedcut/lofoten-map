@@ -5,11 +5,11 @@ account; invited members can sign in to add geotagged photos and notes, and
 admins can maintain the itinerary, routes, places, and membership.
 
 <p>
-  <a href="https://lofoten-map-kappa.vercel.app"><strong>▶ Live app</strong></a>
+  <a href="https://lofoten-logbook.vercel.app"><strong>▶ Live app</strong></a>
   &nbsp;·&nbsp; public reading requires no login
 </p>
 
-![Lofoten Logbook — interactive trip map with itinerary sidebar, route line, and photo markers](docs/images/screenshot.png)
+![Lofoten Logbook — trip map showing one day's hiking route, photo markers, and the itinerary sidebar](docs/images/screenshot.png)
 
 <p>
   <img alt="Next.js" src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white">
@@ -34,6 +34,11 @@ admins can maintain the itinerary, routes, places, and membership.
 - **Database-enforced authorization.** Neon Postgres RLS implements public
   reads, member contributions, and owner-or-admin writes. Signing in alone does
   not grant edit access.
+- **Duplicate and outlier checks.** Re-uploads are caught by content hash and
+  by capture time and place. Admins can review photos whose position disagrees
+  with shots taken around the same time and move them back to that group.
+- **Route import.** Admins can import GPX tracks, which are simplified before
+  they are stored as day routes.
 - **Low-churn collaboration.** Visible tabs refresh Neon data every 30 seconds
   and immediately after local mutations. This replaces the previous Realtime
   subscription while keeping the UI current without a permanent connection.
@@ -42,16 +47,21 @@ admins can maintain the itinerary, routes, places, and membership.
 
 ## Product tour
 
-**Journey mode** steps through a day's media full-screen while a minimap tracks
-each shot along the route.
+Each day gets its own color on the map, in the sidebar, and on the Journey
+timeline. Selecting a day zooms to its routes and photos, and the URL updates so
+any day, photo, or note can be shared as a link.
 
-![Journey mode — full-screen photo playback with a live minimap tracking the route](docs/images/journey-mode.gif)
+**Journey mode** (the "Relive" button) steps through the trip's photos and
+videos full-screen. A minimap tracks each shot along the route, and the
+timeline can jump straight to any day.
 
-The responsive desktop sidebar becomes a mobile bottom sheet, and the map,
-popups, upload flow, and administrative tools remain touch-friendly.
+![Journey mode — full-screen photo playback with a day timeline and a minimap tracking the route](docs/images/journey-mode.gif)
+
+On phones the sidebar becomes a bottom sheet for switching days and starting
+Journey mode. The map, popups, upload flow, and admin tools stay touch-friendly.
 
 <p align="center">
-  <img alt="Mobile view with the itinerary bottom sheet and photo markers" src="docs/images/mobile.png" width="300">
+  <img alt="Mobile view of Day 2 with color-coded routes, photo markers, and the day bottom sheet" src="docs/images/mobile.png" width="300">
 </p>
 
 ## Runtime modes
@@ -133,9 +143,11 @@ lib/backend.ts        Neon Auth + Data API browser client
 lib/object-store*.ts  public R2 URLs, presigned uploads, and guarded deletion
 lib/hooks/            auth, data loading, 30-second polling, and mutations
 cloudflare/           media-worker: Cloudflare Worker serving public R2 objects with CORS and path validation
-neon/                 target schema plus export/import/verification runbook
-supabase/              historical source schema and rollback artifact
-types/                 shared trip data types
+neon/                 target schema, patches, and export/import/verification runbook
+scripts/              one-off maintenance: R2 migration, photo dedupe, orphan purge
+e2e/                  Playwright specs run against demo mode
+supabase/             historical source schema and rollback artifact
+types/                shared trip data types
 ```
 
 Neon RLS remains the source of truth for authorization. The R2 API routes pass
@@ -203,7 +215,8 @@ npm run ci             # lint + typecheck + unit tests
 ```
 
 Unit tests are colocated with the modules they cover. CI runs lint, typecheck,
-tests, and a demo-mode production build. The Playwright suite forces local demo
+unit tests, a demo-mode production build, a typecheck of the Cloudflare media
+worker, and then the Playwright suite. The Playwright suite forces local demo
 mode and does not contact Neon, R2, or the retired Supabase runtime.
 
 ## Roadmap
