@@ -4,6 +4,7 @@ import type { Feature, FeatureCollection, LineString, Point } from "geojson";
 import mapboxgl from "mapbox-gl";
 import { useEffect, useMemo } from "react";
 import type { LngLat } from "@/types/trip";
+import { canUseStyle } from "@/lib/map-style";
 
 type Props = {
   map: mapboxgl.Map | null;
@@ -13,14 +14,6 @@ type Props = {
 const sourceId = "route-draft";
 const lineLayerId = "route-draft-line";
 const pointLayerId = "route-draft-points";
-
-function canUseStyle(map: mapboxgl.Map) {
-  try {
-    return Boolean(map.getStyle());
-  } catch {
-    return false;
-  }
-}
 
 function getLayer(map: mapboxgl.Map, layerId: string) {
   if (!canUseStyle(map)) return undefined;
@@ -101,7 +94,9 @@ export function RouteDraftLayer({ map, points }: Props) {
       }
     };
 
-    if (map.isStyleLoaded()) addOrUpdate();
+    // Not isStyleLoaded(): it is false while any tiles load, and "load" has
+    // already fired, so a point clicked mid-pan would never be drawn.
+    if (canUseStyle(map)) addOrUpdate();
     else map.once("load", addOrUpdate);
 
     return () => {
