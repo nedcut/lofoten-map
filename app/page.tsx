@@ -7,13 +7,11 @@ import type { Map as MapboxMap } from "mapbox-gl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2, Play, Share2, Sparkles, UserRound } from "lucide-react";
 import { collectItemCoordinates, coordinateBounds, routeDistanceMeters } from "@/lib/geo";
-import { AuthPanel } from "@/components/AuthPanel";
 import { DayDot, DaySidebar } from "@/components/DaySidebar";
 import { MOBILE_SHEET_HEIGHT_VAR, MobileSheet } from "@/components/MobileSheet";
 import { StatusPill } from "@/components/StatusPill";
 import { HeaderPill, PillButton } from "@/components/ui/HeaderPill";
 import type { MapItemKind } from "@/components/TripLayers";
-import { EditItemPanel } from "@/components/EditItemPanel";
 import { deriveTripAccess } from "@/lib/access";
 import { dayColorFor, dayColorMap } from "@/lib/day-colors";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
@@ -30,9 +28,12 @@ import { useTripUrlState } from "@/lib/hooks/useTripUrlState";
 import { buildJourneyItems } from "@/lib/journey";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
 import { shareJourneyLink, type ShareResult } from "@/lib/share";
-import { deriveDayStats, deriveOutlierOverlay, filterTripItemsByDay, resolveEditTarget } from "@/lib/trip-view-model";
+import { deriveDayStats, deriveOutlierOverlay, filterItemsByDay, resolveEditTarget } from "@/lib/trip-view-model";
 import { cn, formatDateOnly } from "@/lib/utils";
 import type { LngLat, MapClickMode } from "@/types/trip";
+
+const AuthPanel = dynamic(() => import("@/components/AuthPanel").then((mod) => mod.AuthPanel));
+const EditItemPanel = dynamic(() => import("@/components/EditItemPanel").then((mod) => mod.EditItemPanel));
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
 // These also value-import mapbox-gl (markers, popups, the mini map), so they
@@ -135,7 +136,12 @@ export default function Home() {
     loading,
     onJourneyFromUrl: restoreJourneyFromUrl,
   });
-  const filtered = useMemo(() => filterTripItemsByDay(data, selectedDayId), [data, selectedDayId]);
+  // Keep unrelated map layers stable when a poll changes just one collection.
+  const filteredRoutes = useMemo(() => filterItemsByDay(data.routeSegments, selectedDayId), [data.routeSegments, selectedDayId]);
+  const filteredPhotos = useMemo(() => filterItemsByDay(data.photos, selectedDayId), [data.photos, selectedDayId]);
+  const filteredNotes = useMemo(() => filterItemsByDay(data.notes, selectedDayId), [data.notes, selectedDayId]);
+  const filteredPlaces = useMemo(() => filterItemsByDay(data.places, selectedDayId), [data.places, selectedDayId]);
+  const filtered = useMemo(() => ({ routes: filteredRoutes, photos: filteredPhotos, notes: filteredNotes, places: filteredPlaces }), [filteredRoutes, filteredPhotos, filteredNotes, filteredPlaces]);
   const tripTitle = data.trip?.title ?? "Trip Logbook";
   // Per-day totals for the day cards, computed over the full dataset (not the
   // current filter) so each card describes its whole day.

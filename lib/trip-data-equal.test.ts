@@ -39,10 +39,17 @@ describe("reuseIfEqual", () => {
     expect(reuseIfEqual(previous, next)).toBe(previous);
   });
 
-  it("returns the new object when any row changed", () => {
+  it("updates changed collections while preserving unchanged collection identities", () => {
     const previous = structuredClone(demoTripData);
     const next = structuredClone(demoTripData);
     next.photos[0] = { ...next.photos[0], caption: "changed" };
-    expect(reuseIfEqual(previous, next)).toBe(next);
+    const result = reuseIfEqual(previous, next);
+    expect(result).toEqual(next);
+    expect(result).not.toBe(previous);
+    expect(result.photos).toBe(next.photos);
+    for (const key of ["trip", "days", "routeSegments", "notes", "places", "members", "adminRequests"] as const) {
+      expect(result[key]).toBe(previous[key]);
+    }
+    expect(previous.photos[0].caption).not.toBe("changed");
   });
 });

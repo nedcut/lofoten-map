@@ -62,10 +62,14 @@ export function detectPhotoOutliers(photos: Photo[], options: DetectOutlierOptio
   const windowMs = windowMinutes * 60_000;
   const outliers: PhotoOutlier[] = [];
 
+  // The input is time-sorted. Advance both bounds once instead of scanning
+  // the entire trip for every photo; only nearby timestamps need comparison.
+  let left = 0;
+  let right = 0;
   for (const candidate of located) {
-    const neighbors = located.filter(
-      (other) => other.photo.id !== candidate.photo.id && Math.abs(other.timeMs - candidate.timeMs) <= windowMs,
-    );
+    while (left < located.length && located[left].timeMs < candidate.timeMs - windowMs) left += 1;
+    while (right < located.length && located[right].timeMs <= candidate.timeMs + windowMs) right += 1;
+    const neighbors = located.slice(left, right).filter((other) => other.photo.id !== candidate.photo.id);
     if (neighbors.length < minNeighbors) continue;
 
     const suggested: LngLat = {

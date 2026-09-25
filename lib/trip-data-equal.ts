@@ -31,7 +31,17 @@ export function plainDataEqual(a: unknown, b: unknown): boolean {
   return true;
 }
 
-/** Keep the previous TripData when a refresh returns identical content. */
+/** Reuse unchanged collections so a small edit does not rebuild every map layer. */
 export function reuseIfEqual(previous: TripData, next: TripData): TripData {
-  return plainDataEqual(previous, next) ? previous : next;
+  const shared = { ...next };
+  let changed = false;
+  for (const key of Object.keys(next) as (keyof TripData)[]) {
+    if (plainDataEqual(previous[key], next[key])) {
+      // Each key keeps its own type; Object.assign avoids a union assignment.
+      Object.assign(shared, { [key]: previous[key] });
+    } else {
+      changed = true;
+    }
+  }
+  return changed ? shared : previous;
 }
