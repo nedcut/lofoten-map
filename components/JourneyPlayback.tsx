@@ -150,17 +150,30 @@ export function JourneyPlayback({
     return [{ index, day, left: items.length <= 1 ? 0 : (index / (items.length - 1)) * 100 }];
   }), [days, items]);
   // Which ticks get a "D3" label: walk left to right and only label a tick
-  // when it sits far enough from the last labelled one. Dots always render.
+  // when it sits far enough from the last labelled one. The current day
+  // always keeps its label and its neighbours make way. Dots always render.
+  const activeDayId = activeItem ? activeItem.dayId : undefined;
   const labelledTicks = useMemo(() => {
-    const minGapPx = 26;
     const labelled = new Set<number>();
+    // Until the track is measured, label every day rather than guessing.
+    if (trackWidth <= 0) {
+      for (const tick of dayTicks) labelled.add(tick.index);
+      return labelled;
+    }
+    const minGapPx = 26;
+    const toPx = (left: number) => (left / 100) * trackWidth;
+    const active = dayTicks.find((tick) => (tick.day?.id ?? null) === activeDayId);
+    const activePx = active ? toPx(active.left) : null;
     let lastLabelledPx = -Infinity;
     for (const tick of dayTicks) {
-      const px = trackWidth > 0 ? (tick.left / 100) * trackWidth : Infinity;
-      if (px - lastLabelledPx >= minGapPx) { labelled.add(tick.index); lastLabelledPx = px; }
+      const px = toPx(tick.left);
+      const isActive = tick === active;
+      if (!isActive && (px - lastLabelledPx < minGapPx || (activePx !== null && Math.abs(activePx - px) < minGapPx))) continue;
+      labelled.add(tick.index);
+      lastLabelledPx = px;
     }
     return labelled;
-  }, [dayTicks, trackWidth]);
+  }, [activeDayId, dayTicks, trackWidth]);
   const activeDayColor = activeItem?.dayId ? dayColors.get(activeItem.dayId) ?? null : null;
   const selectedUploaderId = uploaderOptions.find((option) => option.value === uploaderFilter)?.id ?? "";
 
@@ -654,7 +667,7 @@ export function JourneyPlayback({
               day tick), then play/speed on the left and prev/count/next on
               the right. From md up it collapses to the single-row grid. */}
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-3">
-            <div className="flex items-center gap-2 md:col-start-1 md:row-start-1">
+            <div className="col-start-1 row-start-2 flex items-center gap-2 md:row-start-1">
               <button onClick={() => setIsPlaying((value) => !value)} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-stone-950 shadow-lg transition hover:bg-[#fff4d8] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30" aria-label={isPlaying ? "Pause autoplay" : "Start autoplay"}>
                 {isPlaying ? <CirclePause className="h-5 w-5" /> : <CirclePlay className="h-5 w-5" />}
               </button>
@@ -671,7 +684,7 @@ export function JourneyPlayback({
             {/* The track: a tick per day start, labelled "D1…D8" underneath and
                 coloured like the day everywhere else, so scrubbing to a day
                 is a matter of aiming rather than hovering to find out. */}
-            <div ref={trackRef} className="relative col-span-3 h-11 pt-0.5 md:col-span-1 md:col-start-2 md:row-start-1">
+            <div ref={trackRef} className="relative col-span-3 row-start-1 h-11 pt-0.5 md:col-span-1 md:col-start-2">
               <div className="absolute left-0 right-0 top-3.5 h-1 rounded-full bg-white/16">
                 <div className="h-full rounded-full transition-[width] duration-200" style={{ width: `${Math.max(2, progress * 100)}%`, backgroundColor: activeDayColor ?? "#e7a13d" }} />
               </div>
@@ -705,7 +718,7 @@ export function JourneyPlayback({
                 aria-valuetext={`${title}, ${dayLabel(days, activeItem.dayId)}`}
               />
             </div>
-            <div className="col-span-2 flex items-center justify-end gap-1 md:col-span-1 md:col-start-3 md:row-start-1">
+            <div className="col-span-2 col-start-2 row-start-2 flex items-center justify-end gap-1 md:col-span-1 md:col-start-3 md:row-start-1">
               <IconButton onClick={() => { noteInteraction(); onPrev(); }} className="md:hidden" aria-label="Previous item"><ChevronLeft className="h-5 w-5" /></IconButton>
               <span className="min-w-14 text-center text-xs font-bold text-white/60">{activeIndex + 1} / {items.length}</span>
               <IconButton onClick={() => { noteInteraction(); onNext(); }} className="md:hidden" aria-label="Next item"><ChevronRight className="h-5 w-5" /></IconButton>
