@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import type { Map as MapboxMap } from "mapbox-gl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2, Play, Share2, Sparkles, UserRound } from "lucide-react";
-import { collectItemCoordinates, coordinateBounds, routeDistanceMeters } from "@/lib/geo";
+import { collectItemCoordinates, coordinateBounds, LOFOTEN_DEFAULT_VIEW, routeDistanceMeters } from "@/lib/geo";
 import { DayDot, DaySidebar } from "@/components/DaySidebar";
 import { MOBILE_SHEET_HEIGHT_VAR, MobileSheet } from "@/components/MobileSheet";
 import { StatusPill } from "@/components/StatusPill";
@@ -426,13 +426,19 @@ export default function Home() {
     filteredRef.current = filtered;
   }, [filtered]);
 
-  // Center the map on the active day (or all days) whenever the selection
-  // changes: build a bounding box around that day's items and fit it with
-  // padding. Mobile gets extra bottom padding so the bottom sheet doesn't cover
-  // the framed content; a lone point falls back to an eased zoom since a
-  // zero-area box can't be fit.
+  // Center the map on the active day whenever the selection changes: build a
+  // bounding box around that day's items and fit it with padding. Mobile gets
+  // extra bottom padding so the bottom sheet doesn't cover the framed content;
+  // a lone point falls back to an eased zoom since a zero-area box can't be
+  // fit. "All days" returns to the opening Lofoten view instead.
   useEffect(() => {
     if (!map) return;
+    if (!selectedDayId) {
+      // Zero padding clears any padding a previous easeTo left on the camera,
+      // so this lands exactly on the view the page loads with.
+      map.easeTo({ ...LOFOTEN_DEFAULT_VIEW, padding: { top: 0, right: 0, bottom: 0, left: 0 }, duration: 800 });
+      return;
+    }
     const coords = collectItemCoordinates(filteredRef.current);
     if (coords.length === 0) return;
 

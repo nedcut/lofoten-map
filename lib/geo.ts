@@ -3,6 +3,10 @@ import type { LngLat, Note, Photo, Place, RouteSegment } from "@/types/trip";
 
 export const LOFOTEN_CENTER: [number, number] = [13.0897, 67.9325];
 
+// The camera the map opens on. "All days" returns here instead of fitting every
+// item, so a few mainland photos don't pull the overview away from the islands.
+export const LOFOTEN_DEFAULT_VIEW = { center: LOFOTEN_CENTER, zoom: 10.2, pitch: 45, bearing: -20 };
+
 export type CoordinateBounds = { sw: [number, number]; ne: [number, number]; center: [number, number]; diagonalMeters: number };
 
 // Great-circle (haversine) distance, inlined so route/bounds math doesn't pull
