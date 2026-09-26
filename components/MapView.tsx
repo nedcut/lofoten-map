@@ -9,7 +9,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import "./map-overrides.css";
 import { MapPin } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { LOFOTEN_CENTER } from "@/lib/geo";
+import { LOFOTEN_DEFAULT_VIEW } from "@/lib/geo";
 import type { LngLat, MapClickMode } from "@/types/trip";
 
 type Props = {
@@ -70,10 +70,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
       instance = new mapboxgl.Map({
         container: containerRef.current,
         style: "mapbox://styles/mapbox/outdoors-v12",
-        center: LOFOTEN_CENTER,
-        zoom: 10.2,
-        pitch: 45,
-        bearing: -20,
+        ...LOFOTEN_DEFAULT_VIEW,
         attributionControl: false,
       });
     } catch {
