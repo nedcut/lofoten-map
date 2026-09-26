@@ -1,14 +1,16 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { ChevronLeft, ChevronRight, ChevronUp, Play } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { AdminDataPanel } from "@/components/AdminDataPanel";
 import { AdminRequestPanel, DayList, DayListSkeleton, LayersPanel, MemberAdminPanel, NotesPlacesList, QuickActions, type SidebarProps } from "@/components/DaySidebar";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
 import { dayColorFor } from "@/lib/day-colors";
 import { formatMediaCount } from "@/lib/trip-view-model";
 import { cn } from "@/lib/utils";
 import type { Day } from "@/types/trip";
+
+const AdminDataPanel = dynamic(() => import("@/components/AdminDataPanel").then((mod) => mod.AdminDataPanel));
 
 // Written to the root element so the Mapbox controls (map-overrides.css) and
 // the day-framing padding (page.tsx) can stay clear of the collapsed sheet

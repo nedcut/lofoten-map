@@ -9,6 +9,7 @@ import { PHOTO_CLUSTER_MAX_ZOOM, PHOTO_CLUSTER_RADIUS, photoMarkerPresentation }
 import { MOBILE_SHEET_HEIGHT_VAR } from "@/components/MobileSheet";
 import { formatDateTime } from "@/lib/utils";
 import type { Day, Note, Photo, Place, RouteSegment } from "@/types/trip";
+import { canUseStyle } from "@/lib/map-style";
 
 function escapeHtml(value: unknown) {
   return String(value ?? "")
@@ -17,14 +18,6 @@ function escapeHtml(value: unknown) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
-}
-
-function canUseStyle(map: mapboxgl.Map) {
-  try {
-    return Boolean(map.getStyle());
-  } catch {
-    return false;
-  }
 }
 
 function getSource(map: mapboxgl.Map, id: string) {
@@ -106,11 +99,16 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
   const photoData = useMemo(() => photoFeatureCollection(photos), [photos]);
   const noteData = useMemo(() => noteFeatureCollection(notes), [notes]);
   const placeData = useMemo(() => placeFeatureCollection(places), [places]);
+  // The collection last handed to each source. setData re-parses (and for
+  // photos re-clusters) in Mapbox's worker, so a source is only re-sent when
+  // its own collection changed, not when a sibling or a layer toggle did.
+  const sentDataRef = useRef(new Map<string, GeoJSON.FeatureCollection>());
 
   useEffect(() => {
     if (!map) return;
     let cancelled = false;
 
+    const sent = sentDataRef.current;
     const addOrUpdate = () => {
       if (cancelled || !canUseStyle(map)) return;
 
@@ -131,9 +129,10 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
             "line-dasharray": ["match", ["get", "mode"], "ferry", ["literal", [2, 1.6]], "bus", ["literal", [0.3, 1.6]], ["literal", [1, 0]]],
           },
         });
-      } else {
+      } else if (sent.get("routes") !== routeData) {
         (getSource(map, "routes") as mapboxgl.GeoJSONSource).setData(routeData);
       }
+      sent.set("routes", routeData);
 
       if (!getSource(map, "photos")) {
         map.addSource("photos", {
@@ -152,30 +151,36 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
           source: "photos",
           paint: { "circle-radius": 28, "circle-opacity": 0 },
         });
-      } else {
+      } else if (sent.get("photos") !== photoData) {
         (getSource(map, "photos") as mapboxgl.GeoJSONSource).setData(photoData);
       }
+      sent.set("photos", photoData);
 
       if (!getSource(map, "notes")) {
         map.addSource("notes", { type: "geojson", data: noteData });
         map.addLayer({ id: "notes-circle", type: "circle", source: "notes", paint: { "circle-radius": 8, "circle-color": "#f6d28f", "circle-stroke-width": 3, "circle-stroke-color": "#7c4a14" } });
-      } else {
+      } else if (sent.get("notes") !== noteData) {
         (getSource(map, "notes") as mapboxgl.GeoJSONSource).setData(noteData);
       }
+      sent.set("notes", noteData);
 
       if (!getSource(map, "places")) {
         map.addSource("places", { type: "geojson", data: placeData });
         map.addLayer({ id: "places-circle", type: "circle", source: "places", paint: { "circle-radius": 8, "circle-color": "#c8e4d4", "circle-stroke-width": 3, "circle-stroke-color": "#0f5f55" } });
-      } else {
+      } else if (sent.get("places") !== placeData) {
         (getSource(map, "places") as mapboxgl.GeoJSONSource).setData(placeData);
       }
+      sent.set("places", placeData);
 
       for (const id of ["routes-shadow", "routes-line"]) setLayerVisibility(map, id, visibility.routes);
       setLayerVisibility(map, "photos-hit", visibility.photos);
       for (const id of ["notes-circle", "places-circle"]) setLayerVisibility(map, id, visibility.notes);
     };
 
-    if (map.isStyleLoaded()) addOrUpdate();
+    // isStyleLoaded() is also false while any tiles are still loading, long
+    // after "load" has fired, so gating on it would silently drop an update
+    // that lands mid-pan. The style itself only needs to have loaded once.
+    if (canUseStyle(map)) addOrUpdate();
     else map.once("load", addOrUpdate);
 
     return () => {
@@ -512,6 +517,13 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       frame = window.requestAnimationFrame(refreshMarkers);
     }
 
+    // sourcedata also fires for every basemap tile that arrives; only the
+    // photos source changes which clusters and markers exist. "idle" catches
+    // anything that settles after the last photos event.
+    function handleSourceData(event: mapboxgl.MapSourceDataEvent) {
+      if (event.sourceId === "photos") scheduleRefresh();
+    }
+
     scheduleRefresh();
     // Refreshing on every move (coalesced to one pass per animation frame)
     // means markers scrolling into view and clusters splitting or merging
@@ -519,13 +531,15 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
     // Mapbox keeps existing markers glued to their coordinates in between.
     activeMap.on("move", scheduleRefresh);
     activeMap.on("moveend", scheduleRefresh);
-    activeMap.on("sourcedata", scheduleRefresh);
+    activeMap.on("sourcedata", handleSourceData);
+    activeMap.on("idle", scheduleRefresh);
 
     return () => {
       window.cancelAnimationFrame(frame);
       activeMap.off("move", scheduleRefresh);
       activeMap.off("moveend", scheduleRefresh);
-      activeMap.off("sourcedata", scheduleRefresh);
+      activeMap.off("sourcedata", handleSourceData);
+      activeMap.off("idle", scheduleRefresh);
       for (const [key, entry] of markers) dropEntry(key, entry);
     };
   }, [map, photos, days, dayColors, visibility.photos]);

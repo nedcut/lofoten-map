@@ -101,4 +101,32 @@ describe("detectPhotoOutliers", () => {
     expect(outliers.length).toBeGreaterThanOrEqual(2);
     expect(outliers[0].photo.id).toBe(far.id);
   });
+  it("includes both window boundaries and excludes photos just outside them", () => {
+    const stray = photo(67.95, 13.12, "2026-05-29T10:20:00Z");
+    const neighbors = [
+      photo(67.9, 13, "2026-05-29T10:00:00Z"),
+      photo(67.9, 13, "2026-05-29T10:20:00Z"),
+      photo(67.9, 13, "2026-05-29T10:40:00Z"),
+    ];
+    const outside = [
+      photo(68, 14, "2026-05-29T09:59:59.999Z"),
+      photo(68, 14, "2026-05-29T10:40:00.001Z"),
+    ];
+    const result = detectPhotoOutliers([...outside, stray, ...neighbors].reverse()).find((entry) => entry.photo.id === stray.id);
+    expect(result?.neighborCount).toBe(3);
+    expect(result?.suggested).toEqual({ lat: 67.9, lng: 13 });
+  });
+
+  it("keeps independent time clusters and equal timestamps separate from the candidate ID", () => {
+    const first = beachCluster();
+    const stray = photo(67.95, 13.12, "2026-05-29T10:05:00Z");
+    const second = [...first, stray].map((item) => ({
+      ...item, id: `${item.id}-next`, taken_at: item.taken_at!.replace("2026-05-29", "2026-05-30"),
+    }));
+    const result = detectPhotoOutliers([...second, ...first, stray, { ...stray }]);
+    expect(result.find((entry) => entry.photo.id === stray.id)?.neighborCount).toBe(4);
+    expect(result.find((entry) => entry.photo.id === `${stray.id}-next`)?.neighborCount).toBe(4);
+    expect(detectPhotoOutliers([stray, ...first], { windowMinutes: 0 })).toEqual([]);
+  });
+
 });

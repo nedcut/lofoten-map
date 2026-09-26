@@ -9,6 +9,7 @@ import { bearingAlongLeg, distanceKm, legBetween, lerpBearing, offsetPoint, poin
 import { cn } from "@/lib/utils";
 import type { JourneyItem } from "@/lib/journey";
 import type { Day, LngLat, RouteSegment } from "@/types/trip";
+import { canUseStyle } from "@/lib/map-style";
 
 type Props = {
   routes: RouteSegment[];
@@ -18,14 +19,6 @@ type Props = {
   onInteraction: () => void;
   onSelectItem: (id: string) => void;
 };
-
-function canUseStyle(map: mapboxgl.Map) {
-  try {
-    return Boolean(map.getStyle());
-  } catch {
-    return false;
-  }
-}
 
 function getSource(map: mapboxgl.Map, id: string) {
   if (!canUseStyle(map)) return undefined;
@@ -143,8 +136,7 @@ function dayNumber(days: Day[], dayId: string | null) {
   return days.find((day) => day.id === dayId)?.day_number ?? null;
 }
 
-function progressedRoutes(routes: RouteSegment[], days: Day[], activeItem: JourneyItem) {
-  const activeDayNumber = dayNumber(days, activeItem.dayId);
+function progressedRoutes(routes: RouteSegment[], days: Day[], activeDayNumber: number | null) {
   if (activeDayNumber === null) return [];
   return routes.filter((route) => {
     const routeDayNumber = dayNumber(days, route.day_id);
@@ -191,7 +183,13 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     callbacksRef.current = { onInteraction, onSelectItem };
   }, [onInteraction, onSelectItem]);
   const routeData = useMemo(() => routeFeatureCollection(routes), [routes]);
-  const progressRouteData = useMemo(() => routeFeatureCollection(progressedRoutes(routes, days, activeItem)), [activeItem, days, routes]);
+  // Keyed on the day number, not the item, so stepping between photos of the
+  // same day keeps the same collection and the source is not re-sent.
+  const activeDayNumber = dayNumber(days, activeItem.dayId);
+  const progressRouteData = useMemo(() => routeFeatureCollection(progressedRoutes(routes, days, activeDayNumber)), [activeDayNumber, days, routes]);
+  // The collection last handed to each source; setData re-parses in Mapbox's
+  // worker, so only sources whose collection changed are re-sent.
+  const sentDataRef = useRef(new Map<string, FeatureCollection>());
   const itemsData = useMemo(() => pointData(items), [items]);
   const activeData = useMemo(() => activePointData(activeItem), [activeItem]);
 
@@ -335,6 +333,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     const map = mapRef.current;
     if (!map) return;
     let cancelled = false;
+    const sent = sentDataRef.current;
     const addOrUpdate = () => {
       if (cancelled || !canUseStyle(map)) return;
 
@@ -342,16 +341,18 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
         map.addSource("journey-routes", { type: "geojson", data: routeData });
         map.addLayer({ id: "journey-routes-shadow", type: "line", source: "journey-routes", paint: { "line-color": "#1c2f2b", "line-width": 7, "line-opacity": 0.24 } });
         map.addLayer({ id: "journey-routes-line", type: "line", source: "journey-routes", paint: { "line-color": "#fffdf6", "line-width": 3, "line-opacity": 0.85 } });
-      } else {
+      } else if (sent.get("journey-routes") !== routeData) {
         (getSource(map, "journey-routes") as mapboxgl.GeoJSONSource).setData(routeData);
       }
+      sent.set("journey-routes", routeData);
 
       if (!getSource(map, "journey-progress-routes")) {
         map.addSource("journey-progress-routes", { type: "geojson", data: progressRouteData });
         map.addLayer({ id: "journey-progress-line", type: "line", source: "journey-progress-routes", paint: { "line-color": "#e7a13d", "line-width": 4.5, "line-opacity": 0.95 } });
-      } else {
+      } else if (sent.get("journey-progress-routes") !== progressRouteData) {
         (getSource(map, "journey-progress-routes") as mapboxgl.GeoJSONSource).setData(progressRouteData);
       }
+      sent.set("journey-progress-routes", progressRouteData);
 
       if (!getSource(map, "journey-leg")) {
         // The leg the camera is currently walking; data is fed imperatively by
@@ -363,20 +364,24 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       if (!getSource(map, "journey-items")) {
         map.addSource("journey-items", { type: "geojson", data: itemsData });
         map.addLayer({ id: "journey-items-circle", type: "circle", source: "journey-items", paint: { "circle-radius": 4.5, "circle-color": "#fffdf6", "circle-stroke-width": 2, "circle-stroke-color": "#0f766e", "circle-opacity": 0.9 } });
-      } else {
+      } else if (sent.get("journey-items") !== itemsData) {
         (getSource(map, "journey-items") as mapboxgl.GeoJSONSource).setData(itemsData);
       }
+      sent.set("journey-items", itemsData);
 
       if (!getSource(map, "journey-active")) {
         map.addSource("journey-active", { type: "geojson", data: activeData });
         map.addLayer({ id: "journey-active-halo", type: "circle", source: "journey-active", paint: { "circle-radius": 18, "circle-color": "#e7a13d", "circle-opacity": 0.24 } });
         map.addLayer({ id: "journey-active-circle", type: "circle", source: "journey-active", paint: { "circle-radius": 9, "circle-color": "#fffdf6", "circle-stroke-width": 4, "circle-stroke-color": "#e7a13d" } });
-      } else {
+      } else if (sent.get("journey-active") !== activeData) {
         (getSource(map, "journey-active") as mapboxgl.GeoJSONSource).setData(activeData);
       }
+      sent.set("journey-active", activeData);
     };
 
-    if (map.isStyleLoaded()) addOrUpdate();
+    // Not isStyleLoaded(): it stays false while tiles load (every step flies
+    // the camera), and "load" never fires again, so the update would be lost.
+    if (canUseStyle(map)) addOrUpdate();
     else map.once("load", addOrUpdate);
     return () => {
       cancelled = true;

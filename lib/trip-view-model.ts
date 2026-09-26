@@ -16,13 +16,16 @@ export type TripEditTarget =
   | { kind: "place"; item: Place }
   | { kind: "route"; item: RouteSegment };
 
+export function filterItemsByDay<T extends { day_id: string | null }>(items: T[], selectedDayId: string | null): T[] {
+  return selectedDayId ? items.filter((item) => item.day_id === selectedDayId) : items;
+}
+
 export function filterTripItemsByDay(data: TripData, selectedDayId: string | null) {
-  const matches = (dayId: string | null) => !selectedDayId || dayId === selectedDayId;
   return {
-    routes: data.routeSegments.filter((item) => matches(item.day_id)),
-    photos: data.photos.filter((item) => matches(item.day_id)),
-    notes: data.notes.filter((item) => matches(item.day_id)),
-    places: data.places.filter((item) => matches(item.day_id)),
+    routes: filterItemsByDay(data.routeSegments, selectedDayId),
+    photos: filterItemsByDay(data.photos, selectedDayId),
+    notes: filterItemsByDay(data.notes, selectedDayId),
+    places: filterItemsByDay(data.places, selectedDayId),
   };
 }
 

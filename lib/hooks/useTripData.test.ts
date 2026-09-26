@@ -134,6 +134,9 @@ describe("useTripData", () => {
 
     expect(result.current.data).not.toBe(loaded);
     expect(result.current.data.notes[0].body).toBe("Edited");
+    expect(result.current.data.photos).toBe(loaded.photos);
+    expect(result.current.data.routeSegments).toBe(loaded.routeSegments);
+    expect(result.current.data.days).toBe(loaded.days);
   });
 
   it("degrades gracefully when the admin_requests table is missing", async () => {

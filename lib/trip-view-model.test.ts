@@ -6,10 +6,10 @@ import type { PhotoOutlier } from "./photo-outliers";
 describe("filterTripItemsByDay", () => {
   it("keeps every map item when All days is selected", () => {
     const result = filterTripItemsByDay(demoTripData, null);
-    expect(result.routes).toHaveLength(demoTripData.routeSegments.length);
-    expect(result.photos).toHaveLength(demoTripData.photos.length);
-    expect(result.notes).toHaveLength(demoTripData.notes.length);
-    expect(result.places).toHaveLength(demoTripData.places.length);
+    expect(result.routes).toBe(demoTripData.routeSegments);
+    expect(result.photos).toBe(demoTripData.photos);
+    expect(result.notes).toBe(demoTripData.notes);
+    expect(result.places).toBe(demoTripData.places);
   });
 
   it("keeps only items assigned to the selected day", () => {

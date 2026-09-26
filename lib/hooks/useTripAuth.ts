@@ -5,9 +5,11 @@ import type { BackendClient, BackendUser } from "@/lib/backend";
 
 type AuthTone = "info" | "error";
 
-export function useTripAuth(backend: BackendClient | null) {
+// `backendConfigured` keeps auth "loading" while the lazily-imported client is
+// still on its way, so signed-out controls don't flash before the session check.
+export function useTripAuth(backend: BackendClient | null, backendConfigured = Boolean(backend)) {
   const [user, setUser] = useState<BackendUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(Boolean(backend));
+  const [authLoading, setAuthLoading] = useState(Boolean(backend) || backendConfigured);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authMessageTone, setAuthMessageTone] = useState<AuthTone>("info");
   const [authSubmitting, setAuthSubmitting] = useState(false);
