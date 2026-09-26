@@ -1,5 +1,9 @@
 # Neon database migration
 
+Status: the production cutover from Supabase to Neon and R2 was completed in
+July 2026. `schema.sql` plus `patches/` define the current schema. The export,
+import, and verification steps below are kept as a record and for rollback.
+
 This directory is the database half of the Supabase-to-Neon/R2 migration. It
 preserves the eight application tables, constraints, RLS rules, and RPC behavior
 from `supabase/schema.sql`, with these deliberate platform translations:
