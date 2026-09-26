@@ -221,5 +221,5 @@ mode and does not contact Neon, R2, or the retired Supabase runtime.
 
 ## Roadmap
 
-See [`docs/TODO.md`](docs/TODO.md) for active work and
-[`docs/WORKLOG.md`](docs/WORKLOG.md) for completed checkpoints.
+Planned work is tracked in [GitHub Issues](https://github.com/nedcut/lofoten-map/issues).
+Merged pull requests record what has shipped.
