@@ -77,6 +77,9 @@ type Props = {
   onEditItem: (kind: MapItemKind, id: string) => void;
   onDeleteItem: (kind: MapItemKind, id: string) => void;
   onOpenJourney: (photoId: string) => void;
+  // Tapping a photo cluster reports the photos inside it so the page can
+  // offer to relive them; null once the user taps elsewhere or moves the map.
+  onClusterSelect: (photos: Photo[] | null) => void;
   onPhotoFocus: (photoId: string) => void;
   onPhotoBlur: (photoId: string) => void;
   onMovePhoto: (photoId: string, coordinate: { lng: number; lat: number }) => void;
@@ -88,13 +91,13 @@ type Props = {
   outlierPreview: { photo: { lng: number; lat: number }; suggested: { lng: number; lat: number }; neighbors: Array<{ lng: number; lat: number }> } | null;
 };
 
-export function TripLayers({ map, routes, photos, notes, places, days, dayColors, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId, outlierPreview }: Props) {
+export function TripLayers({ map, routes, photos, notes, places, days, dayColors, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId, outlierPreview }: Props) {
   // Popup click handlers are attached once (keyed on [map]); this ref lets those
   // long-lived closures read the latest permissions/callbacks without re-binding.
-  const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto });
+  const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onPhotoFocus, onPhotoBlur, onMovePhoto });
   useEffect(() => {
-    actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto };
-  }, [currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onPhotoFocus, onPhotoBlur, onMovePhoto]);
+    actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onPhotoFocus, onPhotoBlur, onMovePhoto };
+  }, [currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onPhotoFocus, onPhotoBlur, onMovePhoto]);
   const routeData = useMemo(() => routeFeatureCollection(routes, dayColors), [dayColors, routes]);
   const photoData = useMemo(() => photoFeatureCollection(photos), [photos]);
   const noteData = useMemo(() => noteFeatureCollection(notes), [notes]);
@@ -325,6 +328,7 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       photo: Photo;
       isCluster: boolean;
       clusterId: number;
+      count: number;
       coordinates: [number, number];
       leaveTimer: number;
     };
@@ -381,15 +385,17 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       if (draggable) element.title = "Drag to move this photo";
       else element.removeAttribute("title");
       entry.isCluster = isCluster;
+      entry.count = count;
     }
 
     function createEntry(key: string, photo: Photo, coordinates: [number, number]): MarkerEntry {
       const element = createMarkerElement(photo);
       const marker = new mapboxgl.Marker({ element, anchor: "center" }).setLngLat(coordinates).addTo(activeMap);
-      const entry: MarkerEntry = { marker, element, badge: null, photo, isCluster: false, clusterId: Number.NaN, coordinates, leaveTimer: 0 };
+      const entry: MarkerEntry = { marker, element, badge: null, photo, isCluster: false, clusterId: Number.NaN, count: 1, coordinates, leaveTimer: 0 };
       element.addEventListener("click", (event) => {
         event.stopPropagation();
         if (!entry.isCluster) {
+          actionsRef.current.onClusterSelect(null);
           // Viewers who can't edit have nothing to do in a popup but press
           // "Relive from here", so a tap goes straight into the viewer.
           // Owners and admins still get the popup with edit/delete.
@@ -402,6 +408,11 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         source?.getClusterExpansionZoom(entry.clusterId, (error, zoom) => {
           if (error || zoom === null || zoom === undefined) return;
           activeMap.easeTo({ center: target, zoom, duration: 550 });
+        });
+        source?.getClusterLeaves(entry.clusterId, entry.count, 0, (error, leaves) => {
+          if (error || !leaves) return;
+          const members = leaves.flatMap((leaf) => photosById.get(String(leaf.properties?.id ?? "")) ?? []);
+          if (members.length > 0) actionsRef.current.onClusterSelect(members);
         });
       });
       marker.on("dragstart", () => {
@@ -524,6 +535,15 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       if (event.sourceId === "photos") scheduleRefresh();
     }
 
+    // The cluster offer lasts until the user moves on: their own pan or zoom
+    // (the cluster's easeTo carries no originalEvent) or a tap on the map.
+    function handleUserMove(event: { originalEvent?: Event }) {
+      if (event.originalEvent) actionsRef.current.onClusterSelect(null);
+    }
+    function clearClusterSelection() {
+      actionsRef.current.onClusterSelect(null);
+    }
+
     scheduleRefresh();
     // Refreshing on every move (coalesced to one pass per animation frame)
     // means markers scrolling into view and clusters splitting or merging
@@ -533,6 +553,8 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
     activeMap.on("moveend", scheduleRefresh);
     activeMap.on("sourcedata", handleSourceData);
     activeMap.on("idle", scheduleRefresh);
+    activeMap.on("movestart", handleUserMove);
+    activeMap.on("click", clearClusterSelection);
 
     return () => {
       window.cancelAnimationFrame(frame);
@@ -540,7 +562,12 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       activeMap.off("moveend", scheduleRefresh);
       activeMap.off("sourcedata", handleSourceData);
       activeMap.off("idle", scheduleRefresh);
+      activeMap.off("movestart", handleUserMove);
+      activeMap.off("click", clearClusterSelection);
       for (const [key, entry] of markers) dropEntry(key, entry);
+      // The markers (and their clusters) are rebuilt from new photos or a
+      // new day filter, so an open offer no longer matches what's shown.
+      clearClusterSelection();
     };
   }, [map, photos, days, dayColors, visibility.photos]);
 

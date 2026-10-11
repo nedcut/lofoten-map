@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildJourneyItems } from "./journey";
+import { buildJourneyItems, firstJourneyPhotoId } from "./journey";
 import type { Day, Note, Photo, Place, TripData } from "@/types/trip";
 
 const tripId = "trip";
@@ -132,5 +132,25 @@ describe("buildJourneyItems", () => {
     }));
 
     expect(items.map((item) => item.id)).toEqual(["photo:floating", "photo:dayed", "photo:undated"]);
+  });
+});
+
+describe("firstJourneyPhotoId", () => {
+  it("returns the group's earliest photo in journey order, not input order", () => {
+    const items = buildJourneyItems(data({
+      photos: [
+        photo({ id: "late", taken_at: "2026-07-12T15:00:00Z" }),
+        photo({ id: "outside", taken_at: "2026-07-12T08:00:00Z" }),
+        photo({ id: "early", taken_at: "2026-07-12T10:00:00Z" }),
+      ],
+    }));
+
+    expect(firstJourneyPhotoId(items, ["late", "early"])).toBe("early");
+  });
+
+  it("returns null when none of the photos are in the journey", () => {
+    const items = buildJourneyItems(data({ photos: [photo({ id: "a" })] }));
+
+    expect(firstJourneyPhotoId(items, ["missing"])).toBeNull();
   });
 });

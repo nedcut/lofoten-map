@@ -10,6 +10,7 @@ import { collectItemCoordinates, coordinateBounds, LOFOTEN_DEFAULT_VIEW, routeDi
 import { DayDot, DaySidebar } from "@/components/DaySidebar";
 import { MOBILE_SHEET_HEIGHT_VAR, MobileSheet } from "@/components/MobileSheet";
 import { StatusPill } from "@/components/StatusPill";
+import { ClusterRelivePill } from "@/components/ClusterRelivePill";
 import { HeaderPill, PillButton } from "@/components/ui/HeaderPill";
 import type { MapItemKind } from "@/components/TripLayers";
 import { deriveTripAccess } from "@/lib/access";
@@ -25,12 +26,12 @@ import { useTripMutations } from "@/lib/hooks/useTripMutations";
 import { useTripCreation } from "@/lib/hooks/useTripCreation";
 import { useJourneyState } from "@/lib/hooks/useJourneyState";
 import { useTripUrlState } from "@/lib/hooks/useTripUrlState";
-import { buildJourneyItems } from "@/lib/journey";
+import { buildJourneyItems, firstJourneyPhotoId } from "@/lib/journey";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
 import { shareJourneyLink, type ShareResult } from "@/lib/share";
 import { deriveDayStats, deriveOutlierOverlay, filterItemsByDay, resolveEditTarget } from "@/lib/trip-view-model";
 import { cn, formatDateOnly } from "@/lib/utils";
-import type { LngLat, MapClickMode } from "@/types/trip";
+import type { LngLat, MapClickMode, Photo } from "@/types/trip";
 
 const AuthPanel = dynamic(() => import("@/components/AuthPanel").then((mod) => mod.AuthPanel));
 const EditItemPanel = dynamic(() => import("@/components/EditItemPanel").then((mod) => mod.EditItemPanel));
@@ -104,6 +105,8 @@ export default function Home() {
   const [mapUnavailable, setMapUnavailable] = useState(false);
   const [panel, setPanel] = useState<"photo" | "note" | "route" | null>(null);
   const [lastFocusedPhotoId, setLastFocusedPhotoId] = useState<string | null>(null);
+  // Photos in the map cluster the user just tapped, offered for reliving.
+  const [clusterPhotos, setClusterPhotos] = useState<Photo[] | null>(null);
   const [outlierPreview, setOutlierPreview] = useState<PhotoOutlier | null>(null);
   const [shareStatus, setShareStatus] = useState<ShareResult | null>(null);
 
@@ -308,6 +311,16 @@ export default function Home() {
   const handlePhotoBlur = useCallback((photoId: string) => {
     setLastFocusedPhotoId((current) => (current === photoId ? null : current));
   }, []);
+
+  const dismissClusterPhotos = useCallback(() => setClusterPhotos(null), []);
+  // Relive a tapped cluster from its earliest photo, playing on through the
+  // rest of the trip like "Relive from here" on a single photo.
+  const reliveClusterPhotos = useCallback(() => {
+    if (!clusterPhotos) return;
+    const startId = firstJourneyPhotoId(allJourneyItems, clusterPhotos.map((photo) => photo.id));
+    setClusterPhotos(null);
+    if (startId) openJourneyFromMap(startId);
+  }, [allJourneyItems, clusterPhotos, openJourneyFromMap]);
 
   // The header Journey button picks its starting item by context: the photo the
   // user last opened on the map wins, then the first item of the selected day,
@@ -569,8 +582,9 @@ export default function Home() {
         <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
-            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} days={data.days} dayColors={dayColors} visibility={layerVisibility} currentUserId={mutationUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
+            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} days={data.days} dayColors={dayColors} visibility={layerVisibility} currentUserId={mutationUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onClusterSelect={setClusterPhotos} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
             {!mapUnavailable ? <RouteDraftLayer map={map} points={routeDraftPoints} /> : null}
+            {!mapUnavailable && clusterPhotos && clickMode === "idle" && !journeyOpen ? <ClusterRelivePill photos={clusterPhotos} onRelive={reliveClusterPhotos} onDismiss={dismissClusterPhotos} /> : null}
             {/* Which day the map is filtered to. Sits under the header on
                 phones (the map runs full-bleed there) and in the map's own
                 top-left corner on desktop. Hidden while a placement prompt
