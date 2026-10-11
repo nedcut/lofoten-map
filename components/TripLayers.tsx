@@ -198,6 +198,13 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
     const markers = new Map<string, MarkerEntry>();
     const photosById = new Map(photos.map((photo) => [photo.id, photo]));
     let frame = 0;
+    // Bumped on every cluster tap and every dismissal, so a getClusterLeaves
+    // reply that lands after the user moved on can't revive a stale offer.
+    let clusterRequest = 0;
+    function clearClusterSelection() {
+      clusterRequest += 1;
+      actionsRef.current.onClusterSelect(null);
+    }
     // The marker currently being dragged. refreshMarkers runs on every
     // sourcedata event (tiles load constantly), and without this guard it
     // would snap the dragged marker back to its source position — or remove
@@ -395,7 +402,7 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       element.addEventListener("click", (event) => {
         event.stopPropagation();
         if (!entry.isCluster) {
-          actionsRef.current.onClusterSelect(null);
+          clearClusterSelection();
           // Viewers who can't edit have nothing to do in a popup but press
           // "Relive from here", so a tap goes straight into the viewer.
           // Owners and admins still get the popup with edit/delete.
@@ -409,8 +416,10 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
           if (error || zoom === null || zoom === undefined) return;
           activeMap.easeTo({ center: target, zoom, duration: 550 });
         });
+        clearClusterSelection();
+        const request = clusterRequest;
         source?.getClusterLeaves(entry.clusterId, entry.count, 0, (error, leaves) => {
-          if (error || !leaves) return;
+          if (error || !leaves || request !== clusterRequest) return;
           const members = leaves.flatMap((leaf) => photosById.get(String(leaf.properties?.id ?? "")) ?? []);
           if (members.length > 0) actionsRef.current.onClusterSelect(members);
         });
@@ -538,10 +547,7 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
     // The cluster offer lasts until the user moves on: their own pan or zoom
     // (the cluster's easeTo carries no originalEvent) or a tap on the map.
     function handleUserMove(event: { originalEvent?: Event }) {
-      if (event.originalEvent) actionsRef.current.onClusterSelect(null);
-    }
-    function clearClusterSelection() {
-      actionsRef.current.onClusterSelect(null);
+      if (event.originalEvent) clearClusterSelection();
     }
 
     scheduleRefresh();
