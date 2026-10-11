@@ -193,3 +193,11 @@ export function journeyItemTitle(item: JourneyItem) {
   if (item.kind === "note") return item.primary.body;
   return item.primary.name;
 }
+
+// The first of these photos in journey order: where "Relive" from a map
+// cluster starts, so playback runs forward through the whole group.
+export function firstJourneyPhotoId(items: JourneyItem[], photoIds: Iterable<string>): string | null {
+  const wanted = new Set(photoIds);
+  const first = items.find((item) => item.kind === "photo" && wanted.has(item.primary.id));
+  return first?.kind === "photo" ? first.primary.id : null;
+}
