@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_UPLOAD_BYTES } from "@/lib/media-formats";
 
 vi.mock("server-only", () => ({}));
 
@@ -54,13 +55,28 @@ describe("POST /api/storage/presign", () => {
     ["non-integer contentLength", { contentLength: 12.5 }],
     ["string contentLength", { contentLength: "1234" }],
     ["zero contentLength", { contentLength: 0 }],
-    ["oversize contentLength", { contentLength: 50 * 1024 * 1024 + 1 }],
+    ["oversize photo", { contentLength: MAX_UPLOAD_BYTES.photo + 1 }],
+    ["oversize video", { contentType: "video/quicktime", contentLength: MAX_UPLOAD_BYTES.video + 1 }],
+    ["GIF", { contentType: "image/gif" }],
+    ["WebM", { contentType: "video/webm" }],
+    ["untyped bytes", { contentType: "application/octet-stream" }],
   ])("returns 400 for %s", async (_label, overrides) => {
     const response = await post({ ...validBody, ...overrides });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Invalid storage upload request." });
     expect(mocks.authorizeObjectRequest).not.toHaveBeenCalled();
     expect(mocks.presignPut).not.toHaveBeenCalled();
+  });
+
+  // The picker admits exactly these; each must also clear the route.
+  it.each([
+    ["the largest photo the picker allows", { contentType: "image/heic", contentLength: MAX_UPLOAD_BYTES.photo }],
+    ["the largest video the picker allows", { path: "lofoten-2026/abc.mov", contentType: "video/quicktime", contentLength: MAX_UPLOAD_BYTES.video }],
+    ["an MP4 video", { path: "lofoten-2026/abc.mp4", contentType: "video/mp4", contentLength: 100 * 1024 * 1024 }],
+  ])("presigns %s", async (_label, overrides) => {
+    const response = await post({ ...validBody, ...overrides });
+    expect(response.status).toBe(200);
+    expect(mocks.presignPut).toHaveBeenCalledTimes(1);
   });
 
   it("returns 400 for a cacheControl other than one immutable year", async () => {

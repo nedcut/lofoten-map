@@ -347,9 +347,15 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       // The frame and count badge take the colour of the photo's day (see
       // map-overrides.css), matching the day card and route line.
       element.style.setProperty("--day-accent", dayColorFor(dayColors, photo.day_id));
-      const imageUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
+      const fallbackUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
+      const imageUrl = photo.marker_url || fallbackUrl;
       if (imageUrl) {
         const image = document.createElement("img");
+        // Photos uploaded before marker images existed have no object at
+        // marker_url until the backfill runs; show the thumbnail instead.
+        if (fallbackUrl && imageUrl !== fallbackUrl) {
+          image.addEventListener("error", () => { image.src = fallbackUrl; }, { once: true });
+        }
         image.src = imageUrl;
         image.alt = "";
         image.decoding = "async";

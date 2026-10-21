@@ -9,6 +9,19 @@ describe("detectMediaType", () => {
     expect(detectMediaType(new File([], "clip.MOV"))).toBe("video");
     expect(detectMediaType(new File([], "notes.txt", { type: "text/plain" }))).toBeNull();
   });
+
+  // These used to pass the picker and then fail at the presign route.
+  it("rejects formats the upload route would refuse", () => {
+    expect(detectMediaType(new File([], "loop.gif", { type: "image/gif" }))).toBeNull();
+    expect(detectMediaType(new File([], "clip.webm", { type: "video/webm" }))).toBeNull();
+    expect(detectMediaType(new File([], "clip.webm", { type: "" }))).toBeNull();
+    expect(detectMediaType(new File([], "photo.avif", { type: "image/avif" }))).toBeNull();
+  });
+
+  it("accepts m4v as MP4 video", () => {
+    expect(detectMediaType(new File([], "clip.m4v", { type: "video/x-m4v" }))).toBe("video");
+    expect(detectMediaType(new File([], "clip.m4v", { type: "" }))).toBe("video");
+  });
 });
 
 describe("mediaTypeForFile", () => {
@@ -37,6 +50,7 @@ describe("prepareMediaFiles", () => {
     await expect(prepareMediaFiles(file)).resolves.toEqual({
       imageFile: file,
       thumbnailFile: null,
+      markerFile: null,
       optimized: false,
       mediaType: "video",
     });

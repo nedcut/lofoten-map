@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
+import { maxUploadBytesFor } from "@/lib/media-formats";
 import { authorizeObjectRequest, parseNamespace, presignPut, validObjectPath } from "@/lib/object-store-server";
 import { isPreviewReadOnly, PREVIEW_READ_ONLY_MESSAGE } from "@/lib/preview-read-only";
-
-const ALLOWED_CONTENT_TYPES = /^(image\/(jpeg|png|webp|heic|heif)|video\/(mp4|quicktime))$/i;
-const MAX_OBJECT_BYTES = 50 * 1024 * 1024;
 
 export async function POST(request: Request) {
   try {
@@ -16,14 +14,16 @@ export async function POST(request: Request) {
     const contentType = body.contentType;
     const cacheControl = body.cacheControl;
     const contentLength = body.contentLength;
+    // Same allowlist and per-type caps the upload picker enforces.
+    const maxBytes = typeof contentType === "string" ? maxUploadBytesFor(contentType) : null;
     if (!namespace
       || !validObjectPath(path)
       || typeof contentType !== "string"
-      || !ALLOWED_CONTENT_TYPES.test(contentType)
+      || maxBytes === null
       || typeof contentLength !== "number"
       || !Number.isInteger(contentLength)
       || contentLength <= 0
-      || contentLength > MAX_OBJECT_BYTES) {
+      || contentLength > maxBytes) {
       return NextResponse.json({ error: "Invalid storage upload request." }, { status: 400 });
     }
     if (cacheControl !== "31536000") {

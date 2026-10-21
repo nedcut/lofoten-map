@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { dimensionsFor, extensionlessName, preparePhotoFiles } from "./photo-processing";
+import { canDecodeImage, dimensionsFor, extensionlessName, isHeic, preparePhotoFiles } from "./photo-processing";
 
 describe("dimensionsFor", () => {
   it("leaves an image smaller than the max edge untouched", () => {
@@ -54,7 +54,7 @@ describe("preparePhotoFiles (no-canvas environment)", () => {
     // so preparation must degrade gracefully to a pass-through.
     const file = new File([new Uint8Array([1, 2, 3])], "sunset.jpg", { type: "image/jpeg" });
     const result = await preparePhotoFiles(file);
-    expect(result).toEqual({ imageFile: file, thumbnailFile: null, optimized: false });
+    expect(result).toEqual({ imageFile: file, thumbnailFile: null, markerFile: null, optimized: false });
   });
 
   it("passes through unsupported file types without attempting to re-encode", async () => {
@@ -110,8 +110,32 @@ describe("preparePhotoFiles (canvas environment)", () => {
     expect(result.thumbnailFile?.name).toBe("ridge-thumb.jpg");
     expect(result.thumbnailFile?.type).toBe("image/jpeg");
     expect(result.thumbnailFile?.size).toBe(512);
-    expect(drawImage).toHaveBeenCalledTimes(2);
+    expect(result.markerFile?.name).toBe("ridge-marker.jpg");
+    expect(result.markerFile?.type).toBe("image/jpeg");
+    expect(drawImage).toHaveBeenCalledTimes(3);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("crops the marker image to a centred 144 px square", async () => {
+    const { bitmap, drawImage } = installCanvasMocks();
+    const file = new File([new Uint8Array(1024)], "wide.jpg", { type: "image/jpeg" });
+    await preparePhotoFiles(file);
+
+    // 4000x3000: the 3000 px square starts 500 px in and scales to 144x144.
+    expect(drawImage).toHaveBeenCalledWith(bitmap, 500, 0, 3000, 3000, 0, 0, 144, 144);
+  });
+
+  it("re-encodes a decodable HEIC to JPEG even when the JPEG is larger", async () => {
+    installCanvasMocks({ bitmap: { width: 1200, height: 800 }, blobSize: (width) => (width > 520 ? 4096 : 256) });
+    // Browsers often report no MIME type for HEIC, so the extension decides.
+    const file = new File([new Uint8Array(1024)], "fjord.HEIC", { type: "" });
+    const result = await preparePhotoFiles(file);
+
+    expect(result.optimized).toBe(true);
+    expect(result.imageFile.name).toBe("fjord.jpg");
+    expect(result.imageFile.type).toBe("image/jpeg");
+    expect(result.thumbnailFile?.name).toBe("fjord-thumb.jpg");
+    expect(result.markerFile?.name).toBe("fjord-marker.jpg");
   });
 
   it("keeps the original small image while still creating a thumbnail", async () => {
@@ -142,18 +166,34 @@ describe("preparePhotoFiles (canvas environment)", () => {
     const file = new File([new Uint8Array([1, 2, 3])], "corrupt.jpg", { type: "image/jpeg" });
     const result = await preparePhotoFiles(file);
 
-    expect(result).toEqual({ imageFile: file, thumbnailFile: null, optimized: false });
+    expect(result).toEqual({ imageFile: file, thumbnailFile: null, markerFile: null, optimized: false });
     expect(close).not.toHaveBeenCalled();
   });
+});
 
-  it("passes HEIC files through instead of trying unsupported canvas re-encoding", async () => {
-    const createImageBitmap = vi.fn();
-    vi.stubGlobal("createImageBitmap", createImageBitmap);
-    vi.stubGlobal("document", { createElement: vi.fn() });
-    const file = new File([new Uint8Array([1, 2, 3])], "fjord.HEIC", { type: "image/heic" });
-    const result = await preparePhotoFiles(file);
+describe("HEIC selection checks", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-    expect(result).toEqual({ imageFile: file, thumbnailFile: null, optimized: false });
-    expect(createImageBitmap).not.toHaveBeenCalled();
+  it("recognises HEIC by MIME type or, when the type is missing, by extension", () => {
+    expect(isHeic(new File([], "a.heic", { type: "image/heic" }))).toBe(true);
+    expect(isHeic(new File([], "a.HEIF", { type: "" }))).toBe(true);
+    expect(isHeic(new File([], "a.heic", { type: "application/octet-stream" }))).toBe(true);
+    expect(isHeic(new File([], "a.jpg", { type: "image/jpeg" }))).toBe(false);
+  });
+
+  it("reports whether the browser can decode the file", async () => {
+    const close = vi.fn();
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue({ close }));
+    expect(await canDecodeImage(new File([], "a.heic"))).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
+
+    vi.stubGlobal("createImageBitmap", vi.fn().mockRejectedValue(new DOMException("unsupported")));
+    expect(await canDecodeImage(new File([], "a.heic"))).toBe(false);
+  });
+
+  it("treats a browser without createImageBitmap as unable to decode", async () => {
+    expect(await canDecodeImage(new File([], "a.heic"))).toBe(false);
   });
 });

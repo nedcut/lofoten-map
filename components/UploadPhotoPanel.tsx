@@ -9,7 +9,9 @@ import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { correctCameraClock, extractPhotoExif, type ExtractedExif } from "@/lib/exif";
 import { fileContentHash } from "@/lib/file-hash";
+import { MAX_UPLOAD_BYTES, UNSUPPORTED_MEDIA_MESSAGE } from "@/lib/media-formats";
 import { detectMediaType } from "@/lib/media-processing";
+import { canDecodeImage, isHeic } from "@/lib/photo-processing";
 import { clearPhotoDraft, readPhotoDraft, writePhotoDraft, type PhotoDraft } from "@/lib/photo-draft-store";
 import { collectTimeAnchors, timeInterpolateItems } from "@/lib/photo-interpolate";
 import {
@@ -64,8 +66,6 @@ type Props = {
   onSave: (items: PhotoUploadItemInput[], onProgress: (progress: PhotoUploadProgress) => void) => Promise<PhotoUploadSaveResult | void>;
 };
 
-const MAX_IMAGE_FILE_SIZE = 30 * 1024 * 1024;
-const MAX_VIDEO_FILE_SIZE = 250 * 1024 * 1024;
 const EXIF_CONCURRENCY = 4;
 const FINGERPRINT_CONCURRENCY = 2;
 const VIDEO_FINGERPRINT_CONCURRENCY = 1;
@@ -322,9 +322,9 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
       const id = crypto.randomUUID();
       const mediaType = detectMediaType(file);
       if (!mediaType) {
-        return { id, file, mediaType: "photo", contentHash: null, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: "Unsupported file type." };
+        return { id, file, mediaType: "photo", contentHash: null, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: UNSUPPORTED_MEDIA_MESSAGE };
       }
-      const maxSize = mediaType === "video" ? MAX_VIDEO_FILE_SIZE : MAX_IMAGE_FILE_SIZE;
+      const maxSize = MAX_UPLOAD_BYTES[mediaType];
       if (file.size > maxSize) {
         return { id, file, mediaType, contentHash: null, caption: "", dayId: null, dayMatchSource: null, locationSource: null, exif: null, coordinate: null, status: "invalid", message: `Over ${formatBytes(maxSize)}. Export a smaller copy first.` };
       }
@@ -338,6 +338,14 @@ export function UploadPhotoPanel({ days, routes, existingPhotos, tripSlug, mapAv
     const readable = nextItems.filter((item) => item.status === "reading");
     const fingerprinted: QueueItem[] = [];
     async function fingerprintItem(item: QueueItem) {
+      // Only a browser that can decode HEIC can turn it into a JPEG that
+      // every viewer can display, so elsewhere it is refused up front.
+      if (isHeic(item.file) && !await canDecodeImage(item.file)) {
+        setItems((current) => current.map((currentItem) => currentItem.id === item.id
+          ? { ...currentItem, status: "invalid", message: "This browser cannot convert HEIC photos. Export it as JPEG first, or upload from Safari or an iPhone." }
+          : currentItem));
+        return;
+      }
       try {
         const contentHash = await fileContentHash(item.file);
         if (existingHashes.has(contentHash) || selectedHashes.has(contentHash)) {

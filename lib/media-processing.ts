@@ -1,16 +1,13 @@
-import { extensionlessName, preparePhotoFiles, type PreparedPhotoFiles } from "./photo-processing";
+import { mediaTypeForContentType, storedContentType, type MediaType } from "./media-formats";
+import { extensionlessName, prepareMarkerFile, preparePhotoFiles, type PreparedPhotoFiles } from "./photo-processing";
 
-export type MediaType = "photo" | "video";
+export type { MediaType };
 export type PreparedMediaFiles = PreparedPhotoFiles & { mediaType: MediaType };
 
-const IMAGE_EXTENSIONS = [".heic", ".heif", ".jpg", ".jpeg", ".png", ".webp", ".gif"];
-const VIDEO_EXTENSIONS = [".mov", ".mp4", ".m4v", ".webm"];
-
+/** Photo or video for an accepted file; null for anything the app cannot store. */
 export function detectMediaType(file: File): MediaType | null {
-  const lowerName = file.name.toLowerCase();
-  if (file.type.startsWith("image/") || IMAGE_EXTENSIONS.some((extension) => lowerName.endsWith(extension))) return "photo";
-  if (file.type.startsWith("video/") || VIDEO_EXTENSIONS.some((extension) => lowerName.endsWith(extension))) return "video";
-  return null;
+  const contentType = storedContentType(file);
+  return contentType ? mediaTypeForContentType(contentType) : null;
 }
 
 export function mediaTypeForFile(file: File): MediaType {
@@ -80,5 +77,7 @@ function videoThumbnail(file: File): Promise<File | null> {
 export async function prepareMediaFiles(file: File): Promise<PreparedMediaFiles> {
   const mediaType = mediaTypeForFile(file);
   if (mediaType === "photo") return { ...(await preparePhotoFiles(file)), mediaType };
-  return { imageFile: file, thumbnailFile: await videoThumbnail(file), optimized: false, mediaType };
+  const thumbnailFile = await videoThumbnail(file);
+  const markerFile = thumbnailFile ? await prepareMarkerFile(thumbnailFile) : null;
+  return { imageFile: file, thumbnailFile, markerFile, optimized: false, mediaType };
 }

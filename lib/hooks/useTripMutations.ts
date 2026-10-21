@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { BackendClient, BackendUser } from "@/lib/backend";
 import type { Day, LngLat, Note, RouteMode, RouteSegment, TripData } from "@/types/trip";
-import { deleteObjects, PHOTO_BUCKET } from "@/lib/object-store";
+import { deleteObjects, PHOTO_BUCKET, photoStoragePaths } from "@/lib/object-store";
 // @/lib/gpx is loaded lazily inside importGpx (below) so its @turf/simplify
 // dependency stays out of the initial bundle — GPX import is a rare admin action.
 import { lineDistanceMeters } from "@/lib/geo";
@@ -360,15 +360,13 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
       await runAdminOperation(async () => {
         if (backend) {
           const photoToDelete = table === "photos" ? data.photos.find((photo) => photo.id === id) : null;
-          const photoStoragePaths = photoToDelete
-            ? [photoToDelete.image_path, photoToDelete.thumbnail_path].filter((path): path is string => Boolean(path))
-            : [];
+          const storagePaths = photoToDelete ? photoStoragePaths(photoToDelete) : [];
           const { error } = await backend.from(table).delete().eq("id", id).eq("trip_id", trip.id);
           if (error) reportError(error.message);
           else {
             if (table === "days") selectDay(selectedDayId === id ? null : selectedDayId);
-            if (photoStoragePaths.length > 0) {
-              const { error: storageError } = await deleteObjects(backend, PHOTO_BUCKET, photoStoragePaths);
+            if (storagePaths.length > 0) {
+              const { error: storageError } = await deleteObjects(backend, PHOTO_BUCKET, storagePaths);
               if (storageError) reportError(`Item deleted, but photo file cleanup failed: ${storageError.message}`);
               else setInfo("Item deleted.");
             } else {

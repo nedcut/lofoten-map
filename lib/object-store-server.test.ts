@@ -2,7 +2,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { authorizeObjectRequest, objectKey, parseNamespace, validObjectPath } = await import("@/lib/object-store-server");
+const { authorizeObjectRequest, isContentAddressedPhotoPath, objectKey, parseNamespace, validObjectPath } = await import("@/lib/object-store-server");
+
+const HASH = "a".repeat(64);
+
+describe("isContentAddressedPhotoPath", () => {
+  it("accepts the original, thumbnail and marker shapes", () => {
+    expect(isContentAddressedPhotoPath(`slug/${HASH}.heic`)).toBe(true);
+    expect(isContentAddressedPhotoPath(`slug/thumbs/${HASH}.jpg`)).toBe(true);
+    expect(isContentAddressedPhotoPath(`slug/markers/${HASH}.jpg`)).toBe(true);
+    expect(isContentAddressedPhotoPath(`slug/markers/${HASH}.png`)).toBe(false);
+    expect(isContentAddressedPhotoPath(`slug/other/${HASH}.jpg`)).toBe(false);
+  });
+});
 
 describe("validObjectPath", () => {
   it.each([
@@ -70,6 +82,17 @@ describe("authorizeObjectRequest", () => {
     )));
     await expect(authorizeObjectRequest(requestWithToken(), "trip-photos", "slug/abc.jpg", "delete"))
       .rejects.toThrow(/can_delete_photo_object/);
+  });
+
+  // No column stores a marker path, so the row check must look for the
+  // thumbnail it derives from; checking the marker path itself would always
+  // read as "unreferenced" and let any member delete it.
+  it("authorizes a marker delete as its thumbnail", async () => {
+    vi.stubEnv("NEXT_PUBLIC_NEON_DATA_API_URL", "https://data.example.test");
+    const fetchMock = vi.fn().mockResolvedValue(new Response("true", { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(authorizeObjectRequest(requestWithToken(), "trip-photos", `slug/markers/${HASH}.jpg`, "delete")).resolves.toBe(true);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ check_trip_slug: "slug", check_path: `slug/thumbs/${HASH}.jpg` });
   });
 
   it("denies on other RPC failures", async () => {

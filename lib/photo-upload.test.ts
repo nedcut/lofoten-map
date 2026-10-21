@@ -1,7 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackendClient } from "@/lib/backend";
+import type { PreparedMediaFiles } from "./media-processing";
 import { uploadPhotoBatch, type PhotoBatchInput } from "./photo-upload";
 import type { Photo } from "@/types/trip";
+
+// Browser-only renditions (thumbnail, marker) cannot be produced under node,
+// so tests that need them swap in prepared files here.
+const preparation = vi.hoisted(() => ({ override: null as null | ((file: File) => PreparedMediaFiles) }));
+vi.mock("./media-processing", async () => {
+  const actual = await vi.importActual<typeof import("./media-processing")>("./media-processing");
+  return {
+    ...actual,
+    prepareMediaFiles: (file: File) => preparation.override ? Promise.resolve(preparation.override(file)) : actual.prepareMediaFiles(file),
+  };
+});
+
+afterEach(() => {
+  preparation.override = null;
+});
 
 // Video inputs pass through prepareMediaFiles untouched in the node test
 // environment (no canvas, no thumbnail), which keeps storage paths and
@@ -265,5 +281,77 @@ describe("uploadPhotoBatch", () => {
     expect(result.failedClientIds.sort()).toEqual(["a", "b"]);
     expect(removed).toHaveLength(2);
     expect(inserted).toEqual([]);
+  });
+});
+
+describe("uploadPhotoBatch map-marker images", () => {
+  function withRenditions() {
+    preparation.override = (file) => ({
+      imageFile: file,
+      thumbnailFile: new File([new Uint8Array([4])], `${file.name}-thumb.jpg`, { type: "image/jpeg" }),
+      markerFile: new File([new Uint8Array([5])], `${file.name}-marker.jpg`, { type: "image/jpeg" }),
+      optimized: false,
+      mediaType: "video",
+    });
+  }
+
+  it("stores the marker beside the thumbnail, at the path markers are read from", async () => {
+    withRenditions();
+    const { client, uploaded, inserted } = fakeBackend();
+    const { result } = await batch(client, [input({ clientId: "a" })]);
+
+    expect(result.savedClientIds).toEqual(["a"]);
+    expect(uploaded.sort()).toEqual([
+      "lofoten-2026/hash-a.mp4",
+      "lofoten-2026/markers/hash-a.jpg",
+      "lofoten-2026/thumbs/hash-a.jpg",
+    ]);
+    // No column for the marker: it is derived from thumbnail_path.
+    expect(inserted[0]).toMatchObject({ thumbnail_path: "lofoten-2026/thumbs/hash-a.jpg" });
+    expect(inserted[0]).not.toHaveProperty("marker_path");
+  });
+
+  it("skips the marker when its thumbnail could not be stored", async () => {
+    withRenditions();
+    const { client, uploaded } = fakeBackend({ failUploadFor: ["a.mp4-thumb"] });
+    const { result } = await batch(client, [input({ clientId: "a" })]);
+
+    expect(result.savedClientIds).toEqual(["a"]);
+    expect(uploaded).toEqual(["lofoten-2026/hash-a.mp4"]);
+  });
+
+  it("keeps the upload when only the marker fails, with a warning", async () => {
+    withRenditions();
+    const { client } = fakeBackend({ failUploadFor: ["a.mp4-marker"] });
+    const { result } = await batch(client, [input({ clientId: "a" })]);
+
+    expect(result.savedClientIds).toEqual(["a"]);
+    expect(result.warnings).toEqual(["a.mp4: map marker image skipped"]);
+  });
+
+  it("rolls back the marker with the rest of the row's objects", async () => {
+    withRenditions();
+    const { client, removed } = fakeBackend({ insertErrorMessage: "insert exploded" });
+    await batch(client, [input({ clientId: "a" })]);
+
+    expect(removed.sort()).toEqual([
+      "lofoten-2026/hash-a.mp4",
+      "lofoten-2026/markers/hash-a.jpg",
+      "lofoten-2026/thumbs/hash-a.jpg",
+    ]);
+  });
+
+  it("sends HEIC under its real content type when the browser reports none", async () => {
+    preparation.override = (file) => ({ imageFile: file, thumbnailFile: null, markerFile: null, optimized: false, mediaType: "photo" });
+    const contentTypes: Array<string | undefined> = [];
+    const { client } = fakeBackend();
+    const upload = client.__objectStore.upload;
+    client.__objectStore.upload = async (path, file, options?: { contentType?: string }) => {
+      contentTypes.push(options?.contentType);
+      return upload(path, file);
+    };
+    await batch(client, [input({ clientId: "a", mediaType: "photo", file: new File([new Uint8Array([1])], "a.HEIC", { type: "" }) })]);
+
+    expect(contentTypes).toEqual(["image/heic"]);
   });
 });

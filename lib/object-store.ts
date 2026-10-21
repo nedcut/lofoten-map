@@ -1,4 +1,5 @@
 import type { BackendClient } from "@/lib/backend";
+import { storedContentType } from "@/lib/media-formats";
 import type { Photo, TripMember } from "@/types/trip";
 
 export const PHOTO_BUCKET = "trip-photos";
@@ -26,12 +27,29 @@ export function publicObjectUrl(namespace: ObjectNamespace, path: string | null)
   return `${baseUrl}/${namespace}/${encodedPath}`;
 }
 
+/**
+ * The map-marker image sits beside the thumbnail, `<slug>/thumbs/<name>.jpg`
+ * -> `<slug>/markers/<name>.jpg`, so it needs no column of its own. Rows from
+ * before markers existed have no object there until
+ * scripts/backfill-marker-images.mjs runs; markers fall back to the thumbnail.
+ */
+export function markerPathFor(thumbnailPath: string | null): string | null {
+  const match = thumbnailPath?.match(/^([^/]+)\/thumbs\/([^/]+\.jpg)$/);
+  return match ? `${match[1]}/markers/${match[2]}` : null;
+}
+
+/** Every storage object a photo row owns, including its derived marker. */
+export function photoStoragePaths(row: { image_path: string; thumbnail_path: string | null }): string[] {
+  return [row.image_path, row.thumbnail_path, markerPathFor(row.thumbnail_path)].filter((path): path is string => Boolean(path));
+}
+
 export function resolvePhotoUrls(photos: Photo[]): Photo[] {
   return photos.map((photo) => ({
     ...photo,
     media_type: photo.media_type ?? "photo",
     image_url: publicObjectUrl(PHOTO_BUCKET, photo.image_path),
     thumbnail_url: publicObjectUrl(PHOTO_BUCKET, photo.thumbnail_path),
+    marker_url: publicObjectUrl(PHOTO_BUCKET, markerPathFor(photo.thumbnail_path)),
   }));
 }
 
@@ -79,7 +97,9 @@ export async function uploadObject(
   file: Blob,
   options: { contentType?: string; cacheControl?: string } = {},
 ): Promise<StorageResult> {
-  const contentType = options.contentType || file.type || "application/octet-stream";
+  // Browsers often report HEIC as "" or octet-stream, which the presign route
+  // rejects, so fall back to the content type implied by the file extension.
+  const contentType = options.contentType || storedContentType(file) || file.type || "application/octet-stream";
   const cacheControl = options.cacheControl ?? IMMUTABLE_CACHE_SECONDS;
   const { response, error } = await routeRequest(backend, "/api/storage/presign", {
     namespace,
