@@ -1,16 +1,18 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Loader2, MapPinned, Pencil, Plus, RotateCcw, Save, Share2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Loader2, MapIcon, MapPinned, Pencil, Plus, RotateCcw, Save, Share2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { friendlyPersonName, personFilterOptions } from "@/lib/display-name";
-import { cn, formatDateOnly, formatDateTime } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 import { journeyItemTitle, type JourneyAttachedItem, type JourneyItem } from "@/lib/journey";
 import { syncJourneyVideo, videoFallbackDurationMs } from "@/lib/journey-video";
 import { dayColorMap } from "@/lib/day-colors";
+import { journeyDayStops, journeyTimelineTicks } from "@/lib/journey-timeline";
+import { initialMinimapVisible, MINIMAP_VISIBLE_STORAGE_KEY } from "@/lib/journey-minimap";
 import { shareJourneyLink, type ShareResult } from "@/lib/share";
 import type { Day, Photo, RouteSegment, Trip } from "@/types/trip";
 
@@ -28,6 +30,8 @@ type PhotoUpdate = {
 type Props = {
   trip: Trip | null;
   showIntro: boolean;
+  /** Where focus returns when the viewer closes (the control that opened it). */
+  returnFocusRef: React.RefObject<HTMLElement | null>;
   items: JourneyItem[];
   allItems: JourneyItem[];
   activeIndex: number;
@@ -93,6 +97,7 @@ function attachedText(attached: JourneyAttachedItem) {
 export function JourneyPlayback({
   trip,
   showIntro,
+  returnFocusRef,
   items,
   allItems,
   activeIndex,
@@ -123,6 +128,10 @@ export function JourneyPlayback({
   const [introOpen, setIntroOpen] = useState(showIntro);
   const [complete, setComplete] = useState(false);
   const [shareStatus, setShareStatus] = useState<ShareResult | null>(null);
+  // The mini-map can be hidden entirely so the photo is never covered. The
+  // choice lasts for the browser session; with no choice yet, short screens
+  // start without it. The viewer is client-only, so reading storage here is safe.
+  const [mapVisible, setMapVisible] = useState(() => initialMinimapVisible(window.sessionStorage.getItem(MINIMAP_VISIBLE_STORAGE_KEY), window.innerHeight));
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const resumeTimerRef = useRef<number | null>(null);
   const autoplayTimerRef = useRef<number | null>(null);
@@ -142,13 +151,15 @@ export function JourneyPlayback({
     [allItems],
   );
   const dayColors = useMemo(() => dayColorMap(days), [days]);
-  // Where each day starts along the progress track, for the labelled ticks.
-  const dayTicks = useMemo(() => items.flatMap((item, index) => {
-    const isDayStart = index === 0 || item.dayId !== items[index - 1]?.dayId;
-    if (!isDayStart) return [];
-    const day = days.find((entry) => entry.id === item.dayId) ?? null;
-    return [{ index, day, left: items.length <= 1 ? 0 : (index / (items.length - 1)) * 100 }];
-  }), [days, items]);
+  // The day picker's entries: each day once, jumping to its first moment.
+  const dayStops = useMemo(() => journeyDayStops(items, days), [days, items]);
+  // Where the day changes along the progress track. The ticks only mark the
+  // way (the slider and the day picker navigate), and ticks that would pile
+  // onto each other on a narrow track are merged.
+  const dayTicks = useMemo(() => journeyTimelineTicks(items, trackWidth, 10).map((tick) => ({
+    ...tick,
+    day: days.find((entry) => entry.id === tick.dayId) ?? null,
+  })), [days, items, trackWidth]);
   // Which ticks get a "D3" label: walk left to right and only label a tick
   // when it sits far enough from the last labelled one. The current day
   // always keeps its label and its neighbours make way. Dots always render.
@@ -175,6 +186,7 @@ export function JourneyPlayback({
     return labelled;
   }, [activeDayId, dayTicks, trackWidth]);
   const activeDayColor = activeItem?.dayId ? dayColors.get(activeItem.dayId) ?? null : null;
+  const activeDay = activeItem?.dayId ? days.find((day) => day.id === activeItem.dayId) ?? null : null;
   const selectedUploaderId = uploaderOptions.find((option) => option.value === uploaderFilter)?.id ?? "";
 
   /* eslint-disable react-hooks/set-state-in-effect -- resets the caption editor to mirror the active item (external selection); intentional sync, not a render cascade. */
@@ -226,36 +238,15 @@ export function JourneyPlayback({
     });
   }, [activeIndex, isPlaying, items.length, onNext, speed, videoUrl]);
 
-  // Intro and completion are true modal states: focus enters the dialog, Tab
+  // Intro and completion are true modal states: focus enters the overlay, Tab
   // stays within it, and the playback controls behind it cannot receive focus.
-  useEffect(() => {
-    if (!introOpen && !complete) return;
-    const dialog = modalRef.current;
-    const controls = dialog?.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
-    controls?.[0]?.focus();
-    const trap = (event: KeyboardEvent) => {
-      if (event.key !== "Tab" || !controls?.length) return;
-      const first = controls[0];
-      const last = controls[controls.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    };
-    document.addEventListener("keydown", trap);
-    return () => document.removeEventListener("keydown", trap);
-  }, [complete, introOpen]);
-
-  // The main viewer is itself a full-screen dialog: initial focus, a Tab trap,
-  // and focus restore on close. Disabled while the intro/complete overlay is
-  // up (the effect above owns focus then) and doesn't take onClose — the
-  // window keydown handler below already closes on Escape.
-  // The intro overlay takes focus first, so by the time the viewer dialog
-  // activates the "previous" element would be the intro button (or body).
-  // Capture the real opener once on mount and restore to it on close.
-  const openerRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  }, []);
-  useDialogFocus(rootRef, { active: !introOpen && !complete, restoreTo: openerRef });
+  // Whichever dialog is active when the viewer closes hands focus back to the
+  // control that opened Journey Mode.
+  useDialogFocus(modalRef, { active: introOpen || complete, restoreTo: returnFocusRef });
+  // The main viewer is itself a full-screen dialog with the same treatment
+  // while neither overlay is up. Neither takes onClose: the window keydown
+  // handler below already closes on Escape.
+  useDialogFocus(rootRef, { active: !introOpen && !complete, restoreTo: returnFocusRef });
 
   function advanceVideoInSlideshow() {
     if (!isPlayingRef.current) return;
@@ -463,6 +454,19 @@ export function JourneyPlayback({
     window.setTimeout(() => setShareStatus(null), 2500);
   }
 
+  function toggleMap() {
+    const next = !mapVisible;
+    setMapVisible(next);
+    window.sessionStorage.setItem(MINIMAP_VISIBLE_STORAGE_KEY, next ? "1" : "0");
+  }
+
+  function jumpToDay(stopIndex: number) {
+    const stop = dayStops[stopIndex];
+    if (!stop) return;
+    noteInteraction();
+    onSelectIndex(stop.firstIndex);
+  }
+
   function replay() {
     setComplete(false);
     setIntroOpen(false);
@@ -524,6 +528,9 @@ export function JourneyPlayback({
         </div>
         <div className="flex items-center gap-2">
           {filterControls}
+          <IconButton onClick={toggleMap} aria-label="Map" aria-pressed={mapVisible} title={mapVisible ? "Hide map" : "Show map"} className={cn(mapVisible && "bg-white/28")}>
+            <MapIcon className="h-4 w-4" />
+          </IconButton>
           <IconButton onClick={shareJourney} aria-label="Share journey">
             <Share2 className="h-4 w-4" />
           </IconButton>
@@ -533,31 +540,46 @@ export function JourneyPlayback({
       {shareStatus ? <div role="status" className="absolute right-4 top-16 z-50 rounded-full bg-white px-3 py-2 text-xs font-bold text-stone-950 shadow-xl">{shareStatus === "copied" ? "Link copied" : shareStatus === "shared" ? "Journey shared" : "Couldn’t share link"}</div> : null}
 
       {introOpen ? (
-        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-intro-title" className="absolute inset-0 z-50 flex items-center justify-center bg-stone-950/72 p-6 backdrop-blur-md">
-          <section className="max-w-xl text-center">
-            <div className="text-xs font-black uppercase tracking-[0.24em] text-ember-400">A shared travel story</div>
-            {/* h2, not h1 — the app already has an h1 for the trip title (DaySidebar),
-                and this overlay is transient. */}
-            <h2 id="journey-intro-title" className="mt-4 font-serif text-5xl font-semibold md:text-7xl">{trip?.title ?? "this trip"}</h2>
-            {trip?.description ? <p className="mx-auto mt-5 max-w-lg text-base leading-7 text-white/75">{trip.description}</p> : null}
-            <p className="mt-3 text-sm text-white/55">{items.length} moments across {days.length} days</p>
-            <Button onClick={() => { setIntroOpen(false); setIsPlaying(true); }} className="mt-8 rounded-full px-6"><CirclePlay className="h-5 w-5" /> Begin journey</Button>
-          </section>
+        // The overlay scrolls and the inner wrapper centres only while there is
+        // room, so a long description on a short screen never pushes the
+        // buttons out of reach.
+        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-intro-title" className="absolute inset-0 z-50 overflow-y-auto overscroll-contain bg-stone-950/72 backdrop-blur-md">
+          <div className="flex min-h-full items-center justify-center px-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(4rem+env(safe-area-inset-top))]">
+            <section className="max-w-xl text-center">
+              <div className="text-xs font-black uppercase tracking-[0.24em] text-ember-400">A shared travel story</div>
+              {/* h2, not h1 — the app already has an h1 for the trip title (DaySidebar),
+                  and this overlay is transient. */}
+              <h2 id="journey-intro-title" className="mt-4 font-serif text-4xl font-semibold sm:text-5xl md:text-7xl">{trip?.title ?? "this trip"}</h2>
+              {trip?.description ? <p className="mx-auto mt-5 max-w-lg text-base leading-7 text-white/75">{trip.description}</p> : null}
+              <p className="mt-3 text-sm text-white/55">{items.length} moments across {days.length} days</p>
+              <div className="mt-8 flex flex-wrap justify-center gap-3">
+                <Button onClick={() => { setIntroOpen(false); setIsPlaying(true); }} className="rounded-full px-6"><CirclePlay className="h-5 w-5" /> Begin journey</Button>
+                <button type="button" onClick={onClose} className="rounded-full bg-white/12 px-5 py-3 font-bold text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25">Return to map</button>
+              </div>
+            </section>
+          </div>
+          {/* Same spot as the viewer's own Close, which this overlay covers. Last
+              in the DOM so focus still starts on Begin journey. */}
+          <IconButton onClick={onClose} aria-label="Close journey" className="absolute left-3 top-[calc(0.75rem+env(safe-area-inset-top))] md:left-6 md:top-5">
+            <X className="h-5 w-5" />
+          </IconButton>
         </div>
       ) : null}
 
       {complete ? (
-        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-complete-title" className="absolute inset-0 z-50 flex items-center justify-center bg-stone-950/76 p-6 backdrop-blur-md">
-          <section className="max-w-xl text-center">
-            <div className="text-xs font-black uppercase tracking-[0.24em] text-ember-400">End of the journey</div>
-            <h2 id="journey-complete-title" className="mt-4 font-serif text-5xl font-semibold">Thanks for coming along.</h2>
-            <p className="mt-4 text-white/65">{items.length} moments from {days.length} days{trip?.title ? ` in ${trip.title}` : ""}.</p>
-            <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <Button onClick={replay} className="rounded-full px-5"><RotateCcw className="h-4 w-4" /> Replay</Button>
-              <button onClick={shareJourney} className="inline-flex items-center gap-2 rounded-full bg-white/12 px-5 py-3 font-bold text-white"><Share2 className="h-4 w-4" /> Share</button>
-              <button onClick={onClose} className="rounded-full bg-white/12 px-5 py-3 font-bold text-white">Return to map</button>
-            </div>
-          </section>
+        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-complete-title" className="absolute inset-0 z-50 overflow-y-auto overscroll-contain bg-stone-950/76 backdrop-blur-md">
+          <div className="flex min-h-full items-center justify-center px-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))]">
+            <section className="max-w-xl text-center">
+              <div className="text-xs font-black uppercase tracking-[0.24em] text-ember-400">End of the journey</div>
+              <h2 id="journey-complete-title" className="mt-4 font-serif text-4xl font-semibold sm:text-5xl">Thanks for coming along.</h2>
+              <p className="mt-4 text-white/65">{items.length} moments from {days.length} days{trip?.title ? ` in ${trip.title}` : ""}.</p>
+              <div className="mt-8 flex flex-wrap justify-center gap-3">
+                <Button onClick={replay} className="rounded-full px-5"><RotateCcw className="h-4 w-4" /> Replay</Button>
+                <button onClick={shareJourney} className="inline-flex items-center gap-2 rounded-full bg-white/12 px-5 py-3 font-bold text-white"><Share2 className="h-4 w-4" /> Share</button>
+                <button onClick={onClose} className="rounded-full bg-white/12 px-5 py-3 font-bold text-white">Return to map</button>
+              </div>
+            </section>
+          </div>
         </div>
       ) : null}
 
@@ -617,7 +639,7 @@ export function JourneyPlayback({
 
       {/* On desktop the mini-map sits in the bottom-right corner; JourneyMiniMap
           publishes its width so the bar can keep its controls clear of it. */}
-      <div ref={barRef} className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-stone-950 via-stone-950/86 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-12 md:px-6 md:pb-5 md:pt-16 md:pr-[calc(var(--journey-minimap-width,18rem)+3rem)]">
+      <div ref={barRef} className={cn("absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-stone-950 via-stone-950/86 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-12 md:px-6 md:pb-5 md:pt-16", mapVisible && "md:pr-[calc(var(--journey-minimap-width,18rem)+3rem)]")}>
         <div className="mx-auto max-w-5xl">
           <div className="mb-4 max-w-2xl">
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-white/58">
@@ -697,10 +719,28 @@ export function JourneyPlayback({
               >
                 <Gauge className="hidden h-3.5 w-3.5 shrink-0 text-white/60 sm:block" /> {speed}×
               </button>
+              {/* Day picker: every day as one generous target, jumping to the
+                  day's first moment. The placeholder option names the current
+                  day and is never selected for real, so picking the current
+                  day again still jumps back to its start. */}
+              {dayStops.length > 1 ? (
+                <select
+                  value=""
+                  onChange={(event) => jumpToDay(Number(event.target.value))}
+                  aria-label="Jump to day"
+                  title="Jump to day"
+                  className="h-11 max-w-[7.5rem] rounded-full border border-white/15 bg-stone-950/45 px-3 text-xs font-bold text-white outline-none backdrop-blur focus:ring-4 focus:ring-white/20"
+                >
+                  <option value="" disabled hidden>{activeDay ? `Day ${activeDay.day_number}` : "Unsorted"}</option>
+                  {dayStops.map((stop, stopIndex) => (
+                    <option key={stop.dayId ?? "unsorted"} value={stopIndex}>{dayLabel(days, stop.dayId)}</option>
+                  ))}
+                </select>
+              ) : null}
             </div>
-            {/* The track: a tick per day start, labelled "D1…D8" underneath and
-                coloured like the day everywhere else, so scrubbing to a day
-                is a matter of aiming rather than hovering to find out. */}
+            {/* The track: a dot where each day starts, labelled "D1…D8"
+                underneath and coloured like the day everywhere else. The dots
+                are markers only; the slider on top takes every tap. */}
             <div ref={trackRef} className="relative col-span-3 row-start-1 h-11 pt-0.5 md:col-span-1 md:col-start-2">
               <div className="absolute left-0 right-0 top-3.5 h-1 rounded-full bg-white/16">
                 <div className="h-full rounded-full transition-[width] duration-200" style={{ width: `${Math.max(2, progress * 100)}%`, backgroundColor: activeDayColor ?? "#e7a13d" }} />
@@ -709,19 +749,18 @@ export function JourneyPlayback({
                 const isActiveDay = activeItem.dayId === (day?.id ?? null);
                 const color = day ? dayColors.get(day.id) ?? "#ffffff" : "#ffffff";
                 return (
-                  <button
+                  <span
                     key={`${day?.id ?? "unsorted"}:${index}`}
-                    onClick={() => onSelectIndex(index)}
-                    className="absolute top-0 z-10 flex -translate-x-1/2 flex-col items-center"
+                    aria-hidden
+                    data-journey-day-tick
+                    className="pointer-events-none absolute top-0 flex -translate-x-1/2 flex-col items-center"
                     style={{ left: `${left}%` }}
-                    aria-label={`Jump to ${dayLabel(days, day?.id ?? null)}`}
-                    title={`${dayLabel(days, day?.id ?? null)} ${formatDateOnly(day?.date)}`}
                   >
                     <span className={cn("h-4 w-4 rounded-full border-2 border-stone-950 shadow transition-transform", isActiveDay && "scale-110")} style={{ backgroundColor: color }} />
                     {labelledTicks.has(index) ? (
                       <span className={cn("mt-0.5 text-[10px] font-bold uppercase tabular-nums leading-none", isActiveDay ? "text-white" : "text-white/55")}>{day ? `D${day.day_number}` : "—"}</span>
                     ) : null}
-                  </button>
+                  </span>
                 );
               })}
               <input
@@ -730,7 +769,7 @@ export function JourneyPlayback({
                 max={Math.max(0, items.length - 1)}
                 value={activeIndex}
                 onChange={(event) => onSelectIndex(Number(event.target.value))}
-                className="absolute inset-x-0 top-0 h-7 w-full cursor-pointer opacity-0"
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                 aria-label="Journey progress"
                 aria-valuetext={`${title}, ${dayLabel(days, activeItem.dayId)}`}
               />
@@ -744,7 +783,7 @@ export function JourneyPlayback({
         </div>
       </div>
 
-      <JourneyMiniMap routes={routes} days={days} items={items} activeItem={activeItem} onInteraction={noteInteraction} onSelectItem={onSelectItem} />
+      {mapVisible ? <JourneyMiniMap routes={routes} days={days} items={items} activeItem={activeItem} onInteraction={noteInteraction} onSelectItem={onSelectItem} /> : null}
     </div>
   );
 }

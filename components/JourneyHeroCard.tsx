@@ -2,6 +2,7 @@
 
 import { Play } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { journeyEntryCopy } from "@/lib/journey";
 import { cn } from "@/lib/utils";
 import type { Day, Photo } from "@/types/trip";
 
@@ -10,11 +11,12 @@ type Props = {
   // selected day's photos when a day is active.
   photos: Photo[];
   // How many items the journey will play, and across how many days — drives the
-  // subtitle ("142 moments across 8 days").
+  // whole-trip subtitle ("142 moments across 8 days").
   momentCount: number;
   dayCount: number;
-  // When a day is selected the card offers that day specifically ("Relive
-  // Day 2 · 69 moments · Horseid") — the same thing pressing it will do.
+  // When a day is selected the card starts the journey there ("Start journey
+  // at Day 2 · Horseid · then the rest of the trip") — the same thing
+  // pressing it will do. Playback is never limited to that day.
   day?: Day | null;
   onPlay: () => void;
   disabled?: boolean;
@@ -106,13 +108,7 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, day = null, onP
     return () => window.clearInterval(id);
   }, [visible, preview.length]);
 
-  const moments = momentCount > 0 ? `${momentCount} moment${momentCount === 1 ? "" : "s"}` : null;
-  const title = day ? `Relive Day ${day.day_number}` : "Relive the journey";
-  const subtitle = day
-    ? [moments, day.title].filter(Boolean).join(" · ") || "Watch this day unfold on the map"
-    : moments
-      ? `${moments}${dayCount > 0 ? ` across ${dayCount} day${dayCount === 1 ? "" : "s"}` : ""}`
-      : "Watch the trip unfold across the map";
+  const { title, subtitle } = journeyEntryCopy(day, momentCount, dayCount);
 
   return (
     <button
@@ -120,7 +116,7 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, day = null, onP
       type="button"
       onClick={onPlay}
       disabled={disabled}
-      aria-label={`${title}${subtitle ? ` — ${subtitle}` : ""}`}
+      aria-label={`${title} — ${subtitle}`}
       className={cn(
         // shrink-0: the slideshow layers are all absolutely positioned, so the
         // button has no intrinsic height — without this, the flex-column sidebar

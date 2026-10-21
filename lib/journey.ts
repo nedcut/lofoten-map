@@ -201,3 +201,28 @@ export function firstJourneyPhotoId(items: JourneyItem[], photoIds: Iterable<str
   const first = items.find((item) => item.kind === "photo" && wanted.has(item.primary.id));
   return first?.kind === "photo" ? first.primary.id : null;
 }
+
+// Journey always plays the whole trip; starting "at" a day only picks where
+// playback begins. Labels must say so rather than promise a day-only replay.
+export function startJourneyAtDayLabel(dayNumber: number) {
+  return `Start journey at Day ${dayNumber}`;
+}
+
+// Title and subtitle for the Journey entry points (sidebar hero, mobile
+// sheet). With a day selected the entry starts there and plays on, so it
+// names the day but never counts only that day's moments.
+export function journeyEntryCopy(day: Pick<Day, "day_number" | "title"> | null, momentCount: number, dayCount: number) {
+  if (day) {
+    return {
+      title: startJourneyAtDayLabel(day.day_number),
+      subtitle: day.title ? `${day.title} · then the rest of the trip` : "Then the rest of the trip",
+    };
+  }
+  const moments = momentCount > 0 ? `${momentCount} moment${momentCount === 1 ? "" : "s"}` : null;
+  return {
+    title: "Relive the journey",
+    subtitle: moments
+      ? `${moments}${dayCount > 0 ? ` across ${dayCount} day${dayCount === 1 ? "" : "s"}` : ""}`
+      : "Watch the trip unfold across the map",
+  };
+}

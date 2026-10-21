@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildJourneyItems, firstJourneyPhotoId } from "./journey";
+import { buildJourneyItems, firstJourneyPhotoId, journeyEntryCopy, startJourneyAtDayLabel } from "./journey";
 import type { Day, Note, Photo, Place, TripData } from "@/types/trip";
 
 const tripId = "trip";
@@ -152,5 +152,25 @@ describe("firstJourneyPhotoId", () => {
     const items = buildJourneyItems(data({ photos: [photo({ id: "a" })] }));
 
     expect(firstJourneyPhotoId(items, ["missing"])).toBeNull();
+  });
+});
+
+describe("journeyEntryCopy", () => {
+  it("offers to start at a selected day without promising a day-only count", () => {
+    const copy = journeyEntryCopy(days[1], 331, 8);
+    expect(copy.title).toBe("Start journey at Day 2");
+    expect(copy.subtitle).toBe("Two · then the rest of the trip");
+    expect(`${copy.title} ${copy.subtitle}`).not.toMatch(/moment|Relive Day/);
+    expect(journeyEntryCopy({ day_number: 3, title: null }, 331, 8).subtitle).toBe("Then the rest of the trip");
+  });
+
+  it("describes the whole trip when no day is selected", () => {
+    expect(journeyEntryCopy(null, 331, 8)).toEqual({ title: "Relive the journey", subtitle: "331 moments across 8 days" });
+    expect(journeyEntryCopy(null, 1, 1).subtitle).toBe("1 moment across 1 day");
+    expect(journeyEntryCopy(null, 0, 0).subtitle).toBe("Watch the trip unfold across the map");
+  });
+
+  it("labels per-day play buttons as a starting point", () => {
+    expect(startJourneyAtDayLabel(4)).toBe("Start journey at Day 4");
   });
 });
