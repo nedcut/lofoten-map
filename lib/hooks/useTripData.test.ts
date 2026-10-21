@@ -12,6 +12,11 @@ type QueryResponse = { data: unknown; error: { message: string } | null };
  * returns a chainable builder whose terminal `await` resolves to the response
  * configured for that table. Records the tables touched so tests can count
  * loads without caring about the exact filter chain.
+ *
+ * A trips select with embedded tables ("*,days(*),...") is answered like
+ * PostgREST: the trip row with each embedded table's rows attached, or the
+ * first embedded table's error for the whole request. Set `embedError` to fail
+ * every embedded request.
  */
 function createFakeBackend(responses: Record<string, QueryResponse>) {
   const calls: string[] = [];
@@ -20,6 +25,17 @@ function createFakeBackend(responses: Record<string, QueryResponse>) {
   // A pending promise here delays the next query on that table. The query
   // still reads its response up front, like a slow request that hit the DB early.
   const holds: Record<string, Promise<void> | undefined> = {};
+  const flags: { embedError: QueryResponse["error"] } = { embedError: null };
+  const embedded = (columns: string): QueryResponse => {
+    const trip = responses.trips ?? { data: null, error: null };
+    const tables = [...columns.matchAll(/(\w+)\(/g)].map((match) => match[1]);
+    const failure = flags.embedError ?? trip.error ?? tables.map((table) => responses[table]?.error).find(Boolean) ?? null;
+    if (failure) return { data: null, error: failure };
+    if (!trip.data) return trip;
+    const row: Record<string, unknown> = { ...(trip.data as object) };
+    for (const table of tables) row[table] = responses[table]?.data ?? [];
+    return { data: row, error: null };
+  };
   const from = (table: string) => {
     calls.push(table);
     let response = responses[table] ?? { data: [], error: null };
@@ -36,6 +52,7 @@ function createFakeBackend(responses: Record<string, QueryResponse>) {
             ? { data: null, error: { message: "column trips.data_version does not exist" } }
             : { data: { data_version: row.data_version }, error: null };
         }
+        if (table === "trips" && columns.includes("(")) response = embedded(columns);
         return builder;
       },
       eq: () => builder,
@@ -45,7 +62,7 @@ function createFakeBackend(responses: Record<string, QueryResponse>) {
     };
     return builder;
   };
-  return { backend: { from } as unknown as BackendClient, calls, selects, responses, holds };
+  return { backend: { from } as unknown as BackendClient, calls, selects, responses, holds, flags };
 }
 
 const okResponses = (): Record<string, QueryResponse> => ({
@@ -96,6 +113,50 @@ describe("useTripData", () => {
     expect(result.current.data.photos.map((photo) => photo.id)).toEqual(demoPhotos.map((photo) => photo.id));
     // Anonymous visitors never query admin requests.
     expect(calls).not.toContain("admin_requests");
+  });
+
+  it("loads the whole trip in one request", async () => {
+    const { backend, calls, selects } = createFakeBackend(okResponses());
+    const { result } = renderTripData(backend);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(calls).toEqual(["trips"]);
+    expect(selects[0]).toContain("photos(*)");
+    expect(selects[0]).not.toContain("admin_requests");
+    expect(result.current.data.trip).toEqual(demoTrip);
+    expect(result.current.data.routeSegments).toEqual(demoRoutes);
+  });
+
+  it("embeds admin requests for a signed-in user", async () => {
+    const responses = okResponses();
+    responses.admin_requests = { data: [{ id: "request-1", trip_id: demoTrip.id }], error: null };
+    const { backend, calls, selects } = createFakeBackend(responses);
+    const { result } = renderTripData(backend, fakeUser);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(calls).toEqual(["trips"]);
+    expect(selects[0]).toContain("admin_requests(*)");
+    expect(result.current.data.adminRequests).toEqual([{ id: "request-1", trip_id: demoTrip.id }]);
+  });
+
+  it("falls back to one query per table when the embedded request fails", async () => {
+    const fake = createFakeBackend(okResponses());
+    fake.flags.embedError = { message: "Could not find a relationship between 'trips' and 'days'" };
+    const { result } = renderTripData(fake.backend);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(fake.calls).toEqual(expect.arrayContaining(["trips", "days", "photos", "notes", "trip_members"]));
+    expect(result.current.error).toBeNull();
+    expect(result.current.data.notes).toEqual(demoNotes);
+  });
+
+  it("starts the first load without waiting for the session check", async () => {
+    const { backend, calls } = createFakeBackend(okResponses());
+    const { result } = renderHook(() => useTripData({ backend, user: null, authLoading: true, tripSlug: demoTrip.slug, initialData: emptyTripData }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(calls).toEqual(["trips"]);
+    expect(result.current.data.trip).toEqual(demoTrip);
   });
 
   it("surfaces a trip query failure as an error message", async () => {
@@ -163,14 +224,14 @@ describe("useTripData", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     let releasePoll!: () => void;
-    fake.holds.notes = new Promise((resolve) => { releasePoll = resolve; });
+    fake.holds.trips = new Promise((resolve) => { releasePoll = resolve; });
     let poll!: Promise<void>;
     await act(async () => {
       poll = result.current.loadData({ silent: true });
       for (let tick = 0; tick < 25; tick += 1) await Promise.resolve();
     });
     // The poll has read the old notes and is stuck in flight.
-    expect(fake.holds.notes).toBeUndefined();
+    expect(fake.holds.trips).toBeUndefined();
 
     // A save lands, then the mutation reloads.
     fake.responses.notes = { data: [{ ...demoNotes[0], body: "Saved" }], error: null };
