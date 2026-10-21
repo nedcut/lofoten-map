@@ -7,7 +7,22 @@ import { reuseIfEqual } from "@/lib/trip-data-equal";
 import { isMissingSchemaObjectError } from "@/lib/schema-errors";
 import type { AdminRequest, Photo, RouteSegment, TripData, TripMember } from "@/types/trip";
 
-const POLL_INTERVAL_MS = 30_000;
+// Members can edit, so their tabs check for changes often. Guests only watch;
+// a slower check plus a refresh when they come back to the tab keeps their
+// view current without downloading the trip every 30 seconds.
+const MEMBER_POLL_INTERVAL_MS = 30_000;
+const GUEST_POLL_INTERVAL_MS = 180_000;
+// Returning to the tab (focus or visibility) refreshes at most this often.
+const RETURN_REFRESH_MIN_GAP_MS = 15_000;
+
+/**
+ * trips.data_version goes up on every write to the trip or its rows
+ * (neon/patches/2026-10-21-trip-data-version.sql). Returns null when the
+ * column is not deployed yet, which turns change checks off.
+ */
+function dataVersionOf(trip: Record<string, unknown>): number | null {
+  return typeof trip.data_version === "number" ? trip.data_version : null;
+}
 
 type Options = {
   backend: BackendClient | null;
@@ -34,6 +49,11 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
   // True while the current error/notice was set by a silent poll. A later
   // successful silent poll clears only those, never a message a mutation set.
   const pollMessageRef = useRef(false);
+  // data_version of the data on screen, or null when unknown (column missing or
+  // the last load failed). A silent poll skips the full reload while it matches.
+  const loadedVersionRef = useRef<number | null>(null);
+  // When the last load or change check finished, for throttling tab-return refreshes.
+  const lastSyncedAtRef = useRef(0);
 
   const loadData = useCallback((options?: { silent?: boolean }): Promise<void> => {
     if (!backend) return Promise.resolve();
@@ -53,16 +73,34 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
         pollMessageRef.current = false;
       }
       let pollMessage = false;
+      // Cleared only by a load that fully succeeds.
+      let loadedVersion: number | null = null;
       try {
-        const { data: trip, error: tripError } = await backend.from("trips").select("*").eq("slug", tripSlug).maybeSingle();
+        if (options?.silent && loadedVersionRef.current !== null) {
+          const { data: current, error: versionError } = await backend.from("trips").select("data_version").eq("slug", tripSlug).maybeSingle();
+          if (!isCurrent()) return;
+          if (!versionError && current && dataVersionOf(current) === loadedVersionRef.current) {
+            // Nothing changed: keep the data and any messages from the last load.
+            loadedVersion = loadedVersionRef.current;
+            pollMessage = pollMessageRef.current;
+            return;
+          }
+          // Changed, or the check failed: fall through to a full reload, which
+          // reports any real failure the usual way.
+        }
+        const { data: tripRow, error: tripError } = await backend.from("trips").select("*").eq("slug", tripSlug).maybeSingle();
         if (!isCurrent()) return;
-        if (tripError || !trip) {
+        if (tripError || !tripRow) {
           pollMessage = true;
           setError(tripError
             ? `We could not load the trip right now. Try refreshing, or ask an admin to check access. ${tripError.message}`
             : "The trip is not set up yet. Ask an admin to finish creating it, then refresh.");
           return;
         }
+        // Kept out of `trip` so a version bump alone does not replace the trip object.
+        const trip = { ...tripRow };
+        delete trip.data_version;
+        const tripVersion = dataVersionOf(tripRow);
         const adminRequestsQuery = user
           ? backend.from("admin_requests").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false })
           : Promise.resolve({ data: [], error: null });
@@ -111,6 +149,9 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
           // and memo downstream keys on identity, so an unconditional replace
           // would tear down and rebuild the map layers on every 30s poll.
           setData((current) => reuseIfEqual(current, next));
+          // The trips row was read before the child rows, so this version can only
+          // be older than what was loaded. At worst the next poll reloads once more.
+          loadedVersion = tripVersion;
           if (options?.silent && pollMessageRef.current && !pollMessage) {
             setError(null);
             setNotice(null);
@@ -122,6 +163,8 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
         setError(loadError instanceof Error ? `We could not sync the trip right now. Try refreshing. ${loadError.message}` : "We could not sync the trip right now. Try refreshing.");
       } finally {
         if (isCurrent()) {
+          loadedVersionRef.current = loadedVersion;
+          lastSyncedAtRef.current = Date.now();
           if (options?.silent) pollMessageRef.current = pollMessage;
           if (!options?.silent) setLoading(false);
         }
@@ -143,14 +186,18 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
 
   useEffect(() => {
     if (!backend || authLoading) return;
+    const interval = user ? MEMBER_POLL_INTERVAL_MS : GUEST_POLL_INTERVAL_MS;
     let stopped = false;
     let timer: number | null = null;
     let polling = false;
 
     const schedule = () => {
-      if (!stopped && document.visibilityState === "visible") timer = window.setTimeout(poll, POLL_INTERVAL_MS);
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+      if (!stopped && document.visibilityState === "visible") timer = window.setTimeout(poll, interval);
     };
     const poll = async () => {
+      timer = null;
       if (stopped || polling) return;
       if (document.visibilityState !== "visible") return;
       polling = true;
@@ -161,21 +208,26 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
         schedule();
       }
     };
-    const handleVisibilityChange = () => {
+    const handleReturn = () => {
       if (document.visibilityState !== "visible" || polling) return;
-      if (timer !== null) window.clearTimeout(timer);
-      timer = null;
+      if (Date.now() - lastSyncedAtRef.current < RETURN_REFRESH_MIN_GAP_MS) {
+        // Just synced: make sure a poll is scheduled, but do not fetch again now.
+        if (timer === null) schedule();
+        return;
+      }
       void poll();
     };
 
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("visibilitychange", handleReturn);
+    window.addEventListener("focus", handleReturn);
     schedule();
     return () => {
       stopped = true;
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("visibilitychange", handleReturn);
+      window.removeEventListener("focus", handleReturn);
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [authLoading, backend, loadData]);
+  }, [authLoading, backend, loadData, user]);
 
   return {
     data,
