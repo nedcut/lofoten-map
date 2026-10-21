@@ -89,10 +89,33 @@ async function serveObject(request: Request, env: Env, ctx: ExecutionContext, ke
   const cache = caches.default;
   const cacheKey = new Request(new URL(request.url).toString(), { method: "GET" });
 
-  // A cached full object answers Range and If-None-Match requests itself.
+  // Evaluate validators and ranges just as on an R2 miss. Cache.match applies
+  // Range but ignores If-Range, so never pass the original headers through.
   if (isGet) {
-    const cached = await cache.match(request);
-    if (cached) return cached;
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      const etag = cached.headers.get("ETag") ?? "";
+      if (matchesIfNoneMatch(request, etag)) {
+        void cached.body?.cancel();
+        const headers = new Headers(cached.headers);
+        headers.delete("Content-Length");
+        return new Response(null, { status: 304, headers });
+      }
+      const range = parseRange(request, Number(cached.headers.get("Content-Length")), etag);
+      if (range === "unsatisfiable") {
+        void cached.body?.cancel();
+        const headers = new Headers(cached.headers);
+        headers.delete("Content-Length");
+        headers.set("Content-Range", `bytes */${cached.headers.get("Content-Length")}`);
+        return new Response("Range not satisfiable", { status: 416, headers });
+      }
+      if (!range) return cached;
+      void cached.body?.cancel();
+      const partial = await cache.match(new Request(cacheKey, {
+        headers: { Range: `bytes=${range.offset}-${range.offset + range.length - 1}` },
+      }));
+      if (partial) return partial;
+    }
   }
 
   const wantsPartialOrConditional = request.headers.has("Range") || request.headers.has("If-None-Match");
@@ -102,7 +125,13 @@ async function serveObject(request: Request, env: Env, ctx: ExecutionContext, ke
     writeObjectHeaders(headers, object);
     headers.set("Content-Length", String(object.size));
     const response = new Response(object.body, { status: 200, headers });
-    ctx.waitUntil(cache.put(cacheKey, edgeCacheCopy(response)));
+    ctx.waitUntil(cache.put(cacheKey, edgeCacheCopy(response)).catch((error: unknown) => {
+      console.error(JSON.stringify({
+        message: "R2 media cache write failed",
+        path: new URL(request.url).pathname,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }));
     return response;
   }
 

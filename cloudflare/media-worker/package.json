@@ -3,11 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test test/*.test.mjs",
     "types": "wrangler types",
     "typecheck": "tsc --noEmit",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
+    "esbuild": "0.28.1",
+    "miniflare": "5.20260926.0-alpha",
     "typescript": "^7.0.2",
     "wrangler": "^4.142.0"
   }

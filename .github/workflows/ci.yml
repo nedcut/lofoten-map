@@ -45,12 +45,13 @@ jobs:
           # is exercised without needing real secrets in CI.
           NEXT_PUBLIC_TRIP_SLUG: lofoten-2026
 
-      - name: Typecheck Cloudflare media worker
+      - name: Typecheck and test Cloudflare media worker
         working-directory: cloudflare/media-worker
         run: |
           npm ci
           npm run types
           npm run typecheck
+          npm test
 
   e2e:
     runs-on: ubuntu-latest
