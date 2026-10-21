@@ -9,14 +9,15 @@ export default defineConfig({
   },
   test: {
     // Pure functions under lib/ are environment-agnostic; node is fastest.
-    // Tests that need the DOM (React hook tests under lib/hooks/) opt in per
-    // file with a `// @vitest-environment jsdom` comment on their first line.
+    // Tests that need the DOM (hook tests under lib/hooks/, component tests)
+    // opt in per file with a `// @vitest-environment jsdom` comment on their
+    // first line.
     environment: "node",
-    include: ["lib/**/*.test.ts", "app/**/*.test.ts"],
+    include: ["{lib,app,components}/**/*.test.{ts,tsx}"],
     coverage: {
       provider: "v8",
-      include: ["lib/**/*.ts"],
-      exclude: ["lib/**/*.test.ts"],
+      include: ["{lib,app,components}/**/*.{ts,tsx}"],
+      exclude: ["**/*.test.{ts,tsx}"],
       reporter: ["text", "html"],
     },
   },
