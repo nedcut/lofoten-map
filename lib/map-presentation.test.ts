@@ -3,6 +3,7 @@ import {
   PHOTO_CLUSTER_MAX_ZOOM,
   PHOTO_CLUSTER_RADIUS,
   PHOTO_MARKER_OVERVIEW_ZOOM,
+  clusterTapZoomsIn,
   photoMarkerPresentation,
 } from "./map-presentation";
 
@@ -40,5 +41,22 @@ describe("photo marker presentation", () => {
   it("keeps the shared Mapbox cluster settings deliberate", () => {
     expect(PHOTO_CLUSTER_RADIUS).toBe(80);
     expect(PHOTO_CLUSTER_MAX_ZOOM).toBe(17);
+  });
+});
+
+describe("clusterTapZoomsIn", () => {
+  it("zooms in when the cluster splits at a meaningfully closer zoom", () => {
+    expect(clusterTapZoomsIn(13, 11)).toBe(true);
+    expect(clusterTapZoomsIn(PHOTO_CLUSTER_MAX_ZOOM, 15)).toBe(true);
+  });
+
+  it("does not zoom for photos stacked at one spot (expansion past clusterMaxZoom)", () => {
+    expect(clusterTapZoomsIn(PHOTO_CLUSTER_MAX_ZOOM + 1, 10)).toBe(false);
+  });
+
+  it("does not zoom when the map is already at or nearly at the expansion zoom", () => {
+    expect(clusterTapZoomsIn(14, 14)).toBe(false);
+    expect(clusterTapZoomsIn(14, 14.5)).toBe(false);
+    expect(clusterTapZoomsIn(14, 13.8)).toBe(false);
   });
 });

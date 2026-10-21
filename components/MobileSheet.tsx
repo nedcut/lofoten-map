@@ -18,12 +18,18 @@ const AdminDataPanel = dynamic(() => import("@/components/AdminDataPanel").then(
 // without hard-coding its height.
 export const MOBILE_SHEET_HEIGHT_VAR = "--mobile-sheet-height";
 
+// The collapsed sheet's published height, or a typical one before it mounts.
+export function mobileSheetHeight() {
+  const sheet = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(MOBILE_SHEET_HEIGHT_VAR));
+  return Number.isFinite(sheet) && sheet > 0 ? sheet : 160;
+}
+
 // Counts for the current map filter, so the collapsed peek can tell you what's
 // visible without expanding the sheet. Notes and places share a marker layer, so
 // they're summed together as journal pins.
 export type PeekCounts = { routes: number; photos: number; videos: number; notes: number; places: number };
 
-type MobileSheetProps = SidebarProps & { counts: PeekCounts; mapAvailable?: boolean };
+type MobileSheetProps = SidebarProps & { counts: PeekCounts; mapAvailable?: boolean; loading?: boolean };
 
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -55,6 +61,9 @@ export function MobileSheet(props: MobileSheetProps) {
   const collapsedRef = useRef<HTMLDivElement | null>(null);
   const selectedDay = props.days.find((day) => day.id === props.selectedDayId) ?? null;
   const selectedColor = selectedDay ? dayColorFor(props.dayColors, selectedDay.id) : null;
+  // Until the trip arrives, an empty map means "still loading", not
+  // "Nothing on the map yet". A failed load falls back to the counts line.
+  const tripLoading = props.loading === true && props.trip === null;
 
   // Publish the always-visible part of the sheet (peek header + hero row +
   // quick actions) as a CSS variable. Only that part is measured, so the map
@@ -139,7 +148,7 @@ export function MobileSheet(props: MobileSheetProps) {
                   {selectedColor ? <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: selectedColor }} /> : null}
                   <span className="truncate">{dayLabel(selectedDay)}</span>
                 </span>
-                <span className="block truncate font-bold text-stone-950">{props.mapAvailable === false ? "Map unavailable" : countsLabel(props.counts)}</span>
+                <span className="block truncate font-bold text-stone-950">{props.mapAvailable === false ? "Map unavailable" : tripLoading ? "Loading trip…" : countsLabel(props.counts)}</span>
               </span>
               <ChevronUp className={cn("h-5 w-5 shrink-0 text-stone-500 transition-transform duration-300", expanded && "rotate-180")} />
             </button>

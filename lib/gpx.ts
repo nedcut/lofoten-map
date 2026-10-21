@@ -1,5 +1,6 @@
 import type { LineString } from "geojson";
 import simplify from "@turf/simplify";
+import { TRIP_TIME_ZONE } from "./utils";
 
 export type GpxTrackPoint = {
   lng: number;
@@ -23,7 +24,6 @@ export type ParsedGpx = {
   waypoints: GpxWaypoint[];
 };
 
-const TRIP_TIME_ZONE = "Europe/Oslo";
 const UNDATED_BUCKET = "__undated__";
 
 const tripDayFormatter = new Intl.DateTimeFormat("en-US", {

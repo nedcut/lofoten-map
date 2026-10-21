@@ -25,11 +25,24 @@ type Props = {
 };
 
 const PREVIEW_COUNT = 4;
+// Candidates sampled per shuffle; only landscape ones become slides when any
+// exist, since a portrait photo cropped to this wide card is a thin strip.
+const SAMPLE_COUNT = 12;
 const SLIDE_MS = 5000;
 
+// Thumbnails (520px long edge) are cheap and usually cached by the map
+// markers, so they're used to read each candidate's orientation.
 function previewUrl(photo: Photo) {
   return photo.thumbnail_url ?? photo.image_url;
 }
+
+// The card is ~340px wide on desktop, so on a 2x screen even a landscape
+// thumbnail is upscaled; slides show the full image instead.
+function slideUrl(photo: Photo) {
+  return photo.image_url ?? photo.thumbnail_url;
+}
+
+type Orientation = "landscape" | "portrait" | "broken";
 
 // Fisher–Yates over a copy — never mutates the source array.
 function shuffle<T>(items: T[]): T[] {
@@ -65,13 +78,43 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, day = null, onP
       const kept = current
         .map((photo) => byId.get(photo.id))
         .filter((photo): photo is Photo => Boolean(photo));
-      if (kept.length >= Math.min(PREVIEW_COUNT, candidates.length)) return kept.slice(0, PREVIEW_COUNT);
+      if (kept.length >= Math.min(SAMPLE_COUNT, candidates.length)) return kept.slice(0, SAMPLE_COUNT);
 
       const keptIds = new Set(kept.map((photo) => photo.id));
       const additions = shuffle(candidates.filter((photo) => !keptIds.has(photo.id)));
-      return [...kept, ...additions].slice(0, PREVIEW_COUNT);
+      return [...kept, ...additions].slice(0, SAMPLE_COUNT);
     });
   }, [candidateSignature, candidates]);
+
+  // Probe each sampled thumbnail's natural size to learn its orientation.
+  const [orientations, setOrientations] = useState<Record<string, Orientation>>({});
+  useEffect(() => {
+    let cancelled = false;
+    const record = (id: string, orientation: Orientation) => {
+      if (!cancelled) setOrientations((current) => (current[id] === orientation ? current : { ...current, [id]: orientation }));
+    };
+    const probes = preview.map((photo) => {
+      const image = new Image();
+      image.onload = () => record(photo.id, image.naturalWidth > image.naturalHeight ? "landscape" : "portrait");
+      image.onerror = () => record(photo.id, "broken");
+      image.src = previewUrl(photo) ?? "";
+      return image;
+    });
+    return () => {
+      cancelled = true;
+      probes.forEach((image) => {
+        image.onload = null;
+        image.onerror = null;
+      });
+    };
+  }, [preview]);
+
+  // Landscape slides appear as their probes land, in shuffled order, so the
+  // first frame doesn't wait on the rest. Portraits are the fallback only once
+  // every probe is in and none came back landscape.
+  const landscapes = preview.filter((photo) => orientations[photo.id] === "landscape");
+  const probed = preview.every((photo) => orientations[photo.id] !== undefined);
+  const slides = (landscapes.length > 0 || !probed ? landscapes : preview.filter((photo) => orientations[photo.id] === "portrait")).slice(0, PREVIEW_COUNT);
 
   // The crossfade only runs once the card is actually on screen, so an unseen
   // hero (collapsed mobile sheet, scrolled-away sidebar) costs nothing.
@@ -97,16 +140,16 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, day = null, onP
   // a single static frame: the interval simply never starts.
   const [active, setActive] = useState(0);
   useEffect(() => {
-    if (preview.length === 0) return;
+    if (slides.length === 0) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clamps the active slide after realtime preview removals; intentional.
-    setActive((current) => (current < preview.length ? current : 0));
-  }, [preview.length]);
+    setActive((current) => (current < slides.length ? current : 0));
+  }, [slides.length]);
   useEffect(() => {
-    if (!visible || preview.length < 2) return;
+    if (!visible || slides.length < 2) return;
     if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    const id = window.setInterval(() => setActive((current) => (current + 1) % preview.length), SLIDE_MS);
+    const id = window.setInterval(() => setActive((current) => (current + 1) % slides.length), SLIDE_MS);
     return () => window.clearInterval(id);
-  }, [visible, preview.length]);
+  }, [visible, slides.length]);
 
   const { title, subtitle } = journeyEntryCopy(day, momentCount, dayCount);
 
@@ -126,12 +169,13 @@ export function JourneyHeroCard({ photos, momentCount, dayCount, day = null, onP
       )}
     >
       {/* Slideshow frames. Each crossfades via opacity; the active one also drifts
-          (Ken Burns) for ambient motion. Decorative, so alt="". */}
-      {preview.map((photo, index) => (
+          (Ken Burns) for ambient motion. Decorative, so alt="". Full images are
+          ~500 KB, so each frame mounts only once the slideshow nears it. */}
+      {slides.map((photo, index) => index > active + 1 ? null : (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           key={photo.id}
-          src={previewUrl(photo) ?? undefined}
+          src={slideUrl(photo) ?? undefined}
           alt=""
           aria-hidden
           decoding="async"
