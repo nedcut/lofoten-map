@@ -197,7 +197,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   // State rather than a ref: Retry replaces the instance, and every effect
   // that wires into the map has to re-run against the new one.
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
-  // "failed" when the style never loads (an error before "load", or the
+  // "failed" when the style never loads (an error before "style.load", or the
   // load timeout); Retry bumps `attempt`, which rebuilds the map.
   const [loadState, setLoadState] = useState<"loading" | "ready" | "failed">("loading");
   const [attempt, setAttempt] = useState(0);
@@ -301,13 +301,13 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     // A style that never arrives (outage, offline, bad token) leaves an empty
     // canvas with no event at all unless Mapbox reports an error, so both an
     // early fatal error and a bounded wait end in the Retry state. Errors
-    // after "load" (a missing tile, the DEM) are not fatal and are ignored.
+    // after "style.load" (a missing tile, the DEM) are not fatal and are ignored.
     setLoadState("loading");
     let loaded = false;
     const fail = () => { if (!loaded) setLoadState("failed"); };
     const loadTimer = window.setTimeout(fail, MINIMAP_LOAD_TIMEOUT_MS);
     map.on("error", (event) => { if (isFatalMinimapError(event, loaded)) fail(); });
-    map.once("load", () => {
+    map.once("style.load", () => {
       loaded = true;
       window.clearTimeout(loadTimer);
       setLoadState("ready");

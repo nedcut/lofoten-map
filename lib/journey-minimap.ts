@@ -6,7 +6,7 @@ export const MINIMAP_LOAD_TIMEOUT_MS = 15_000;
 
 /**
  * Whether a Mapbox "error" event means the mini-map cannot start. Only
- * failures before the first "load" count, and only those not tied to a
+ * failures before the first "style.load" count, and only those not tied to a
  * source: a missing tile or a failed terrain/DEM request carries a
  * `sourceId` and the map still works without it, while a failed style
  * request (HTTP 5xx, bad token, offline) has none and leaves an empty canvas.

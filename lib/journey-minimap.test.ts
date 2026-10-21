@@ -4,7 +4,7 @@ import { initialMinimapVisible, isFatalMinimapError } from "./journey-minimap";
 describe("isFatalMinimapError", () => {
   const styleFailure = { type: "error", error: Object.assign(new Error("Service Unavailable"), { status: 503 }) };
 
-  it("treats a source-less error before load (the style request failing) as fatal", () => {
+  it("treats a source-less error before style load (the style request failing) as fatal", () => {
     expect(isFatalMinimapError(styleFailure, false)).toBe(true);
   });
 
@@ -13,7 +13,7 @@ describe("isFatalMinimapError", () => {
     expect(isFatalMinimapError({ ...styleFailure, tile: {} }, false)).toBe(false);
   });
 
-  it("ignores every error once the map has loaded", () => {
+  it("ignores every error once the style has loaded", () => {
     expect(isFatalMinimapError(styleFailure, true)).toBe(false);
   });
 });
