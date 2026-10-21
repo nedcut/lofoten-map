@@ -23,6 +23,15 @@ describe("formatDateTime", () => {
     expect(formatted).toContain("2026");
     expect(formatted).toMatch(/Jun/);
   });
+
+  it("shows the trip's wall clock (Europe/Oslo) regardless of the viewer's time zone", () => {
+    // 20:33Z is 22:33 in Bodø during summer time.
+    expect(formatDateTime("2026-05-27T20:33:00Z")).toBe("May 27, 2026, 10:33 PM");
+  });
+
+  it("rolls the date over at the trip's midnight, not the viewer's", () => {
+    expect(formatDateTime("2026-05-27T22:30:00Z")).toBe("May 28, 2026, 12:30 AM");
+  });
 });
 
 describe("formatDateOnly", () => {
