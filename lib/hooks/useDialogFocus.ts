@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 // Shared focus-management for the app's overlay dialogs (panels, the auth
 // modal, Journey Mode). On activation: remember what had focus, move focus
@@ -33,17 +33,32 @@ export function useDialogFocus(
   // happens later than the open (e.g. after an intro overlay).
   const { onClose, active = true, trapFocus = true, restoreTo } = options;
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  // Callers usually pass an inline onClose, so its identity changes on every
+  // parent render. Keep the latest one in a ref so the activation effect runs
+  // only on open/close; re-running it would move focus back to the first
+  // control mid-interaction.
+  const onCloseRef = useRef(onClose);
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!active) return;
     const container = containerRef.current;
     if (!container) return;
 
-    previouslyFocused.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Keep the earlier opener if focus is already inside the dialog. In dev,
+    // StrictMode re-runs this effect right after the first pass focused the
+    // Close button, and the page behind is `inert`, so the cleanup in between
+    // can't hand focus back to the opener.
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!(focused && container.contains(focused))) previouslyFocused.current = focused;
     // Read once at activation; the opener ref is filled before this effect runs.
     const restoreTarget = restoreTo?.current ?? null;
 
-    const getFocusable = () => Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isVisible);
+    // Re-read the ref on each call: a dialog may swap its root element while
+    // open (AuthPanel's email and code steps), and this effect won't re-run.
+    const getFocusable = () => Array.from((containerRef.current ?? container).querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isVisible);
 
     const initial = getFocusable()[0];
     if (initial) {
@@ -54,9 +69,10 @@ export function useDialogFocus(
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && onClose) {
+      const close = onCloseRef.current;
+      if (event.key === "Escape" && close) {
         event.preventDefault();
-        onClose();
+        close();
         return;
       }
       if (event.key !== "Tab" || !trapFocus) return;
@@ -79,6 +95,6 @@ export function useDialogFocus(
       const toRestore = restoreTarget ?? previouslyFocused.current;
       if (toRestore && document.contains(toRestore)) toRestore.focus();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose is read fresh each run via the effect re-running when it changes identity; containerRef is a ref.
-  }, [active, onClose, trapFocus, restoreTo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- containerRef is a ref; onClose is read through onCloseRef.
+  }, [active, trapFocus, restoreTo]);
 }

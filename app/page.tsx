@@ -13,7 +13,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { ClusterRelivePill } from "@/components/ClusterRelivePill";
 import { HeaderPill, PillButton } from "@/components/ui/HeaderPill";
 import type { MapItemKind } from "@/components/TripLayers";
-import { deriveTripAccess } from "@/lib/access";
+import { canManageItem, deriveTripAccess } from "@/lib/access";
 import { dayColorFor, dayColorMap } from "@/lib/day-colors";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
 import { isPreviewReadOnly } from "@/lib/preview-read-only";
@@ -249,6 +249,14 @@ export default function Home() {
   // Resolve the popup-selected item live from data, so the editor reflects updates
   // and closes automatically if the item is deleted (here or by another member).
   const editTarget = useMemo(() => resolveEditTarget(data, editTargetRef), [editTargetRef, data]);
+  // Same owner-or-admin rule as the map popups: an ?item= link to someone
+  // else's item must not open an editor whose saves RLS silently drops.
+  const canEditTarget = Boolean(editTarget && canManageItem(
+    editTarget.kind,
+    editTarget.kind === "photo" || editTarget.kind === "note" ? editTarget.item.user_id : null,
+    mutationUserId,
+    isAdmin,
+  ));
   const memberAdmin = access.showMemberAdminControls
     ? {
       members: data.members,
@@ -613,7 +621,7 @@ export default function Home() {
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} existingPhotos={data.photos} tripSlug={tripSlug} mapAvailable={mapActionsEnabled} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
       {/* ?item= links restore the editor for anyone; only open it for viewers who can save. */}
-      {editTarget && canContribute ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminStatus.isSaving} onClose={closeEditItem} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
+      {editTarget && canEditTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminStatus.isSaving} onClose={closeEditItem} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
       {journeyOpen ? (
         <JourneyPlayback
           trip={data.trip}
