@@ -17,6 +17,7 @@ vi.mock("./media-processing", async () => {
 
 afterEach(() => {
   preparation.override = null;
+  vi.unstubAllGlobals();
 });
 
 // Video inputs pass through prepareMediaFiles untouched in the node test
@@ -155,6 +156,33 @@ describe("uploadPhotoBatch", () => {
     expect(inserted[0]).toMatchObject({ trip_id: "trip-1", uploader_name: "Ned", media_type: "video" });
     expect(result.insertedRows).toHaveLength(2);
     expect(result.insertedRows[0].id).toBe("row-0");
+  });
+
+  it.each(["null", "throw"])("reports HEIC encoder %s failures per item and continues the batch", async (failure) => {
+    const close = vi.fn();
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue({ width: 1200, height: 800, close }));
+    vi.stubGlobal("document", {
+      createElement: () => ({
+        getContext: () => ({ drawImage: vi.fn() }),
+        toBlob(callback: BlobCallback) {
+          if (failure === "throw") throw new Error("encoder failed");
+          callback(null);
+        },
+      }),
+    });
+    const { client, uploaded, inserted } = fakeBackend();
+    const { result, progressCalls } = await batch(client, [
+      input({ clientId: "bad", mediaType: "photo", file: new File([new Uint8Array([1])], "fjord.HEIC", { type: "" }) }),
+      input({ clientId: "good", mediaType: "photo", file: new File([new Uint8Array([2])], "ridge.jpg", { type: "image/jpeg" }) }),
+    ]);
+
+    expect(result.failedClientIds).toEqual(["bad"]);
+    expect(result.failures).toEqual(["fjord.HEIC: Could not convert HEIC/HEIF to JPEG. Export it as JPEG and try again."]);
+    expect(result.savedClientIds).toEqual(["good"]);
+    expect(uploaded).toEqual(["lofoten-2026/hash-good.jpg"]);
+    expect(inserted).toHaveLength(1);
+    expect(progressCalls()).toBe(2);
+    expect(close).toHaveBeenCalledTimes(2);
   });
 
   it("skips items that duplicate existing photos without touching storage", async () => {

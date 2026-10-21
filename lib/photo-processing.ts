@@ -15,6 +15,7 @@ const CANVAS_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/he
 // Only Safari decodes HEIC, so a stored HEIC original would be a broken image
 // for everyone else. When the browser can decode one, it is always re-encoded.
 const HEIC_TYPES = new Set(["image/heic", "image/heif"]);
+const HEIC_CONVERSION_ERROR = "Could not convert HEIC/HEIF to JPEG. Export it as JPEG and try again.";
 
 export type PreparedPhotoFiles = {
   imageFile: File;
@@ -104,20 +105,22 @@ export async function prepareMarkerFile(thumbnail: File): Promise<File | null> {
 
 export async function preparePhotoFiles(file: File): Promise<PreparedPhotoFiles> {
   const contentType = storedContentType(file);
+  const mustReencode = HEIC_TYPES.has(contentType ?? "");
   if (typeof document === "undefined" || typeof createImageBitmap === "undefined" || !contentType || !CANVAS_TYPES.has(contentType)) {
+    if (mustReencode) throw new Error(HEIC_CONVERSION_ERROR);
     return { imageFile: file, thumbnailFile: null, markerFile: null, optimized: false };
   }
 
   let bitmap: ImageBitmap | null = null;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-    const mustReencode = HEIC_TYPES.has(contentType);
     const shouldOptimize = mustReencode || file.size > OPTIMIZE_ABOVE_BYTES || Math.max(bitmap.width, bitmap.height) > MAX_IMAGE_EDGE;
     const [optimizedImage, thumbnail, marker] = await Promise.all([
       shouldOptimize ? renderImageFile(bitmap, file, MAX_IMAGE_EDGE, IMAGE_QUALITY, "") : Promise.resolve(null),
       renderImageFile(bitmap, file, MAX_THUMB_EDGE, THUMB_QUALITY, "-thumb"),
       renderMarkerFile(bitmap, file),
     ]);
+    if (mustReencode && !optimizedImage) throw new Error(HEIC_CONVERSION_ERROR);
     const useOptimized = Boolean(optimizedImage && (mustReencode || optimizedImage.size < file.size));
 
     return {
@@ -128,7 +131,8 @@ export async function preparePhotoFiles(file: File): Promise<PreparedPhotoFiles>
       markerFile: thumbnail ? marker : null,
       optimized: useOptimized,
     };
-  } catch {
+  } catch (error) {
+    if (mustReencode) throw new Error(HEIC_CONVERSION_ERROR, { cause: error });
     return { imageFile: file, thumbnailFile: null, markerFile: null, optimized: false };
   } finally {
     bitmap?.close();

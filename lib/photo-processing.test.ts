@@ -88,7 +88,7 @@ describe("preparePhotoFiles (canvas environment)", () => {
         height: 0,
         getContext: vi.fn(() => ({ drawImage })),
         toBlob(this: HTMLCanvasElement, callback: BlobCallback, type: string) {
-          const size = options.blobSize?.(this.width) ?? 10;
+          const size = options.blobSize ? options.blobSize(this.width) : 10;
           callback(size === null ? null : new Blob([new Uint8Array(size)], { type }));
         },
       })),
@@ -136,6 +136,31 @@ describe("preparePhotoFiles (canvas environment)", () => {
     expect(result.imageFile.type).toBe("image/jpeg");
     expect(result.thumbnailFile?.name).toBe("fjord-thumb.jpg");
     expect(result.markerFile?.name).toBe("fjord-marker.jpg");
+  });
+
+  describe.each(["null", "throw"])("when JPEG encoding returns %s", (failure) => {
+    function failEncoding() {
+      return installCanvasMocks({ blobSize: () => {
+        if (failure === "throw") throw new Error("encoder failed");
+        return null;
+      } });
+    }
+
+    it.each(["heic", "heif"])("rejects decoded %s instead of returning the raw file", async (extension) => {
+      const { close } = failEncoding();
+      const file = new File([new Uint8Array(1024)], `fjord.${extension}`, { type: "" });
+
+      await expect(preparePhotoFiles(file)).rejects.toThrow("Could not convert HEIC/HEIF to JPEG. Export it as JPEG and try again.");
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("retains the original JPEG when optional optimization fails", async () => {
+      const { close } = failEncoding();
+      const file = new File([new Uint8Array(1024)], "fjord.jpg", { type: "image/jpeg" });
+
+      expect(await preparePhotoFiles(file)).toEqual({ imageFile: file, thumbnailFile: null, markerFile: null, optimized: false });
+      expect(close).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("keeps the original small image while still creating a thumbnail", async () => {

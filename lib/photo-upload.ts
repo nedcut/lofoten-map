@@ -127,7 +127,15 @@ export async function uploadPhotoBatch(options: {
   }
 
   await mapWithConcurrency(uploadCandidates.map((candidate) => candidate.input), concurrency, async (input) => {
-    const prepared = await prepareMediaFiles(input.file);
+    let prepared: Awaited<ReturnType<typeof prepareMediaFiles>>;
+    try {
+      prepared = await prepareMediaFiles(input.file);
+    } catch (error) {
+      failures.push(`${input.file.name}: ${error instanceof Error ? error.message : "Could not prepare media for upload"}`);
+      failedClientIds.push(input.clientId);
+      onItemComplete();
+      return;
+    }
     const extension = storageFileExtension(prepared.imageFile);
     // Content-addressed, so an upload is idempotent: a retry of a batch that
     // died before its insert lands on the same immutable key and reuses the
