@@ -9,7 +9,8 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import "./map-overrides.css";
 import { MapPin } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { LOFOTEN_DEFAULT_VIEW } from "@/lib/geo";
+import { mobileSheetHeight } from "@/components/MobileSheet";
+import { lofotenOpeningView } from "@/lib/geo";
 import type { LngLat, MapClickMode } from "@/types/trip";
 
 type Props = {
@@ -66,13 +67,17 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
     }
     mapboxgl.accessToken = token;
     let instance: mapboxgl.Map;
+    // Same camera as "All days" (app/page.tsx). MapOptions takes no padding,
+    // so it's set right after construction, before the first frame renders.
+    const { padding, ...openingView } = lofotenOpeningView(window.innerWidth, mobileSheetHeight());
     try {
       instance = new mapboxgl.Map({
         container: containerRef.current,
         style: "mapbox://styles/mapbox/outdoors-v12",
-        ...LOFOTEN_DEFAULT_VIEW,
+        ...openingView,
         attributionControl: false,
       });
+      instance.setPadding(padding);
     } catch {
       markUnavailable("The interactive map could not start in this browser. The trip details are still available.");
       return;

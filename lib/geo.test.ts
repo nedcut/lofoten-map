@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { coordinateBounds, lineDistanceMeters, routeDistanceMeters, routeGeometry } from "./geo";
+import { coordinateBounds, LOFOTEN_DEFAULT_VIEW, lineDistanceMeters, lofotenOpeningView, routeDistanceMeters, routeGeometry } from "./geo";
+
+describe("lofotenOpeningView", () => {
+  it("keeps the desktop opening view exactly as before", () => {
+    expect(lofotenOpeningView(1440, 300)).toEqual({ ...LOFOTEN_DEFAULT_VIEW, padding: { top: 0, right: 0, bottom: 0, left: 0 } });
+    expect(lofotenOpeningView(768, 300).zoom).toBe(LOFOTEN_DEFAULT_VIEW.zoom);
+  });
+
+  it("pulls a phone back and pads the bottom sheet out of the frame", () => {
+    const view = lofotenOpeningView(390, 240);
+    expect(view.zoom).toBeLessThan(LOFOTEN_DEFAULT_VIEW.zoom - 0.9);
+    expect(view.zoom).toBeGreaterThan(8.5);
+    expect(view.padding.bottom).toBe(240);
+    expect(view.pitch).toBe(LOFOTEN_DEFAULT_VIEW.pitch);
+    expect(view.bearing).toBe(LOFOTEN_DEFAULT_VIEW.bearing);
+  });
+
+  it("zooms out further on narrower phones", () => {
+    expect(lofotenOpeningView(320, 0).zoom).toBeLessThan(lofotenOpeningView(430, 0).zoom);
+  });
+});
 
 describe("coordinateBounds", () => {
   it("returns null for an empty list", () => {

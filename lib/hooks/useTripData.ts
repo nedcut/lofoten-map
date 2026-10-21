@@ -28,13 +28,20 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
   const [adminRequestsAvailable, setAdminRequestsAvailable] = useState(true);
   const [profilesAvailable, setProfilesAvailable] = useState(true);
   const loadInFlightRef = useRef<Promise<void> | null>(null);
+  // Bumped by every fetch that starts. Only the newest fetch may write state,
+  // so a poll that read the DB before a save cannot overwrite the reload after it.
+  const loadGenerationRef = useRef(0);
   // True while the current error/notice was set by a silent poll. A later
   // successful silent poll clears only those, never a message a mutation set.
   const pollMessageRef = useRef(false);
 
   const loadData = useCallback((options?: { silent?: boolean }): Promise<void> => {
     if (!backend) return Promise.resolve();
-    if (loadInFlightRef.current) return loadInFlightRef.current;
+    // Polls share whatever fetch is running. Other reloads (after a save, on
+    // sign-in) always start fresh, because an in-flight fetch may predate the write.
+    if (options?.silent && loadInFlightRef.current) return loadInFlightRef.current;
+    const generation = ++loadGenerationRef.current;
+    const isCurrent = () => loadGenerationRef.current === generation;
 
     const request = (async () => {
       // A silent background poll must not wipe a message the user is still
@@ -48,6 +55,7 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
       let pollMessage = false;
       try {
         const { data: trip, error: tripError } = await backend.from("trips").select("*").eq("slug", tripSlug).maybeSingle();
+        if (!isCurrent()) return;
         if (tripError || !trip) {
           pollMessage = true;
           setError(tripError
@@ -67,13 +75,15 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
           backend.from("trip_members").select("trip_id,user_id,role,display_name,avatar_path,created_at").eq("trip_id", trip.id).order("created_at"),
           adminRequestsQuery,
         ]);
+        if (!isCurrent()) return;
         const adminRequestsMissing = isMissingSchemaObjectError(adminRequests.error, "admin_requests");
-        setAdminRequestsAvailable(!adminRequestsMissing);
         const profilesMissing = isMissingSchemaObjectError(members.error, "avatar_path");
-        setProfilesAvailable(!profilesMissing);
         const membersResult = profilesMissing
           ? await backend.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", trip.id).order("created_at")
           : members;
+        if (!isCurrent()) return;
+        setAdminRequestsAvailable(!adminRequestsMissing);
+        setProfilesAvailable(!profilesMissing);
         if (adminRequestsMissing || profilesMissing) {
           const stale = [adminRequestsMissing ? "Admin access requests" : null, profilesMissing ? "Member profiles" : null].filter(Boolean).join(" and ");
           pollMessage = true;
@@ -107,11 +117,14 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
           }
         }
       } catch (loadError) {
+        if (!isCurrent()) return;
         pollMessage = true;
         setError(loadError instanceof Error ? `We could not sync the trip right now. Try refreshing. ${loadError.message}` : "We could not sync the trip right now. Try refreshing.");
       } finally {
-        if (options?.silent) pollMessageRef.current = pollMessage;
-        if (!options?.silent) setLoading(false);
+        if (isCurrent()) {
+          if (options?.silent) pollMessageRef.current = pollMessage;
+          if (!options?.silent) setLoading(false);
+        }
       }
     })();
     loadInFlightRef.current = request;

@@ -252,8 +252,10 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
       if (!trip) return;
       await runAdminOperation(async () => {
         if (backend) {
-          const { error } = await backend.from("route_segments").update(input).eq("id", routeId).eq("trip_id", trip.id);
+          // .select() reports touched rows; RLS blocks by matching zero (see updatePhoto).
+          const { data: updatedRows, error } = await backend.from("route_segments").update(input).eq("id", routeId).eq("trip_id", trip.id).select("id");
           if (error) reportError(error.message);
+          else if (!updatedRows || updatedRows.length === 0) reportError("The change was not saved — you may not have permission to edit this route.");
           else {
             setInfo("Route updated.");
             await loadData();
@@ -272,8 +274,9 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
       if (!trip) return;
       await runAdminOperation(async () => {
         if (backend) {
-          const { error } = await backend.from("notes").update(input).eq("id", noteId).eq("trip_id", trip.id);
+          const { data: updatedRows, error } = await backend.from("notes").update(input).eq("id", noteId).eq("trip_id", trip.id).select("id");
           if (error) reportError(error.message);
+          else if (!updatedRows || updatedRows.length === 0) reportError("The change was not saved — you may not have permission to edit this note.");
           else {
             setInfo("Note updated.");
             await loadData();
@@ -292,8 +295,9 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
       if (!trip) return;
       await runAdminOperation(async () => {
         if (backend) {
-          const { error } = await backend.from("places").update(input).eq("id", placeId).eq("trip_id", trip.id);
+          const { data: updatedRows, error } = await backend.from("places").update(input).eq("id", placeId).eq("trip_id", trip.id).select("id");
           if (error) reportError(error.message);
+          else if (!updatedRows || updatedRows.length === 0) reportError("The change was not saved — you may not have permission to edit this place.");
           else {
             setInfo("Place updated.");
             await loadData();
@@ -319,8 +323,9 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
           const { data: updatedRows, error } = await backend.from("photos").update(input).eq("id", photoId).eq("trip_id", trip.id).select("id");
           if (error) reportError(error.message);
           else if (!updatedRows || updatedRows.length === 0) {
-            reportError("The change was not saved — you may not have permission to edit this photo.");
+            // Reload before reporting: a non-silent load clears the global error.
             await loadData();
+            reportError("The change was not saved — you may not have permission to edit this photo.");
           } else {
             setInfo("Photo updated.");
             await loadData();
@@ -363,18 +368,17 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
           const photoStoragePaths = photoToDelete
             ? [photoToDelete.image_path, photoToDelete.thumbnail_path].filter((path): path is string => Boolean(path))
             : [];
-          const { error } = await backend.from(table).delete().eq("id", id).eq("trip_id", trip.id);
+          // Zero rows means RLS blocked the delete; keep the stored files too.
+          const { data: deletedRows, error } = await backend.from(table).delete().eq("id", id).eq("trip_id", trip.id).select("id");
           if (error) reportError(error.message);
+          else if (!deletedRows || deletedRows.length === 0) reportError("Nothing was deleted — you may not have permission to delete this item.");
           else {
             if (table === "days") selectDay(selectedDayId === id ? null : selectedDayId);
-            if (photoStoragePaths.length > 0) {
-              const { error: storageError } = await deleteObjects(backend, PHOTO_BUCKET, photoStoragePaths);
-              if (storageError) reportError(`Item deleted, but photo file cleanup failed: ${storageError.message}`);
-              else setInfo("Item deleted.");
-            } else {
-              setInfo("Item deleted.");
-            }
+            const storageError = photoStoragePaths.length > 0 ? (await deleteObjects(backend, PHOTO_BUCKET, photoStoragePaths)).error : null;
+            // Reload before reporting: a non-silent load clears the global error.
             await loadData();
+            if (storageError) reportError(`Item deleted, but photo file cleanup failed: ${storageError.message}`);
+            else setInfo("Item deleted.");
           }
         } else {
           // Revoke blob URLs from the current snapshot before the state swap, so

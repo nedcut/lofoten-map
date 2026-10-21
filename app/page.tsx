@@ -6,14 +6,14 @@ import dynamic from "next/dynamic";
 import type { Map as MapboxMap } from "mapbox-gl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2, Play, Share2, Sparkles, UserRound } from "lucide-react";
-import { collectItemCoordinates, coordinateBounds, LOFOTEN_DEFAULT_VIEW, routeDistanceMeters } from "@/lib/geo";
+import { collectItemCoordinates, coordinateBounds, lofotenOpeningView, routeDistanceMeters } from "@/lib/geo";
 import { DayDot, DaySidebar } from "@/components/DaySidebar";
-import { MOBILE_SHEET_HEIGHT_VAR, MobileSheet } from "@/components/MobileSheet";
+import { MobileSheet, mobileSheetHeight } from "@/components/MobileSheet";
 import { StatusPill } from "@/components/StatusPill";
 import { ClusterRelivePill } from "@/components/ClusterRelivePill";
 import { HeaderPill, PillButton } from "@/components/ui/HeaderPill";
 import type { MapItemKind } from "@/components/TripLayers";
-import { deriveTripAccess } from "@/lib/access";
+import { canManageItem, deriveTripAccess } from "@/lib/access";
 import { dayColorFor, dayColorMap } from "@/lib/day-colors";
 import { demoTripData, emptyTripData } from "@/lib/demo-trip";
 import { isPreviewReadOnly } from "@/lib/preview-read-only";
@@ -53,8 +53,7 @@ const UploadPhotoPanel = dynamic(() => import("@/components/UploadPhotoPanel").t
 function mapFramingPadding() {
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
   if (!isMobile) return { top: 80, right: 80, bottom: 80, left: 80 };
-  const sheet = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(MOBILE_SHEET_HEIGHT_VAR));
-  return { top: 96, right: 48, bottom: (Number.isFinite(sheet) && sheet > 0 ? sheet : 160) + 48, left: 48 };
+  return { top: 96, right: 48, bottom: mobileSheetHeight() + 48, left: 48 };
 }
 
 export default function Home() {
@@ -250,6 +249,14 @@ export default function Home() {
   // Resolve the popup-selected item live from data, so the editor reflects updates
   // and closes automatically if the item is deleted (here or by another member).
   const editTarget = useMemo(() => resolveEditTarget(data, editTargetRef), [editTargetRef, data]);
+  // Same owner-or-admin rule as the map popups: an ?item= link to someone
+  // else's item must not open an editor whose saves RLS silently drops.
+  const canEditTarget = Boolean(editTarget && canManageItem(
+    editTarget.kind,
+    editTarget.kind === "photo" || editTarget.kind === "note" ? editTarget.item.user_id : null,
+    mutationUserId,
+    isAdmin,
+  ));
   const memberAdmin = access.showMemberAdminControls
     ? {
       members: data.members,
@@ -315,12 +322,14 @@ export default function Home() {
   const dismissClusterPhotos = useCallback(() => setClusterPhotos(null), []);
   // Relive a tapped cluster from its earliest photo, playing on through the
   // rest of the trip like "Relive from here" on a single photo.
-  const reliveClusterPhotos = useCallback(() => {
-    if (!clusterPhotos) return;
-    const startId = firstJourneyPhotoId(allJourneyItems, clusterPhotos.map((photo) => photo.id));
+  const reliveCluster = useCallback((photos: Photo[]) => {
+    const startId = firstJourneyPhotoId(allJourneyItems, photos.map((photo) => photo.id));
     setClusterPhotos(null);
     if (startId) openJourneyFromMap(startId);
-  }, [allJourneyItems, clusterPhotos, openJourneyFromMap]);
+  }, [allJourneyItems, openJourneyFromMap]);
+  const reliveClusterPhotos = useCallback(() => {
+    if (clusterPhotos) reliveCluster(clusterPhotos);
+  }, [clusterPhotos, reliveCluster]);
 
   // The header Journey button picks its starting item by context: the photo the
   // user last opened on the map wins, then the first item of the selected day,
@@ -447,9 +456,9 @@ export default function Home() {
   useEffect(() => {
     if (!map) return;
     if (!selectedDayId) {
-      // Zero padding clears any padding a previous easeTo left on the camera,
-      // so this lands exactly on the view the page loads with.
-      map.easeTo({ ...LOFOTEN_DEFAULT_VIEW, padding: { top: 0, right: 0, bottom: 0, left: 0 }, duration: 800 });
+      // The view carries its own padding, replacing any a previous easeTo left
+      // on the camera, so this lands exactly on the view the page loads with.
+      map.easeTo({ ...lofotenOpeningView(window.innerWidth, mobileSheetHeight()), duration: 800 });
       return;
     }
     const coords = collectItemCoordinates(filteredRef.current);
@@ -544,7 +553,9 @@ export default function Home() {
       <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(135deg,rgba(255,253,246,0.92),rgba(211,229,222,0.5)_44%,rgba(234,198,132,0.26))]" />
       <div inert={overlayOpen} className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] md:px-6">
         <HeaderPill className="flex max-w-[min(18rem,calc(100vw-11rem))] items-center gap-2 text-sm font-black text-stone-950 sm:max-w-none">
-          <Sparkles className="h-3.5 w-3.5 shrink-0 text-ember-500" /> <span className="truncate">{tripTitle}</span>
+          {/* A placeholder bar while the trip loads, so the header doesn't flash
+              the "Trip Logbook" fallback (as DaySidebar's TitleSkeleton avoids). */}
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-ember-500" /> {loading && !data.trip ? <span aria-hidden className="h-3.5 w-28 rounded-full bg-stone-200/80 motion-safe:animate-pulse" /> : <span className="truncate">{tripTitle}</span>}
         </HeaderPill>
         <div className="flex items-center gap-2">
           {backend && user && !previewReadOnly ? <HeaderPill className="hidden sm:block">{currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only"}</HeaderPill> : null}
@@ -582,7 +593,7 @@ export default function Home() {
         <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
-            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} days={data.days} dayColors={dayColors} visibility={layerVisibility} currentUserId={mutationUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onClusterSelect={setClusterPhotos} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
+            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} days={data.days} dayColors={dayColors} visibility={layerVisibility} currentUserId={mutationUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onClusterSelect={setClusterPhotos} onReliveCluster={reliveCluster} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
             {!mapUnavailable ? <RouteDraftLayer map={map} points={routeDraftPoints} /> : null}
             {!mapUnavailable && clusterPhotos && clickMode === "idle" && !journeyOpen ? <ClusterRelivePill photos={clusterPhotos} onRelive={reliveClusterPhotos} onDismiss={dismissClusterPhotos} /> : null}
             {/* Which day the map is filtered to. Sits under the header on
@@ -598,7 +609,7 @@ export default function Home() {
           </MapView>
         </div>
       </div>
-      {!panel ? <div inert={overlayOpen}><MobileSheet trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.filter((photo) => photo.media_type !== "video").length, videos: filtered.photos.filter((photo) => photo.media_type === "video").length, notes: filtered.notes.length, places: filtered.places.length }} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div> : null}
+      {!panel ? <div inert={overlayOpen}><MobileSheet trip={data.trip} loading={loading} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.filter((photo) => photo.media_type !== "video").length, videos: filtered.photos.filter((photo) => photo.media_type === "video").length, notes: filtered.notes.length, places: filtered.places.length }} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div> : null}
       {loading && !backendLoadError ? <StatusPill><Loader2 className="h-4 w-4 motion-safe:animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {shareStatus && !error ? <StatusPill>{shareStatus === "copied" ? "Link copied" : shareStatus === "shared" ? "Link shared" : "Couldn’t copy the link"}</StatusPill> : null}
@@ -610,7 +621,7 @@ export default function Home() {
       {panel === "photo" ? <UploadPhotoPanel days={data.days} routes={data.routeSegments} existingPhotos={data.photos} tripSlug={tripSlug} mapAvailable={mapActionsEnabled} defaultDayId={selectedDayId} pendingCoordinate={pendingCoordinate} isSaving={saving} onCancel={closePanel} onCoordinatePreview={setPendingCoordinate} onSave={savePhotos} /> : null}
       {panel === "route" ? <ManualRoutePanel days={data.days} defaultDayId={selectedDayId} points={routeDraftPoints} distanceMeters={routeDraftDistance} isSaving={saving} onCancel={closePanel} onUndoPoint={() => setRouteDraftPoints((current) => current.slice(0, -1))} onClear={() => setRouteDraftPoints([])} onSave={saveRoute} /> : null}
       {/* ?item= links restore the editor for anyone; only open it for viewers who can save. */}
-      {editTarget && canContribute ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminStatus.isSaving} onClose={closeEditItem} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
+      {editTarget && canEditTarget ? <EditItemPanel target={editTarget} days={data.days} isSaving={adminStatus.isSaving} onClose={closeEditItem} onUpdatePhoto={updatePhoto} onUpdateNote={updateNote} onUpdatePlace={updatePlace} onUpdateRoute={updateRoute} onDeleteItem={deleteDataItem} /> : null}
       {journeyOpen ? (
         <JourneyPlayback
           trip={data.trip}

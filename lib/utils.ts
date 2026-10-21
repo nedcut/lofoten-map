@@ -5,9 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Every trip is in Lofoten, so times read as the trip's wall clock, not the viewer's. */
+export const TRIP_TIME_ZONE = "Europe/Oslo";
+
 export function formatDateTime(value: string | null | undefined) {
   if (!value) return "Unknown time";
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: TRIP_TIME_ZONE,
     month: "short",
     day: "numeric",
     year: "numeric",

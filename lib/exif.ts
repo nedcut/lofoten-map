@@ -1,4 +1,5 @@
 import ExifReader from "exifreader";
+import { TRIP_TIME_ZONE } from "./utils";
 
 export type ExtractedExif = {
   lat: number | null;
@@ -14,8 +15,6 @@ export type ExtractedExif = {
 };
 
 type TagValue = { value?: unknown; description?: string };
-
-const TRIP_TIME_ZONE = "Europe/Oslo";
 
 const tripDateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: TRIP_TIME_ZONE,

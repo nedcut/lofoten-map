@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PhotoUploadProgress } from "@/components/UploadPhotoPanel";
 import { Button } from "@/components/ui/Button";
 import { dayLabel, locationLabel, type QueueItem } from "@/lib/upload-queue";
-import { cn } from "@/lib/utils";
+import { cn, TRIP_TIME_ZONE } from "@/lib/utils";
 import type { Day } from "@/types/trip";
 
 // The one and only import surface: the map stays visible and interactive
@@ -64,7 +64,7 @@ function takenLabel(item: QueueItem) {
   if (!item.exif?.takenAt) return null;
   const parsed = new Date(item.exif.takenAt);
   if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return parsed.toLocaleString("en-US", { timeZone: TRIP_TIME_ZONE, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function statusDotClass(item: QueueItem) {

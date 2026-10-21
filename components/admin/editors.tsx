@@ -4,6 +4,7 @@ import { Loader2, MapPin, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import type { Day, Note, Photo, Place, RouteMode, RouteSegment, Trip } from "@/types/trip";
+import { TRIP_TIME_ZONE } from "@/lib/utils";
 
 // The per-row admin edit forms (days, routes, notes, places, photos) plus the
 // FormData helpers and remount keys they share. AdminDataPanel composes these
@@ -177,7 +178,7 @@ function placeLabel(place: Place) {
 
 export function photoLabel(photo: Photo) {
   if (photo.caption) return photo.caption.length > 42 ? `${photo.caption.slice(0, 42)}...` : photo.caption;
-  if (photo.taken_at) return `photo from ${new Date(photo.taken_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  if (photo.taken_at) return `photo from ${new Date(photo.taken_at).toLocaleDateString("en-US", { timeZone: TRIP_TIME_ZONE, month: "short", day: "numeric" })}`;
   return "this photo";
 }
 
