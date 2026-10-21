@@ -527,7 +527,9 @@ export function JourneyPlayback({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {filterControls}
+          {/* Phones drop the type filter (as they already drop the uploader
+              filter) so the day title keeps its room next to Map and Share. */}
+          <div className="hidden items-center gap-2 sm:flex">{filterControls}</div>
           <IconButton onClick={toggleMap} aria-label="Map" aria-pressed={mapVisible} title={mapVisible ? "Hide map" : "Show map"} className={cn(mapVisible && "bg-white/28")}>
             <MapIcon className="h-4 w-4" />
           </IconButton>
