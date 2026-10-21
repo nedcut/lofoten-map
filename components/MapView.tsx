@@ -10,7 +10,9 @@ import "./map-overrides.css";
 import { MapPin } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { mobileSheetHeight } from "@/components/MobileSheet";
+import { Button } from "@/components/ui/Button";
 import { lofotenOpeningView } from "@/lib/geo";
+import { watchMapInit } from "@/lib/map-init";
 import type { LngLat, MapClickMode } from "@/types/trip";
 
 type Props = {
@@ -31,6 +33,11 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
   const onCoordinatePickRef = useRef(onCoordinatePick);
   const [tokenMissing, setTokenMissing] = useState(false);
   const [mapUnavailable, setMapUnavailable] = useState<string | null>(null);
+  // Set when the map failed for a reason that may pass (a style request that
+  // errored or timed out), so the fallback offers to try again.
+  const [canRetry, setCanRetry] = useState(false);
+  // Bumped by Retry; the init effect depends on it to build a fresh map.
+  const [attempt, setAttempt] = useState(0);
   const clickPrompt = clickMode === "draw-route" ? "Tap the map to add route points" : "Tap the map to set the location";
 
   useEffect(() => {
@@ -84,18 +91,34 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
     }
     instance.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "bottom-right");
     instance.addControl(new mapboxgl.AttributionControl({ compact: true }));
+    let removed = false;
+    const removeInstance = () => {
+      if (removed) return;
+      removed = true;
+      markerRef.current?.remove();
+      markerRef.current = null;
+      instance.remove();
+      mapRef.current = null;
+    };
+    // Construction succeeding doesn't mean the map will load: the style is
+    // fetched asynchronously, and a failed or stalled request otherwise leaves
+    // an empty panel with no explanation.
+    const stopWatching = watchMapInit(instance, () => {
+      removeInstance();
+      setCanRetry(true);
+      markUnavailable("The map couldn't load. Check your connection and try again. The trip details are still available.");
+    });
     instance.on("load", () => {
       document.body.classList.remove("map-unavailable-active");
       onMapReady(instance);
     });
     mapRef.current = instance;
     return () => {
-      markerRef.current?.remove();
-      instance.remove();
+      stopWatching();
+      removeInstance();
       document.body.classList.remove("map-unavailable-active");
-      mapRef.current = null;
     };
-  }, [onMapReady, onMapUnavailable]);
+  }, [onMapReady, onMapUnavailable, attempt]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -143,6 +166,18 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
             <p className="mt-2 text-sm leading-6 text-stone-600">
               {tokenMissing ? "Add NEXT_PUBLIC_MAPBOX_TOKEN to your environment to load the interactive trip map." : mapUnavailable}
             </p>
+            {canRetry && !tokenMissing ? (
+              <Button
+                className="mt-4"
+                onClick={() => {
+                  setCanRetry(false);
+                  setMapUnavailable(null);
+                  setAttempt((current) => current + 1);
+                }}
+              >
+                Retry
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : null}
