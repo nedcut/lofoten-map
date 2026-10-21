@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackendClient, BackendUser } from "@/lib/backend";
 import { demoDays, demoNotes, demoPhotos, demoPlaces, demoRoutes, demoTrip, emptyTripData } from "@/lib/demo-trip";
@@ -94,6 +94,7 @@ async function flushLoad() {
 }
 
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -366,6 +367,58 @@ describe("useTripData", () => {
     });
     await flushLoad();
     expect(tripCalls()).toBe(2);
+  });
+
+  it.each(["focus", "visibilitychange"])("keeps one polling timer after %s and clears it on unmount", async (event) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const { backend, calls } = createFakeBackend(okResponses());
+    const { result, unmount } = renderTripData(backend, fakeUser);
+    await flushLoad();
+    expect(result.current.loading).toBe(false);
+    expect(calls).toHaveLength(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+      if (event === "focus") {
+        window.dispatchEvent(new Event("focus"));
+      } else {
+        visibility.mockReturnValue("hidden");
+        document.dispatchEvent(new Event("visibilitychange"));
+        visibility.mockReturnValue("visible");
+        document.dispatchEvent(new Event("visibilitychange"));
+      }
+    });
+    await flushLoad();
+    expect(calls).toHaveLength(2);
+
+    // A focus/visibility pair from the same return must not refresh twice.
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flushLoad();
+    expect(calls).toHaveLength(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(40_000);
+    });
+    await flushLoad();
+    expect.soft(calls).toHaveLength(3);
+    expect.soft(vi.getTimerCount()).toBe(1);
+
+    unmount();
+    expect.soft(vi.getTimerCount()).toBe(0);
+    const callsAtUnmount = calls.length;
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(180_000);
+    });
+    expect(calls).toHaveLength(callsAtUnmount);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("skips the full reload when trips.data_version has not changed", async () => {

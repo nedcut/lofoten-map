@@ -268,6 +268,7 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
       if (!stopped && document.visibilityState === "visible") timer = window.setTimeout(poll, interval);
     };
     const poll = async () => {
+      if (timer !== null) window.clearTimeout(timer);
       timer = null;
       if (stopped || polling) return;
       if (document.visibilityState !== "visible") return;
