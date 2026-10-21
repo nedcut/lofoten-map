@@ -6,7 +6,7 @@ import { canManageItem } from "@/lib/access";
 import { dayColorFor } from "@/lib/day-colors";
 import { friendlyPersonName } from "@/lib/display-name";
 import { noteFeatureCollection, photoFeatureCollection, placeFeatureCollection, routeFeatureCollection } from "@/lib/geo";
-import { PHOTO_CLUSTER_MAX_ZOOM, PHOTO_CLUSTER_RADIUS, photoMarkerPresentation } from "@/lib/map-presentation";
+import { PHOTO_CLUSTER_MAX_ZOOM, PHOTO_CLUSTER_RADIUS, clusterTapZoomsIn, photoMarkerPresentation } from "@/lib/map-presentation";
 import { MOBILE_SHEET_HEIGHT_VAR } from "@/components/MobileSheet";
 import { formatDateTime } from "@/lib/utils";
 import type { Day, Note, Photo, Place, RouteSegment } from "@/types/trip";
@@ -81,6 +81,9 @@ type Props = {
   // Tapping a photo cluster reports the photos inside it so the page can
   // offer to relive them; null once the user taps elsewhere or moves the map.
   onClusterSelect: (photos: Photo[] | null) => void;
+  // A tapped cluster that can't zoom apart (photos stacked at one spot, or
+  // the map is already at its expansion zoom) relives its photos directly.
+  onReliveCluster: (photos: Photo[]) => void;
   onPhotoFocus: (photoId: string) => void;
   onPhotoBlur: (photoId: string) => void;
   onMovePhoto: (photoId: string, coordinate: { lng: number; lat: number }) => void;
@@ -92,13 +95,13 @@ type Props = {
   outlierPreview: { photo: { lng: number; lat: number }; suggested: { lng: number; lat: number }; neighbors: Array<{ lng: number; lat: number }> } | null;
 };
 
-export function TripLayers({ map, routes, photos, notes, places, days, dayColors, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId, outlierPreview }: Props) {
+export function TripLayers({ map, routes, photos, notes, places, days, dayColors, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onReliveCluster, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId, outlierPreview }: Props) {
   // Popup click handlers are attached once (keyed on [map]); this ref lets those
   // long-lived closures read the latest permissions/callbacks without re-binding.
-  const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onPhotoFocus, onPhotoBlur, onMovePhoto });
+  const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onReliveCluster, onPhotoFocus, onPhotoBlur, onMovePhoto });
   useEffect(() => {
-    actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onPhotoFocus, onPhotoBlur, onMovePhoto };
-  }, [currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onPhotoFocus, onPhotoBlur, onMovePhoto]);
+    actionsRef.current = { currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onReliveCluster, onPhotoFocus, onPhotoBlur, onMovePhoto };
+  }, [currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onReliveCluster, onPhotoFocus, onPhotoBlur, onMovePhoto]);
   const routeData = useMemo(() => routeFeatureCollection(routes, dayColors), [dayColors, routes]);
   const photoData = useMemo(() => photoFeatureCollection(photos), [photos]);
   const noteData = useMemo(() => noteFeatureCollection(notes), [notes]);
@@ -413,16 +416,20 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         }
         const source = getSource(activeMap, "photos") as mapboxgl.GeoJSONSource | undefined;
         const target = entry.coordinates;
-        source?.getClusterExpansionZoom(entry.clusterId, (error, zoom) => {
-          if (error || zoom === null || zoom === undefined) return;
-          activeMap.easeTo({ center: target, zoom, duration: 550 });
-        });
+        const zoomAtTap = activeMap.getZoom();
         clearClusterSelection();
         const request = clusterRequest;
-        source?.getClusterLeaves(entry.clusterId, entry.count, 0, (error, leaves) => {
-          if (error || !leaves || request !== clusterRequest) return;
-          const members = leaves.flatMap((leaf) => photosById.get(String(leaf.properties?.id ?? "")) ?? []);
-          if (members.length > 0) actionsRef.current.onClusterSelect(members);
+        source?.getClusterExpansionZoom(entry.clusterId, (error, zoom) => {
+          if (error || zoom === null || zoom === undefined || request !== clusterRequest) return;
+          const zoomsIn = clusterTapZoomsIn(zoom, zoomAtTap);
+          if (zoomsIn) activeMap.easeTo({ center: target, zoom, duration: 550 });
+          source.getClusterLeaves(entry.clusterId, entry.count, 0, (leavesError, leaves) => {
+            if (leavesError || !leaves || request !== clusterRequest) return;
+            const members = leaves.flatMap((leaf) => photosById.get(String(leaf.properties?.id ?? "")) ?? []);
+            if (members.length === 0) return;
+            if (zoomsIn) actionsRef.current.onClusterSelect(members);
+            else actionsRef.current.onReliveCluster(members);
+          });
         });
       });
       marker.on("dragstart", () => {

@@ -7,6 +7,19 @@ export const LOFOTEN_CENTER: [number, number] = [13.0897, 67.9325];
 // item, so a few mainland photos don't pull the overview away from the islands.
 export const LOFOTEN_DEFAULT_VIEW = { center: LOFOTEN_CENTER, zoom: 10.2, pitch: 45, bearing: -20 };
 
+// The opening ("All days") camera for a viewport. Desktop gets
+// LOFOTEN_DEFAULT_VIEW unchanged. On a phone that zoom crops the islands
+// (Å falls off the left) and the bottom sheet hides the lower third, so
+// narrow viewports centre on the trip's islands (Å to Ramberg), pull back
+// in proportion to width (zoom ~9.1 at 390px), and pad the sheet out.
+const LOFOTEN_TRIP_CENTER: [number, number] = [13.115, 67.99];
+export function lofotenOpeningView(viewportWidth: number, sheetHeight: number) {
+  const noPadding = { top: 0, right: 0, bottom: 0, left: 0 };
+  if (viewportWidth >= 768) return { ...LOFOTEN_DEFAULT_VIEW, padding: noPadding };
+  const zoom = LOFOTEN_DEFAULT_VIEW.zoom - Math.log2(860 / Math.max(viewportWidth, 1));
+  return { ...LOFOTEN_DEFAULT_VIEW, center: LOFOTEN_TRIP_CENTER, zoom, padding: { ...noPadding, top: 56, bottom: sheetHeight } };
+}
+
 export type CoordinateBounds = { sw: [number, number]; ne: [number, number]; center: [number, number]; diagonalMeters: number };
 
 // Great-circle (haversine) distance, inlined so route/bounds math doesn't pull
