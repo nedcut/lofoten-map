@@ -20,6 +20,12 @@ type Props = {
   onClose: () => void;
 };
 
+// The panel is capped to the dynamic viewport height and scrolls on its own,
+// so on short screens (landscape phones, an open software keyboard) the Close
+// button and submit stay reachable instead of overflowing past both edges.
+const overlayClass = "fixed inset-0 z-40 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm";
+const panelClass = "relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-panel border border-stone-200/80 bg-paper/97 p-5 text-stone-950 shadow-2xl";
+
 export function AuthPanel({ tripTitle, message, messageTone, isSubmitting, pendingOtpEmail = null, onSignIn, onVerifyCode, onCancelCodeEntry, onSignInWithGoogle, onClose }: Props) {
   const containerRef = useRef<HTMLFormElement | null>(null);
   useDialogFocus(containerRef, { onClose });
@@ -37,8 +43,8 @@ export function AuthPanel({ tripTitle, message, messageTone, isSubmitting, pendi
 
   if (awaitingCode) {
     return (
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm" onClick={onClose}>
-        <form ref={containerRef} action={submit} role="dialog" aria-modal="true" aria-labelledby="auth-panel-title" onClick={(event) => event.stopPropagation()} className="relative w-full max-w-md rounded-panel border border-stone-200/80 bg-paper/97 p-5 text-stone-950 shadow-2xl">
+      <div className={overlayClass} onClick={onClose}>
+        <form key="code" ref={containerRef} action={submit} role="dialog" aria-modal="true" aria-labelledby="auth-panel-title" onClick={(event) => event.stopPropagation()} className={panelClass}>
           <button type="button" onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-full p-1.5 text-stone-500 transition hover:bg-stone-900/10 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50"><X className="h-4 w-4" /></button>
           <div className="mb-4 flex items-center gap-3">
             <div className="rounded-lg bg-teal-50 p-3 text-teal-800"><KeyRound className="h-5 w-5" /></div>
@@ -65,8 +71,8 @@ export function AuthPanel({ tripTitle, message, messageTone, isSubmitting, pendi
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm" onClick={onClose}>
-      <form ref={containerRef} action={submit} role="dialog" aria-modal="true" aria-labelledby="auth-panel-title" onClick={(event) => event.stopPropagation()} className="relative w-full max-w-md rounded-panel border border-stone-200/80 bg-paper/97 p-5 text-stone-950 shadow-2xl">
+    <div className={overlayClass} onClick={onClose}>
+      <form key="email" ref={containerRef} action={submit} role="dialog" aria-modal="true" aria-labelledby="auth-panel-title" onClick={(event) => event.stopPropagation()} className={panelClass}>
         <button type="button" onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-full p-1.5 text-stone-500 transition hover:bg-stone-900/10 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-stone-300/50"><X className="h-4 w-4" /></button>
         <div className="mb-4 flex items-center gap-3">
           <div className="rounded-lg bg-teal-50 p-3 text-teal-800"><ShieldCheck className="h-5 w-5" /></div>
