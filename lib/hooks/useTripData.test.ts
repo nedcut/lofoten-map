@@ -15,19 +15,25 @@ type QueryResponse = { data: unknown; error: { message: string } | null };
  */
 function createFakeBackend(responses: Record<string, QueryResponse>) {
   const calls: string[] = [];
+  // A pending promise here delays the next query on that table. The query
+  // still reads its response up front, like a slow request that hit the DB early.
+  const holds: Record<string, Promise<void> | undefined> = {};
   const from = (table: string) => {
     calls.push(table);
-    const respond = () => responses[table] ?? { data: [], error: null };
+    const response = responses[table] ?? { data: [], error: null };
+    const hold = holds[table];
+    delete holds[table];
+    const respond = () => (hold ?? Promise.resolve()).then(() => response);
     const builder = {
       select: () => builder,
       eq: () => builder,
       order: () => builder,
-      maybeSingle: () => Promise.resolve(respond()),
-      then: <T>(resolve: (value: QueryResponse) => T) => Promise.resolve(respond()).then(resolve),
+      maybeSingle: respond,
+      then: <T>(resolve: (value: QueryResponse) => T) => respond().then(resolve),
     };
     return builder;
   };
-  return { backend: { from } as unknown as BackendClient, calls, responses };
+  return { backend: { from } as unknown as BackendClient, calls, responses, holds };
 }
 
 const okResponses = (): Record<string, QueryResponse> => ({
@@ -137,6 +143,37 @@ describe("useTripData", () => {
     expect(result.current.data.photos).toBe(loaded.photos);
     expect(result.current.data.routeSegments).toBe(loaded.routeSegments);
     expect(result.current.data.days).toBe(loaded.days);
+  });
+
+  it("does not let a poll that read the database before a save overwrite the post-save reload", async () => {
+    const fake = createFakeBackend(okResponses());
+    const { result } = renderTripData(fake.backend);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let releasePoll!: () => void;
+    fake.holds.notes = new Promise((resolve) => { releasePoll = resolve; });
+    let poll!: Promise<void>;
+    await act(async () => {
+      poll = result.current.loadData({ silent: true });
+      for (let tick = 0; tick < 25; tick += 1) await Promise.resolve();
+    });
+    // The poll has read the old notes and is stuck in flight.
+    expect(fake.holds.notes).toBeUndefined();
+
+    // A save lands, then the mutation reloads.
+    fake.responses.notes = { data: [{ ...demoNotes[0], body: "Saved" }], error: null };
+    let reload!: Promise<void>;
+    await act(async () => {
+      reload = result.current.loadData();
+      for (let tick = 0; tick < 25; tick += 1) await Promise.resolve();
+    });
+    await act(async () => {
+      releasePoll();
+      await Promise.all([poll, reload]);
+    });
+
+    expect(result.current.data.notes[0].body).toBe("Saved");
+    expect(result.current.loading).toBe(false);
   });
 
   it("degrades gracefully when the admin_requests table is missing", async () => {

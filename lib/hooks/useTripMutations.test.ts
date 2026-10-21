@@ -45,12 +45,13 @@ function createFakeBackend(responses: Record<string, QueryResponse> = {}) {
 
 // Demo photos are inline data URIs with no storage path; the delete tests need
 // a photo whose files actually live in the object store.
-const storedPhoto = { ...demoTripData.photos[0], id: "photo-stored", image_path: "trip/photo.jpg", thumbnail_path: "trip/photo-thumb.jpg" };
+const storedPhoto = { ...demoTripData.photos[0], id: "photo-stored", image_path: "trip/photo.jpg", thumbnail_path: "trip/thumbs/photo.jpg" };
 const tripDataWithStoredPhoto: TripData = { ...demoTripData, photos: [storedPhoto, ...demoTripData.photos] };
 
 function renderMutations(backend: BackendClient | null, initial: TripData = demoTripData, selectedDayId: string | null = null) {
-  const loadData = vi.fn(async () => {});
   const setGlobalError = vi.fn();
+  // Mirrors useTripData: a non-silent reload clears the global error pill.
+  const loadData = vi.fn(async () => setGlobalError(null));
   const selectDay = vi.fn();
   const hook = renderHook(() => {
     const [data, setData] = useState(initial);
@@ -136,6 +137,31 @@ describe("useTripMutations", () => {
     });
   });
 
+  describe("updates that RLS silently blocks", () => {
+    const route = demoTripData.routeSegments[0];
+    const note = demoTripData.notes[0];
+    const place = demoTripData.places[0];
+    const cases = [
+      { name: "updateRoute", table: "route_segments", run: (m: ReturnType<typeof useTripMutations>) => m.updateRoute(route.id, { day_id: null, name: "Renamed", mode: route.mode, source: route.source }) },
+      { name: "updateNote", table: "notes", run: (m: ReturnType<typeof useTripMutations>) => m.updateNote(note.id, { day_id: null, author_name: null, body: "Edited" }) },
+      { name: "updatePlace", table: "places", run: (m: ReturnType<typeof useTripMutations>) => m.updatePlace(place.id, { day_id: null, name: "Renamed", place_type: null, description: null, lat: place.lat, lng: place.lng }) },
+    ];
+
+    it.each(cases)("$name reports a zero-row update as not saved", async ({ table, run }) => {
+      const { backend } = createFakeBackend({ [table]: { data: [], error: null } });
+      const { result, loadData, setGlobalError } = renderMutations(backend);
+
+      await act(async () => {
+        await run(result.current.mutations);
+      });
+
+      expect(loadData).not.toHaveBeenCalled();
+      expect(result.current.mutations.status.tone).toBe("error");
+      expect(result.current.mutations.status.message).toContain("may not have permission");
+      expect(setGlobalError).toHaveBeenLastCalledWith(expect.stringContaining("may not have permission"));
+    });
+  });
+
   describe("updatePhoto", () => {
     const photo = demoTripData.photos[0];
     const input = { day_id: photo.day_id, uploader_name: photo.uploader_name, caption: "New caption", lat: photo.lat, lng: photo.lng, taken_at: photo.taken_at };
@@ -191,7 +217,7 @@ describe("useTripMutations", () => {
       });
 
       expect(calls).toEqual([{ table: "photos", op: "delete" }]);
-      expect(deleteObjectsMock).toHaveBeenCalledWith(backend, "trip-photos", ["trip/photo.jpg", "trip/photo-thumb.jpg"]);
+      expect(deleteObjectsMock).toHaveBeenCalledWith(backend, "trip-photos", ["trip/photo.jpg", "trip/thumbs/photo.jpg", "trip/markers/photo.jpg"]);
       expect(loadData).toHaveBeenCalledTimes(1);
       expect(result.current.mutations.status.message).toBe("Item deleted.");
     });
@@ -208,6 +234,20 @@ describe("useTripMutations", () => {
       expect(loadData).not.toHaveBeenCalled();
       expect(setGlobalError).toHaveBeenLastCalledWith("delete denied");
       expect(result.current.data).toBe(tripDataWithStoredPhoto);
+    });
+
+    it("reports a zero-row delete as a permission failure and keeps the stored files", async () => {
+      const { backend } = createFakeBackend({ photos: { data: [], error: null } });
+      const { result, loadData, setGlobalError } = renderMutations(backend, tripDataWithStoredPhoto);
+
+      await act(async () => {
+        await result.current.mutations.deleteDataItem("photos", storedPhoto.id);
+      });
+
+      expect(deleteObjectsMock).not.toHaveBeenCalled();
+      expect(loadData).not.toHaveBeenCalled();
+      expect(result.current.mutations.status.tone).toBe("error");
+      expect(setGlobalError).toHaveBeenLastCalledWith(expect.stringContaining("may not have permission"));
     });
 
     it("keeps the row deleted but reports when file cleanup fails", async () => {

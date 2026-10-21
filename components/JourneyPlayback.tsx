@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
+import { useCaptionDraft } from "@/lib/hooks/useCaptionDraft";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { friendlyPersonName, personFilterOptions } from "@/lib/display-name";
 import { cn, formatDateOnly, formatDateTime } from "@/lib/utils";
@@ -118,8 +119,7 @@ export function JourneyPlayback({
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [interactionHold, setInteractionHold] = useState(false);
-  const [captionDraft, setCaptionDraft] = useState("");
-  const [editingCaption, setEditingCaption] = useState(false);
+  const { captionDraft, setCaptionDraft, editingCaption, setEditingCaption } = useCaptionDraft(activeItem);
   const [introOpen, setIntroOpen] = useState(showIntro);
   const [complete, setComplete] = useState(false);
   const [shareStatus, setShareStatus] = useState<ShareResult | null>(null);
@@ -176,18 +176,6 @@ export function JourneyPlayback({
   }, [activeDayId, dayTicks, trackWidth]);
   const activeDayColor = activeItem?.dayId ? dayColors.get(activeItem.dayId) ?? null : null;
   const selectedUploaderId = uploaderOptions.find((option) => option.value === uploaderFilter)?.id ?? "";
-
-  /* eslint-disable react-hooks/set-state-in-effect -- resets the caption editor to mirror the active item (external selection); intentional sync, not a render cascade. */
-  useEffect(() => {
-    if (!activeItem || activeItem.kind !== "photo") {
-      setCaptionDraft("");
-      setEditingCaption(false);
-      return;
-    }
-    setCaptionDraft(activeItem.primary.caption ?? "");
-    setEditingCaption(false);
-  }, [activeItem]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
