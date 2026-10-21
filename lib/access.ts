@@ -46,3 +46,13 @@ export function deriveTripAccess({ backendEnabled, userId, members, adminRequest
     showAdminRequestControls: Boolean(!previewReadOnly && backendEnabled && currentMember && currentMember.role !== "admin"),
   };
 }
+
+/**
+ * Whether the viewer may edit or delete a map item. Mirrors the RLS policies:
+ * owner-or-admin for photos/notes (they carry user_id); admin-only for
+ * places/routes, which have no per-user ownership in the schema.
+ */
+export function canManageItem(kind: "photo" | "note" | "place" | "route", ownerId: string | null, viewerId: string | null, isAdmin: boolean) {
+  if (isAdmin) return true;
+  return (kind === "photo" || kind === "note") && Boolean(ownerId && ownerId === viewerId);
+}

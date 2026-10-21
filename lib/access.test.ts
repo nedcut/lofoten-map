@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveTripAccess } from "./access";
+import { canManageItem, deriveTripAccess } from "./access";
 import type { AdminRequest, TripMember } from "@/types/trip";
 
 function member(overrides: Partial<TripMember>): TripMember {
@@ -137,5 +137,21 @@ describe("deriveTripAccess", () => {
       ],
     });
     expect(access.pendingAdminRequests.map((item) => item.id)).toEqual(["newer", "older"]);
+  });
+});
+
+describe("canManageItem", () => {
+  it("lets members manage only their own photos and notes", () => {
+    expect(canManageItem("photo", "user-1", "user-1", false)).toBe(true);
+    expect(canManageItem("note", "user-1", "user-1", false)).toBe(true);
+    expect(canManageItem("photo", "user-2", "user-1", false)).toBe(false);
+    expect(canManageItem("note", null, null, false)).toBe(false);
+  });
+
+  it("keeps places and routes admin-only", () => {
+    expect(canManageItem("place", null, "user-1", false)).toBe(false);
+    expect(canManageItem("route", null, "user-1", false)).toBe(false);
+    expect(canManageItem("route", null, "user-1", true)).toBe(true);
+    expect(canManageItem("photo", "user-2", "user-1", true)).toBe(true);
   });
 });

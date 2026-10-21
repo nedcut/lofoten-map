@@ -2,6 +2,7 @@
 
 import mapboxgl from "mapbox-gl";
 import { useEffect, useMemo, useRef } from "react";
+import { canManageItem } from "@/lib/access";
 import { dayColorFor } from "@/lib/day-colors";
 import { friendlyPersonName } from "@/lib/display-name";
 import { noteFeatureCollection, photoFeatureCollection, placeFeatureCollection, routeFeatureCollection } from "@/lib/geo";
@@ -588,13 +589,9 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       return `<span class="lofoten-popup-tag lofoten-popup-tag-${kind}">${escapeHtml(kind)}</span>`;
     }
 
-    // Owner-or-admin for photos/notes (they carry user_id); admin-only for
-    // places/routes, which have no per-user ownership in the schema.
     function canManage(kind: MapItemKind, ownerId: string | null) {
       const { isAdmin: admin, currentUserId: viewerId } = actionsRef.current;
-      if (admin) return true;
-      if ((kind === "photo" || kind === "note") && ownerId && ownerId === viewerId) return true;
-      return false;
+      return canManageItem(kind, ownerId, viewerId, admin);
     }
 
     // Inject Edit/Delete controls into a freshly-opened popup and route clicks to
