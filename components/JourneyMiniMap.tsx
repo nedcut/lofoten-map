@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import type { JourneyItem } from "@/lib/journey";
 import type { Day, LngLat, RouteSegment } from "@/types/trip";
 import { canUseStyle } from "@/lib/map-style";
-import { isFatalMinimapError, MINIMAP_LOAD_TIMEOUT_MS } from "@/lib/journey-minimap";
+import { isFatalMapError, MAP_STYLE_TIMEOUT_MS } from "@/lib/map-init";
 
 type Props = {
   routes: RouteSegment[];
@@ -305,8 +305,8 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     setLoadState("loading");
     let loaded = false;
     const fail = () => { if (!loaded) setLoadState("failed"); };
-    const loadTimer = window.setTimeout(fail, MINIMAP_LOAD_TIMEOUT_MS);
-    map.on("error", (event) => { if (isFatalMinimapError(event, loaded)) fail(); });
+    const loadTimer = window.setTimeout(fail, MAP_STYLE_TIMEOUT_MS);
+    map.on("error", (event) => { if (isFatalMapError(event, loaded)) fail(); });
     map.once("style.load", () => {
       loaded = true;
       window.clearTimeout(loadTimer);

@@ -14,8 +14,11 @@ export async function POST(request: Request) {
     const contentType = body.contentType;
     const cacheControl = body.cacheControl;
     const contentLength = body.contentLength;
-    // Same allowlist and per-type caps the upload picker enforces.
-    const maxBytes = typeof contentType === "string" ? maxUploadBytesFor(contentType) : null;
+    // Same allowlist and per-type caps the upload picker enforces, narrowed to
+    // what the app writes at this path.
+    const maxBytes = namespace && validObjectPath(path) && typeof contentType === "string"
+      ? maxUploadBytesFor(namespace, path, contentType)
+      : null;
     if (!namespace
       || !validObjectPath(path)
       || typeof contentType !== "string"

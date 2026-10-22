@@ -52,7 +52,6 @@ export function useProfile({ backend, user, currentMember, trip, loadData, onErr
           const path = `${user.id}/${crypto.randomUUID()}.jpg`;
           const { error: uploadError } = await uploadObject(backend, AVATAR_BUCKET, path, prepared, {
             cacheControl: IMMUTABLE_CACHE_SECONDS,
-            contentType: prepared.type || "image/jpeg",
           });
           if (uploadError) {
             onError(`Could not upload your photo. ${uploadError.message}`);

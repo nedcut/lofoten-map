@@ -81,7 +81,56 @@ test("cold and warm cache preserve range and conditional semantics", async (t) =
         assert.equal(response.headers.get("Content-Range"), scenario.range ?? null);
         assert.equal(response.headers.get("ETag"), etag);
         assert.equal(response.headers.get("Access-Control-Allow-Origin"), "*");
+        if (scenario.status === 416) {
+          assert.equal(response.headers.get("Cache-Control"), "no-store");
+          assert.equal(response.headers.get("Content-Type"), "text/plain; charset=utf-8");
+        }
       });
     }
   }
+
+  await t.test("HEAD ignores Range and describes the whole object", async () => {
+    await bucket.put(key, body);
+    for (const range of ["bytes=0-1", "bytes=1000-"]) {
+      const response = await mf.dispatchFetch(`https://media.test/${key}`, { method: "HEAD", headers: { Range: range } });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("Content-Length"), "1000");
+      assert.equal(response.headers.get("Content-Range"), null);
+    }
+  });
+
+  await t.test("warm: query string shares the cache entry", async () => {
+    const response = await mf.dispatchFetch(`https://media.test/${key}?v=other`, { headers: { Range: "bytes=0-1" } });
+    assert.deepEqual({ status: response.status, body: await response.text() }, { status: 206, body: "01" });
+  });
+});
+
+test("a cached copy without a usable size falls back to R2", async (t) => {
+  const mf = new Miniflare(convertV4MiniflareOptions({
+    workers: [{
+      name: "media",
+      modules: true,
+      script: outputFiles[0].text,
+      compatibilityDate: config.compatibility_date,
+      compatibilityFlags: config.compatibility_flags,
+      r2Buckets: ["MEDIA_BUCKET"],
+    }],
+  }));
+  t.after(() => mf.dispose());
+  const bucket = await mf.getR2Bucket("MEDIA_BUCKET");
+  const key = "trip-photos/sizeless";
+  await bucket.put(key, body);
+  const caches = await mf.getCaches();
+  // A chunked body leaves the stored response without Content-Length.
+  const chunked = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(body)); controller.close(); } });
+  await caches.default.put(`https://media.test/${key}`, new Response(chunked, {
+    headers: { "Cache-Control": "public, max-age=60", ETag: '"cached"' },
+  }));
+  const cached = await caches.default.match(`https://media.test/${key}`);
+  assert.equal(cached?.headers.get("Content-Length") ?? null, null);
+  await cached?.arrayBuffer();
+
+  const response = await mf.dispatchFetch(`https://media.test/${key}`, { headers: { Range: "bytes=0-1" } });
+  assert.deepEqual({ status: response.status, body: await response.text() }, { status: 206, body: "01" });
+  assert.equal(response.headers.get("Content-Range"), "bytes 0-1/1000");
 });

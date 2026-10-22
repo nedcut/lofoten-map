@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
 import type { JourneyItem } from "./journey";
-import { MINIMAP_LOAD_TIMEOUT_MS } from "./journey-minimap";
+import { MAP_STYLE_TIMEOUT_MS } from "./map-init";
 
 const maps = vi.hoisted(() => {
   class MapStub {
@@ -60,14 +60,14 @@ describe("Journey mini-map loading", () => {
   it("keeps the map visible when the style loads but tiles take longer than the timeout", () => {
     const view = renderMap();
     act(() => { maps.instances[0].emit("style.load"); });
-    act(() => { vi.advanceTimersByTime(MINIMAP_LOAD_TIMEOUT_MS + 1); });
+    act(() => { vi.advanceTimersByTime(MAP_STYLE_TIMEOUT_MS + 1); });
     expect(view.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(view.getByRole("button", { name: "Rotate map left" })).toBeTruthy();
   });
 
   it("offers Retry when the style never loads", () => {
     const view = renderMap();
-    act(() => { vi.advanceTimersByTime(MINIMAP_LOAD_TIMEOUT_MS + 1); });
+    act(() => { vi.advanceTimersByTime(MAP_STYLE_TIMEOUT_MS + 1); });
     expect(view.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
 });

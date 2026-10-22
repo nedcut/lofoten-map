@@ -1,22 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialMinimapVisible, isFatalMinimapError } from "./journey-minimap";
-
-describe("isFatalMinimapError", () => {
-  const styleFailure = { type: "error", error: Object.assign(new Error("Service Unavailable"), { status: 503 }) };
-
-  it("treats a source-less error before style load (the style request failing) as fatal", () => {
-    expect(isFatalMinimapError(styleFailure, false)).toBe(true);
-  });
-
-  it("ignores tile and source errors, which leave a usable map", () => {
-    expect(isFatalMinimapError({ ...styleFailure, sourceId: "mapbox-dem" }, false)).toBe(false);
-    expect(isFatalMinimapError({ ...styleFailure, tile: {} }, false)).toBe(false);
-  });
-
-  it("ignores every error once the style has loaded", () => {
-    expect(isFatalMinimapError(styleFailure, true)).toBe(false);
-  });
-});
+import { initialMinimapVisible } from "./journey-minimap";
 
 describe("initialMinimapVisible", () => {
   it("starts hidden on short screens and shown on tall ones when there is no session choice", () => {

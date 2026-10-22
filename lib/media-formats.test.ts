@@ -24,11 +24,33 @@ describe("storedContentType", () => {
 });
 
 describe("upload limits", () => {
+  const HASH = "a".repeat(64);
+
   it("caps photos and videos separately, and refuses unknown types", () => {
     expect(mediaTypeForContentType("image/heic")).toBe("photo");
     expect(mediaTypeForContentType("video/quicktime")).toBe("video");
-    expect(maxUploadBytesFor("image/jpeg")).toBe(MAX_UPLOAD_BYTES.photo);
-    expect(maxUploadBytesFor("VIDEO/MP4")).toBe(MAX_UPLOAD_BYTES.video);
-    expect(maxUploadBytesFor("text/html")).toBeNull();
+    expect(maxUploadBytesFor("trip-photos", `slug/${HASH}.jpg`, "image/jpeg")).toBe(MAX_UPLOAD_BYTES.photo);
+    expect(maxUploadBytesFor("trip-photos", `slug/${HASH}.mp4`, "VIDEO/MP4")).toBe(MAX_UPLOAD_BYTES.video);
+    expect(maxUploadBytesFor("trip-photos", `slug/${HASH}.jpg`, "text/html")).toBeNull();
+  });
+
+  it("refuses raw HEIC, which the browser always converts first", () => {
+    expect(maxUploadBytesFor("trip-photos", `slug/${HASH}.heic`, "image/heic")).toBeNull();
+    expect(maxUploadBytesFor("trip-photos", `slug/${HASH}.heif`, "image/heif")).toBeNull();
+    expect(maxUploadBytesFor("avatars", "user/avatar.jpg", "image/heic")).toBeNull();
+  });
+
+  it("allows only JPEG at thumbnail and marker paths", () => {
+    for (const folder of ["thumbs", "markers"]) {
+      expect(maxUploadBytesFor("trip-photos", `slug/${folder}/${HASH}.jpg`, "image/jpeg")).toBe(MAX_UPLOAD_BYTES.photo);
+      expect(maxUploadBytesFor("trip-photos", `slug/${folder}/${HASH}.jpg`, "image/png")).toBeNull();
+      expect(maxUploadBytesFor("trip-photos", `slug/${folder}/${HASH}.jpg`, "video/mp4")).toBeNull();
+    }
+  });
+
+  it("allows only photos as avatars, at the photo cap", () => {
+    expect(maxUploadBytesFor("avatars", "user/avatar.jpg", "image/jpeg")).toBe(MAX_UPLOAD_BYTES.photo);
+    expect(maxUploadBytesFor("avatars", "user/avatar.jpg", "image/png")).toBe(MAX_UPLOAD_BYTES.photo);
+    expect(maxUploadBytesFor("avatars", "user/avatar.jpg", "video/mp4")).toBeNull();
   });
 });

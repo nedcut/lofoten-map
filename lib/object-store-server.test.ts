@@ -8,7 +8,7 @@ const HASH = "a".repeat(64);
 
 describe("isContentAddressedPhotoPath", () => {
   it("accepts the original, thumbnail and marker shapes", () => {
-    expect(isContentAddressedPhotoPath(`slug/${HASH}.heic`)).toBe(true);
+    expect(isContentAddressedPhotoPath(`slug/${HASH}.mov`)).toBe(true);
     expect(isContentAddressedPhotoPath(`slug/thumbs/${HASH}.jpg`)).toBe(true);
     expect(isContentAddressedPhotoPath(`slug/markers/${HASH}.jpg`)).toBe(true);
     expect(isContentAddressedPhotoPath(`slug/markers/${HASH}.png`)).toBe(false);
