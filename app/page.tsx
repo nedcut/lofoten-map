@@ -37,6 +37,9 @@ const AuthPanel = dynamic(() => import("@/components/AuthPanel").then((mod) => m
 const EditItemPanel = dynamic(() => import("@/components/EditItemPanel").then((mod) => mod.EditItemPanel));
 
 const MapView = dynamic(() => import("@/components/MapView").then((mod) => mod.MapView), { ssr: false });
+// Start the mapbox chunk download while the page hydrates rather than when
+// MapView first renders. dynamic() reuses the same in-flight module.
+if (typeof window !== "undefined") import("@/components/MapView").catch(() => {});
 // These also value-import mapbox-gl (markers, popups, the mini map), so they
 // must stay out of the static import graph for the same reason as MapView.
 const TripLayers = dynamic(() => import("@/components/TripLayers").then((mod) => mod.TripLayers), { ssr: false });

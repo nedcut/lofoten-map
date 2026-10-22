@@ -5,9 +5,106 @@ import type { BackendClient, BackendUser } from "@/lib/backend";
 import { resolveMemberAvatars, resolvePhotoUrls } from "@/lib/object-store";
 import { reuseIfEqual } from "@/lib/trip-data-equal";
 import { isMissingSchemaObjectError } from "@/lib/schema-errors";
-import type { AdminRequest, Photo, RouteSegment, TripData, TripMember } from "@/types/trip";
+import type { AdminRequest, Day, Note, Photo, Place, RouteSegment, Trip, TripData, TripMember } from "@/types/trip";
 
-const POLL_INTERVAL_MS = 30_000;
+// Members can edit, so their tabs check for changes often. Guests only watch;
+// a slower check plus a refresh when they come back to the tab keeps their
+// view current without downloading the trip every 30 seconds.
+const MEMBER_POLL_INTERVAL_MS = 30_000;
+const GUEST_POLL_INTERVAL_MS = 180_000;
+// Returning to the tab (focus or visibility) refreshes at most this often.
+const RETURN_REFRESH_MIN_GAP_MS = 15_000;
+
+/**
+ * trips.data_version goes up on every write to the trip or its rows
+ * (neon/patches/2026-10-21-trip-data-version.sql). Returns null when the
+ * column is not deployed yet, which turns change checks off.
+ */
+function dataVersionOf(trip: Record<string, unknown>): number | null {
+  return typeof trip.data_version === "number" ? trip.data_version : null;
+}
+
+const MEMBER_COLUMNS = "trip_id,user_id,role,display_name,avatar_path,created_at";
+
+type QueryError = { message: string } | null;
+type Rows = { data: unknown[] | null; error: QueryError };
+type TripRows = {
+  tripRow: Record<string, unknown> | null;
+  tripError: QueryError;
+  days: Rows;
+  routes: Rows;
+  photos: Rows;
+  notes: Rows;
+  places: Rows;
+  members: Rows;
+  adminRequests: Rows;
+  profilesMissing: boolean;
+};
+
+const noRows: Rows = { data: [], error: null };
+
+/**
+ * The whole trip in one PostgREST request: the trips row with its child rows
+ * embedded, filtered by the same RLS as separate queries. Returns null when the
+ * request fails, so the caller can retry table by table and report which
+ * section broke. Anonymous callers cannot embed admin_requests (no grant).
+ */
+async function fetchTripEmbedded(backend: BackendClient, tripSlug: string, withAdminRequests: boolean): Promise<TripRows | null> {
+  const embeds = ["days(*)", "route_segments(*)", "photos(*)", "notes(*)", "places(*)", `trip_members(${MEMBER_COLUMNS})`];
+  if (withAdminRequests) embeds.push("admin_requests(*)");
+  let query = backend.from("trips").select(["*", ...embeds].join(",")).eq("slug", tripSlug)
+    .order("day_number", { referencedTable: "days" })
+    .order("created_at", { referencedTable: "route_segments" })
+    .order("created_at", { referencedTable: "photos", ascending: false })
+    .order("created_at", { referencedTable: "notes", ascending: false })
+    .order("created_at", { referencedTable: "places", ascending: false })
+    .order("created_at", { referencedTable: "trip_members" });
+  if (withAdminRequests) query = query.order("created_at", { referencedTable: "admin_requests", ascending: false });
+  const { data, error } = await query.maybeSingle();
+  if (error) return null;
+  const row = data as Record<string, unknown> | null;
+  if (!row) return { tripRow: null, tripError: null, days: noRows, routes: noRows, photos: noRows, notes: noRows, places: noRows, members: noRows, adminRequests: noRows, profilesMissing: false };
+  const { days, route_segments, photos, notes, places, trip_members, admin_requests, ...tripRow } = row;
+  const rows = (value: unknown): Rows => ({ data: Array.isArray(value) ? value : [], error: null });
+  return {
+    tripRow,
+    tripError: null,
+    days: rows(days),
+    routes: rows(route_segments),
+    photos: rows(photos),
+    notes: rows(notes),
+    places: rows(places),
+    members: rows(trip_members),
+    adminRequests: rows(admin_requests),
+    profilesMissing: false,
+  };
+}
+
+/** One query per table, so a schema that lags the app degrades section by section. */
+async function fetchTripSeparately(backend: BackendClient, tripSlug: string, withAdminRequests: boolean): Promise<TripRows> {
+  const { data: tripRow, error: tripError } = await backend.from("trips").select("*").eq("slug", tripSlug).maybeSingle();
+  if (tripError || !tripRow) {
+    return { tripRow: null, tripError, days: noRows, routes: noRows, photos: noRows, notes: noRows, places: noRows, members: noRows, adminRequests: noRows, profilesMissing: false };
+  }
+  const tripId = (tripRow as { id: string }).id;
+  const adminRequestsQuery = withAdminRequests
+    ? backend.from("admin_requests").select("*").eq("trip_id", tripId).order("created_at", { ascending: false })
+    : Promise.resolve(noRows);
+  const [days, routes, photos, notes, places, members, adminRequests] = await Promise.all([
+    backend.from("days").select("*").eq("trip_id", tripId).order("day_number"),
+    backend.from("route_segments").select("*").eq("trip_id", tripId).order("created_at"),
+    backend.from("photos").select("*").eq("trip_id", tripId).order("created_at", { ascending: false }),
+    backend.from("notes").select("*").eq("trip_id", tripId).order("created_at", { ascending: false }),
+    backend.from("places").select("*").eq("trip_id", tripId).order("created_at", { ascending: false }),
+    backend.from("trip_members").select(MEMBER_COLUMNS).eq("trip_id", tripId).order("created_at"),
+    adminRequestsQuery,
+  ]);
+  const profilesMissing = isMissingSchemaObjectError(members.error, "avatar_path");
+  const membersResult = profilesMissing
+    ? await backend.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", tripId).order("created_at")
+    : members;
+  return { tripRow, tripError: null, days, routes, photos, notes, places, members: membersResult, adminRequests, profilesMissing };
+}
 
 type Options = {
   backend: BackendClient | null;
@@ -34,6 +131,11 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
   // True while the current error/notice was set by a silent poll. A later
   // successful silent poll clears only those, never a message a mutation set.
   const pollMessageRef = useRef(false);
+  // data_version of the data on screen, or null when unknown (column missing or
+  // the last load failed). A silent poll skips the full reload while it matches.
+  const loadedVersionRef = useRef<number | null>(null);
+  // When the last load or change check finished, for throttling tab-return refreshes.
+  const lastSyncedAtRef = useRef(0);
 
   const loadData = useCallback((options?: { silent?: boolean }): Promise<void> => {
     if (!backend) return Promise.resolve();
@@ -53,35 +155,38 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
         pollMessageRef.current = false;
       }
       let pollMessage = false;
+      // Cleared only by a load that fully succeeds.
+      let loadedVersion: number | null = null;
       try {
-        const { data: trip, error: tripError } = await backend.from("trips").select("*").eq("slug", tripSlug).maybeSingle();
+        if (options?.silent && loadedVersionRef.current !== null) {
+          const { data: current, error: versionError } = await backend.from("trips").select("data_version").eq("slug", tripSlug).maybeSingle();
+          if (!isCurrent()) return;
+          if (!versionError && current && dataVersionOf(current) === loadedVersionRef.current) {
+            // Nothing changed: keep the data and any messages from the last load.
+            loadedVersion = loadedVersionRef.current;
+            pollMessage = pollMessageRef.current;
+            return;
+          }
+          // Changed, or the check failed: fall through to a full reload, which
+          // reports any real failure the usual way.
+        }
+        const withAdminRequests = Boolean(user);
+        const rows = (await fetchTripEmbedded(backend, tripSlug, withAdminRequests))
+          ?? (await fetchTripSeparately(backend, tripSlug, withAdminRequests));
         if (!isCurrent()) return;
-        if (tripError || !trip) {
+        const { tripRow, tripError, days, routes, photos, notes, places, members, adminRequests, profilesMissing } = rows;
+        if (tripError || !tripRow) {
           pollMessage = true;
           setError(tripError
             ? `We could not load the trip right now. Try refreshing, or ask an admin to check access. ${tripError.message}`
             : "The trip is not set up yet. Ask an admin to finish creating it, then refresh.");
           return;
         }
-        const adminRequestsQuery = user
-          ? backend.from("admin_requests").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false })
-          : Promise.resolve({ data: [], error: null });
-        const [days, routes, photos, notes, places, members, adminRequests] = await Promise.all([
-          backend.from("days").select("*").eq("trip_id", trip.id).order("day_number"),
-          backend.from("route_segments").select("*").eq("trip_id", trip.id).order("created_at"),
-          backend.from("photos").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
-          backend.from("notes").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
-          backend.from("places").select("*").eq("trip_id", trip.id).order("created_at", { ascending: false }),
-          backend.from("trip_members").select("trip_id,user_id,role,display_name,avatar_path,created_at").eq("trip_id", trip.id).order("created_at"),
-          adminRequestsQuery,
-        ]);
-        if (!isCurrent()) return;
+        // Kept out of `trip` so a version bump alone does not replace the trip object.
+        const trip = { ...tripRow };
+        delete trip.data_version;
+        const tripVersion = dataVersionOf(tripRow);
         const adminRequestsMissing = isMissingSchemaObjectError(adminRequests.error, "admin_requests");
-        const profilesMissing = isMissingSchemaObjectError(members.error, "avatar_path");
-        const membersResult = profilesMissing
-          ? await backend.from("trip_members").select("trip_id,user_id,role,display_name,created_at").eq("trip_id", trip.id).order("created_at")
-          : members;
-        if (!isCurrent()) return;
         setAdminRequestsAvailable(!adminRequestsMissing);
         setProfilesAvailable(!profilesMissing);
         if (adminRequestsMissing || profilesMissing) {
@@ -89,21 +194,21 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
           pollMessage = true;
           setNotice(`${stale} are temporarily unavailable. Apply the latest database migrations, then refresh.`);
         }
-        const failure = [days.error, routes.error, photos.error, notes.error, places.error, membersResult.error, adminRequestsMissing ? null : adminRequests.error].find(Boolean);
+        const failure = [days.error, routes.error, photos.error, notes.error, places.error, members.error, adminRequestsMissing ? null : adminRequests.error].find(Boolean);
         if (failure) {
           pollMessage = true;
           setError(`The trip loaded, but one section could not sync. Try refreshing. ${failure.message}`);
         } else {
           const resolvedPhotos = resolvePhotoUrls((photos.data ?? []) as Photo[]);
-          const memberRows = ((membersResult.data ?? []) as Partial<TripMember>[]).map((member) => ({ avatar_path: null, ...member })) as TripMember[];
+          const memberRows = ((members.data ?? []) as Partial<TripMember>[]).map((member) => ({ avatar_path: null, ...member })) as TripMember[];
           const resolvedMembers = resolveMemberAvatars(memberRows);
           const next: TripData = {
-            trip,
-            days: days.data ?? [],
+            trip: trip as Trip,
+            days: (days.data ?? []) as Day[],
             routeSegments: (routes.data ?? []) as RouteSegment[],
             photos: resolvedPhotos,
-            notes: notes.data ?? [],
-            places: places.data ?? [],
+            notes: (notes.data ?? []) as Note[],
+            places: (places.data ?? []) as Place[],
             members: resolvedMembers,
             adminRequests: adminRequestsMissing ? [] : (adminRequests.data ?? []) as AdminRequest[],
           };
@@ -111,6 +216,10 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
           // and memo downstream keys on identity, so an unconditional replace
           // would tear down and rebuild the map layers on every 30s poll.
           setData((current) => reuseIfEqual(current, next));
+          // The embedded request reads the version and rows in one snapshot. The
+          // table-by-table fallback reads trips first, so its version can only be
+          // older than the rows loaded; at worst the next poll reloads once more.
+          loadedVersion = tripVersion;
           if (options?.silent && pollMessageRef.current && !pollMessage) {
             setError(null);
             setNotice(null);
@@ -122,6 +231,8 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
         setError(loadError instanceof Error ? `We could not sync the trip right now. Try refreshing. ${loadError.message}` : "We could not sync the trip right now. Try refreshing.");
       } finally {
         if (isCurrent()) {
+          loadedVersionRef.current = loadedVersion;
+          lastSyncedAtRef.current = Date.now();
           if (options?.silent) pollMessageRef.current = pollMessage;
           if (!options?.silent) setLoading(false);
         }
@@ -135,22 +246,30 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
     return request;
   }, [backend, tripSlug, user]);
 
+  // Trip rows are public, so the first load does not wait for the session check:
+  // both start together, and the SDK's data requests share its session lookup.
+  // When a signed-in user resolves, loadData changes and reloads with their
+  // admin requests.
   useEffect(() => {
     if (!backend) return;
-    if (authLoading) return;
     void loadData();
-  }, [authLoading, backend, loadData, user]);
+  }, [backend, loadData]);
 
   useEffect(() => {
     if (!backend || authLoading) return;
+    const interval = user ? MEMBER_POLL_INTERVAL_MS : GUEST_POLL_INTERVAL_MS;
     let stopped = false;
     let timer: number | null = null;
     let polling = false;
 
     const schedule = () => {
-      if (!stopped && document.visibilityState === "visible") timer = window.setTimeout(poll, POLL_INTERVAL_MS);
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+      if (!stopped && document.visibilityState === "visible") timer = window.setTimeout(poll, interval);
     };
     const poll = async () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
       if (stopped || polling) return;
       if (document.visibilityState !== "visible") return;
       polling = true;
@@ -161,21 +280,26 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
         schedule();
       }
     };
-    const handleVisibilityChange = () => {
+    const handleReturn = () => {
       if (document.visibilityState !== "visible" || polling) return;
-      if (timer !== null) window.clearTimeout(timer);
-      timer = null;
+      if (Date.now() - lastSyncedAtRef.current < RETURN_REFRESH_MIN_GAP_MS) {
+        // Just synced: make sure a poll is scheduled, but do not fetch again now.
+        if (timer === null) schedule();
+        return;
+      }
       void poll();
     };
 
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("visibilitychange", handleReturn);
+    window.addEventListener("focus", handleReturn);
     schedule();
     return () => {
       stopped = true;
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("visibilitychange", handleReturn);
+      window.removeEventListener("focus", handleReturn);
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [authLoading, backend, loadData]);
+  }, [authLoading, backend, loadData, user]);
 
   return {
     data,
