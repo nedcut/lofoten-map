@@ -157,7 +157,9 @@ async function serveObject(request: Request, env: Env, ctx: ExecutionContext, ke
 
   if (matchesIfNoneMatch(request, metadata.httpEtag)) return new Response(null, { status: 304, headers });
 
-  const range = parseRange(request, metadata.size, metadata.httpEtag);
+  // Range applies only to GET (RFC 9110 section 14.2); HEAD describes the
+  // whole object.
+  const range = isGet ? parseRange(request, metadata.size, metadata.httpEtag) : null;
   if (range === "unsatisfiable") return rangeNotSatisfiable(metadata.httpEtag, metadata.size);
 
   if (!range) {
@@ -170,7 +172,6 @@ async function serveObject(request: Request, env: Env, ctx: ExecutionContext, ke
 
   headers.set("Content-Range", `bytes ${range.offset}-${range.offset + range.length - 1}/${metadata.size}`);
   headers.set("Content-Length", String(range.length));
-  if (!isGet) return new Response(null, { status: 206, headers });
   const object = await env.MEDIA_BUCKET.get(key, { range });
   if (!object) return new Response("Not found", { status: 404, headers: responseHeaders() });
   return new Response(object.body, { status: 206, headers });

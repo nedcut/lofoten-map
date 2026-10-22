@@ -89,6 +89,16 @@ test("cold and warm cache preserve range and conditional semantics", async (t) =
     }
   }
 
+  await t.test("HEAD ignores Range and describes the whole object", async () => {
+    await bucket.put(key, body);
+    for (const range of ["bytes=0-1", "bytes=1000-"]) {
+      const response = await mf.dispatchFetch(`https://media.test/${key}`, { method: "HEAD", headers: { Range: range } });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("Content-Length"), "1000");
+      assert.equal(response.headers.get("Content-Range"), null);
+    }
+  });
+
   await t.test("warm: query string shares the cache entry", async () => {
     const response = await mf.dispatchFetch(`https://media.test/${key}?v=other`, { headers: { Range: "bytes=0-1" } });
     assert.deepEqual({ status: response.status, body: await response.text() }, { status: 206, body: "01" });
