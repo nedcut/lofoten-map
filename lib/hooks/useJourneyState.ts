@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JourneyFilter } from "@/components/JourneyPlayback";
 import type { JourneyItem } from "@/lib/journey";
 import { applyTripUrlState } from "@/lib/trip-url";
@@ -35,7 +35,17 @@ export function useJourneyState({ allJourneyItems }: UseJourneyStateOptions) {
   }, [activeJourneyId, journeyItems]);
   const journeyOpen = Boolean(activeJourneyId);
 
+  // The control that opened the viewer, so closing it can hand focus back.
+  // Captured here, synchronously in the opening click: once the viewer is
+  // open the page behind it turns inert, which drops focus to <body> before
+  // the (lazily loaded) viewer even mounts.
+  const journeyOpenerRef = useRef<HTMLElement | null>(null);
+
   const openJourneyAt = useCallback((itemId: string, mode: HistoryMode = "push") => {
+    // "push" opens the viewer; "replace" moves within an already-open one.
+    if (mode === "push" && typeof document !== "undefined") {
+      journeyOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
     setActiveJourneyId(itemId);
     if (typeof window === "undefined") return;
     applyTripUrlState(window.location.href, { journey: itemId, item: null }, mode);
@@ -94,7 +104,7 @@ export function useJourneyState({ allJourneyItems }: UseJourneyStateOptions) {
     openJourneyAt(`photo:${photoId}`, "push");
   }, [openJourneyAt]);
 
-  // "Play this day" from a day card: clear any active filters so the day's first
+  // "Start journey at Day N" from a day card: clear any active filters so the day's first
   // moment is guaranteed to be in the sequence, then drop into playback there.
   const playDayJourney = useCallback((dayId: string) => {
     setJourneyIntro(false);
@@ -126,6 +136,8 @@ export function useJourneyState({ allJourneyItems }: UseJourneyStateOptions) {
     activeJourneyId,
     /** Direct setter for callers that leave the viewer without touching the URL. */
     setActiveJourneyId,
+    /** Focus target for when the viewer closes: the control that opened it. */
+    journeyOpenerRef,
     activeJourneyIndex,
     journeyOpen,
     journeyItems,

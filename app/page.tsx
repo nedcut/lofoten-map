@@ -116,6 +116,7 @@ export default function Home() {
   const {
     activeJourneyId,
     setActiveJourneyId,
+    journeyOpenerRef,
     activeJourneyIndex,
     journeyOpen,
     journeyItems,
@@ -351,20 +352,18 @@ export default function Home() {
   }, [journeyItems, lastFocusedPhotoId, openJourneyAt, selectedDayId, setJourneyIntro]);
 
   // Bundle for the sidebar/mobile Journey hero + per-day play buttons. With a
-  // day selected the hero describes (and previews) that day, matching what
-  // startJourney will actually do; otherwise it describes the whole trip.
-  const journeyEntry = useMemo(() => {
-    const dayMoments = selectedDayId ? allJourneyItems.filter((item) => item.dayId === selectedDayId).length : allJourneyItems.length;
-    return {
-      photos: selectedDayId ? data.photos.filter((photo) => photo.day_id === selectedDayId) : data.photos,
-      momentCount: dayMoments,
-      dayCount: data.days.length,
-      day: selectedDay,
-      onPlay: startJourney,
-      onPlayDay: playDayJourney,
-      disabled: allJourneyItems.length === 0,
-    };
-  }, [data.photos, data.days.length, allJourneyItems, selectedDay, selectedDayId, startJourney, playDayJourney]);
+  // day selected the hero offers to start there (and previews that day),
+  // matching what startJourney will actually do: begin at the day and play on
+  // through the rest of the trip. Otherwise it describes the whole trip.
+  const journeyEntry = useMemo(() => ({
+    photos: selectedDayId ? data.photos.filter((photo) => photo.day_id === selectedDayId) : data.photos,
+    momentCount: allJourneyItems.length,
+    dayCount: data.days.length,
+    day: selectedDay,
+    onPlay: startJourney,
+    onPlayDay: playDayJourney,
+    disabled: allJourneyItems.length === 0,
+  }), [data.photos, data.days.length, allJourneyItems, selectedDay, selectedDayId, startJourney, playDayJourney]);
 
   // Share whatever is on screen: the URL already encodes the selected day, so
   // a copied link lands the recipient on the same view.
@@ -629,6 +628,7 @@ export default function Home() {
         <JourneyPlayback
           trip={data.trip}
           showIntro={journeyIntro}
+          returnFocusRef={journeyOpenerRef}
           items={journeyItems}
           allItems={allJourneyItems}
           activeIndex={Math.max(0, activeJourneyIndex)}

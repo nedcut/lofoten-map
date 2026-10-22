@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import type { JourneyItem } from "@/lib/journey";
 import type { Day, LngLat, RouteSegment } from "@/types/trip";
 import { canUseStyle } from "@/lib/map-style";
+import { isFatalMinimapError, MINIMAP_LOAD_TIMEOUT_MS } from "@/lib/journey-minimap";
 
 type Props = {
   routes: RouteSegment[];
@@ -36,6 +37,53 @@ function hasLayer(map: mapboxgl.Map, id: string) {
   } catch {
     return false;
   }
+}
+
+// Every source and layer the mini-map draws, created together (empty) the
+// first time any of them is needed so the stacking order never depends on
+// which data effect happens to run first. Each source's data is then fed by
+// its own effect below.
+function ensureJourneyLayers(map: mapboxgl.Map) {
+  if (getSource(map, "journey-routes")) return;
+  const empty = { type: "FeatureCollection" as const, features: [] };
+  map.addSource("journey-routes", { type: "geojson", data: empty });
+  map.addLayer({ id: "journey-routes-shadow", type: "line", source: "journey-routes", paint: { "line-color": "#1c2f2b", "line-width": 7, "line-opacity": 0.24 } });
+  map.addLayer({ id: "journey-routes-line", type: "line", source: "journey-routes", paint: { "line-color": "#fffdf6", "line-width": 3, "line-opacity": 0.85 } });
+  map.addSource("journey-progress-routes", { type: "geojson", data: empty });
+  map.addLayer({ id: "journey-progress-line", type: "line", source: "journey-progress-routes", paint: { "line-color": "#e7a13d", "line-width": 4.5, "line-opacity": 0.95 } });
+  // The leg the camera is currently walking; data is fed imperatively by the
+  // flight effect, which owns when a leg starts and ends.
+  map.addSource("journey-leg", { type: "geojson", data: empty });
+  map.addLayer({ id: "journey-leg-line", type: "line", source: "journey-leg", layout: { "line-cap": "round" }, paint: { "line-color": "#ffd089", "line-width": 4, "line-dasharray": [0.2, 1.6], "line-opacity": 0.95 } });
+  map.addSource("journey-items", { type: "geojson", data: empty });
+  map.addLayer({ id: "journey-items-circle", type: "circle", source: "journey-items", paint: { "circle-radius": 4.5, "circle-color": "#fffdf6", "circle-stroke-width": 2, "circle-stroke-color": "#0f766e", "circle-opacity": 0.9 } });
+  map.addSource("journey-active", { type: "geojson", data: empty });
+  map.addLayer({ id: "journey-active-halo", type: "circle", source: "journey-active", paint: { "circle-radius": 18, "circle-color": "#e7a13d", "circle-opacity": 0.24 } });
+  map.addLayer({ id: "journey-active-circle", type: "circle", source: "journey-active", paint: { "circle-radius": 9, "circle-color": "#fffdf6", "circle-stroke-width": 4, "circle-stroke-color": "#e7a13d" } });
+}
+
+// Sends one source's collection to the map, only when that collection
+// changes: setData re-parses in Mapbox's worker, so the full route geometry
+// and every journey point must not be re-sent on each step. Waits for the
+// style when the map is still loading.
+function useJourneySourceData(map: mapboxgl.Map | null, sourceId: string, data: FeatureCollection) {
+  useEffect(() => {
+    if (!map) return;
+    let cancelled = false;
+    const apply = () => {
+      if (cancelled || !canUseStyle(map)) return;
+      ensureJourneyLayers(map);
+      (getSource(map, sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(data);
+    };
+    // Not isStyleLoaded(): it stays false while tiles load (every step flies
+    // the camera), and "load" never fires again, so the update would be lost.
+    if (canUseStyle(map)) apply();
+    else map.once("load", apply);
+    return () => {
+      cancelled = true;
+      map.off("load", apply);
+    };
+  }, [map, sourceId, data]);
 }
 
 function pointData(items: JourneyItem[]): FeatureCollection<Point> {
@@ -146,7 +194,13 @@ function progressedRoutes(routes: RouteSegment[], days: Day[], activeDayNumber: 
 
 export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction, onSelectItem }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  // State rather than a ref: Retry replaces the instance, and every effect
+  // that wires into the map has to re-run against the new one.
+  const [map, setMap] = useState<mapboxgl.Map | null>(null);
+  // "failed" when the style never loads (an error before "style.load", or the
+  // load timeout); Retry bumps `attempt`, which rebuilds the map.
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "failed">("loading");
+  const [attempt, setAttempt] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [sizeIndex, setSizeIndex] = useState(() => storedSizeIndex(SIZE_STORAGE_KEY, COLLAPSED_SIZES.length));
   const [expandedSizeIndex, setExpandedSizeIndex] = useState(() => storedSizeIndex(EXPANDED_SIZE_STORAGE_KEY, EXPANDED_SIZES.length));
@@ -187,11 +241,12 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   // same day keeps the same collection and the source is not re-sent.
   const activeDayNumber = dayNumber(days, activeItem.dayId);
   const progressRouteData = useMemo(() => routeFeatureCollection(progressedRoutes(routes, days, activeDayNumber)), [activeDayNumber, days, routes]);
-  // The collection last handed to each source; setData re-parses in Mapbox's
-  // worker, so only sources whose collection changed are re-sent.
-  const sentDataRef = useRef(new Map<string, FeatureCollection>());
   const itemsData = useMemo(() => pointData(items), [items]);
   const activeData = useMemo(() => activePointData(activeItem), [activeItem]);
+  useJourneySourceData(map, "journey-routes", routeData);
+  useJourneySourceData(map, "journey-progress-routes", progressRouteData);
+  useJourneySourceData(map, "journey-items", itemsData);
+  useJourneySourceData(map, "journey-active", activeData);
 
   // Publish the collapsed width so the playback bar can reserve that much
   // room. Only the collapsed size counts: the hover-expanded map is transient
@@ -214,9 +269,9 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     };
   }, []);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- one-shot sync from Mapbox availability (token/WebGL/init failure, an external system) during mount; intentional. */
+  /* eslint-disable react-hooks/set-state-in-effect -- syncs from Mapbox availability and load lifecycle (token/WebGL/init/style failure, an external system); intentional. */
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    if (!containerRef.current) return;
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) {
       setUnavailable("Map token needed");
@@ -243,6 +298,20 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       setUnavailable("Map unavailable");
       return;
     }
+    // A style that never arrives (outage, offline, bad token) leaves an empty
+    // canvas with no event at all unless Mapbox reports an error, so both an
+    // early fatal error and a bounded wait end in the Retry state. Errors
+    // after "style.load" (a missing tile, the DEM) are not fatal and are ignored.
+    setLoadState("loading");
+    let loaded = false;
+    const fail = () => { if (!loaded) setLoadState("failed"); };
+    const loadTimer = window.setTimeout(fail, MINIMAP_LOAD_TIMEOUT_MS);
+    map.on("error", (event) => { if (isFatalMinimapError(event, loaded)) fail(); });
+    map.once("style.load", () => {
+      loaded = true;
+      window.clearTimeout(loadTimer);
+      setLoadState("ready");
+    });
     // 3D terrain sells the hike: the fjords rise around the camera as it
     // follows the path. style.load (not load) so terrain survives style swaps.
     map.on("style.load", () => {
@@ -255,26 +324,27 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     // Dev-only handle for inspecting camera state (pitch/zoom/terrain) from the
     // console or Playwright; the camera maths here have bitten us before.
     if (process.env.NODE_ENV !== "production") (window as unknown as { __miniMap?: mapboxgl.Map }).__miniMap = map;
-    mapRef.current = map;
+    setMap(map);
     // Keep the canvas in lockstep with the container as it animates between the
     // collapsed and expanded sizes. A one-shot resize would capture a mid-
     // transition size; the observer fires on every frame of the CSS transition.
     const observer = new ResizeObserver(() => map.resize());
     observer.observe(containerRef.current);
     return () => {
+      window.clearTimeout(loadTimer);
       observer.disconnect();
       map.remove();
-      mapRef.current = null;
+      setMap(null);
     };
-    // Create the map instance exactly once. The initial center/zoom captures the
-    // active item at mount; recentring as the active item changes is handled by
-    // the easeTo effect below, so we must not tear the map down per navigation.
+    // Create the map instance once per attempt (mount, then each Retry). The
+    // initial center/zoom captures the active item at creation; recentring as
+    // the active item changes is handled by the flight effect below, so we
+    // must not tear the map down per navigation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [attempt]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
-    const map = mapRef.current;
     if (!map) return;
     // A user grabbing the map takes the camera back: stop any in-flight follow
     // animation so it doesn't wrestle the drag.
@@ -292,10 +362,9 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       map.off("rotatestart", noteInteraction);
       map.off("pitchstart", noteInteraction);
     };
-  }, [cancelFlight, onInteraction]);
+  }, [cancelFlight, map, onInteraction]);
 
   useEffect(() => {
-    const map = mapRef.current;
     if (!map) return;
     const layer = "journey-items-circle";
     let attached = false;
@@ -326,75 +395,14 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       map.off("mouseenter", layer, setPointer);
       map.off("mouseleave", layer, resetPointer);
     };
-    // Attach once for the map's lifetime; callbacks come from callbacksRef.
-  }, []);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    let cancelled = false;
-    const sent = sentDataRef.current;
-    const addOrUpdate = () => {
-      if (cancelled || !canUseStyle(map)) return;
-
-      if (!getSource(map, "journey-routes")) {
-        map.addSource("journey-routes", { type: "geojson", data: routeData });
-        map.addLayer({ id: "journey-routes-shadow", type: "line", source: "journey-routes", paint: { "line-color": "#1c2f2b", "line-width": 7, "line-opacity": 0.24 } });
-        map.addLayer({ id: "journey-routes-line", type: "line", source: "journey-routes", paint: { "line-color": "#fffdf6", "line-width": 3, "line-opacity": 0.85 } });
-      } else if (sent.get("journey-routes") !== routeData) {
-        (getSource(map, "journey-routes") as mapboxgl.GeoJSONSource).setData(routeData);
-      }
-      sent.set("journey-routes", routeData);
-
-      if (!getSource(map, "journey-progress-routes")) {
-        map.addSource("journey-progress-routes", { type: "geojson", data: progressRouteData });
-        map.addLayer({ id: "journey-progress-line", type: "line", source: "journey-progress-routes", paint: { "line-color": "#e7a13d", "line-width": 4.5, "line-opacity": 0.95 } });
-      } else if (sent.get("journey-progress-routes") !== progressRouteData) {
-        (getSource(map, "journey-progress-routes") as mapboxgl.GeoJSONSource).setData(progressRouteData);
-      }
-      sent.set("journey-progress-routes", progressRouteData);
-
-      if (!getSource(map, "journey-leg")) {
-        // The leg the camera is currently walking; data is fed imperatively by
-        // the flight effect, which owns when a leg starts and ends.
-        map.addSource("journey-leg", { type: "geojson", data: emptyLine() });
-        map.addLayer({ id: "journey-leg-line", type: "line", source: "journey-leg", layout: { "line-cap": "round" }, paint: { "line-color": "#ffd089", "line-width": 4, "line-dasharray": [0.2, 1.6], "line-opacity": 0.95 } });
-      }
-
-      if (!getSource(map, "journey-items")) {
-        map.addSource("journey-items", { type: "geojson", data: itemsData });
-        map.addLayer({ id: "journey-items-circle", type: "circle", source: "journey-items", paint: { "circle-radius": 4.5, "circle-color": "#fffdf6", "circle-stroke-width": 2, "circle-stroke-color": "#0f766e", "circle-opacity": 0.9 } });
-      } else if (sent.get("journey-items") !== itemsData) {
-        (getSource(map, "journey-items") as mapboxgl.GeoJSONSource).setData(itemsData);
-      }
-      sent.set("journey-items", itemsData);
-
-      if (!getSource(map, "journey-active")) {
-        map.addSource("journey-active", { type: "geojson", data: activeData });
-        map.addLayer({ id: "journey-active-halo", type: "circle", source: "journey-active", paint: { "circle-radius": 18, "circle-color": "#e7a13d", "circle-opacity": 0.24 } });
-        map.addLayer({ id: "journey-active-circle", type: "circle", source: "journey-active", paint: { "circle-radius": 9, "circle-color": "#fffdf6", "circle-stroke-width": 4, "circle-stroke-color": "#e7a13d" } });
-      } else if (sent.get("journey-active") !== activeData) {
-        (getSource(map, "journey-active") as mapboxgl.GeoJSONSource).setData(activeData);
-      }
-      sent.set("journey-active", activeData);
-    };
-
-    // Not isStyleLoaded(): it stays false while tiles load (every step flies
-    // the camera), and "load" never fires again, so the update would be lost.
-    if (canUseStyle(map)) addOrUpdate();
-    else map.once("load", addOrUpdate);
-    return () => {
-      cancelled = true;
-      map.off("load", addOrUpdate);
-    };
-  }, [activeData, itemsData, progressRouteData, routeData]);
+    // Attach once per map instance; callbacks come from callbacksRef.
+  }, [map]);
 
   // Follow the journey: when the active item changes, walk the camera along the
   // route between the previous item and this one, pitched into the terrain and
   // facing the direction of travel. Falls back to a plain ease for the first
   // item, reduced-motion users, and items with no location.
   useEffect(() => {
-    const map = mapRef.current;
     if (!map) return;
     const next = activeItem.coord;
     // An item without a location keeps the camera where it is — but stop any
@@ -586,7 +594,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     flightActiveRef.current = true;
     frameId = requestAnimationFrame(frame);
     return cancelFlight;
-  }, [activeItem.coord, cancelFlight, expanded, routes]);
+  }, [activeItem.coord, cancelFlight, expanded, map, routes]);
 
   function expand() {
     if (performance.now() - sizeChangedAtRef.current < 800) return;
@@ -615,7 +623,6 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   }
 
   function rotateBy(degrees: number) {
-    const map = mapRef.current;
     if (!map) return;
     onInteraction();
     cancelFlight();
@@ -675,7 +682,15 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
           </div>
         ) : null}
         <div ref={containerRef} className="h-full w-full" onPointerDown={expand} />
-        {!unavailable ? (
+        {!unavailable && loadState === "failed" ? (
+          <div role="status" className="absolute inset-0 z-20 flex items-center justify-center gap-1.5 bg-mist p-3 text-center text-xs font-bold text-stone-700">
+            <MapPin className="h-3.5 w-3.5 shrink-0 text-teal-700" /> Map unavailable ·
+            <button type="button" onClick={() => setAttempt((current) => current + 1)} className="rounded-full px-1.5 py-1 text-teal-800 underline underline-offset-2 hover:text-teal-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/30">
+              Retry
+            </button>
+          </div>
+        ) : null}
+        {!unavailable && loadState !== "failed" ? (
           <div className="absolute bottom-1.5 right-1.5 z-10 flex items-center gap-1">
             <button type="button" onClick={() => rotateBy(-15)} className={controlButton} aria-label="Rotate map left" title="Rotate left 15°">
               <RotateCcw className="h-3.5 w-3.5" />
@@ -690,7 +705,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
             <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-teal-700" /> {activeItem.coord ? unavailable : "Location unknown"}</span>
           </div>
         ) : null}
-        {!activeItem.coord && !unavailable ? (
+        {!activeItem.coord && !unavailable && loadState !== "failed" ? (
           <div className="pointer-events-none absolute inset-x-2 bottom-2 rounded-lg bg-paper/93 px-2 py-1.5 text-center text-[11px] font-bold text-stone-700 shadow">
             Location unknown
           </div>

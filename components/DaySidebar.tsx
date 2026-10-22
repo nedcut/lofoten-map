@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { InlineMessage } from "@/components/ui/InlineMessage";
 import { SectionCard } from "@/components/ui/SectionCard";
 import { dayColorFor } from "@/lib/day-colors";
+import { startJourneyAtDayLabel } from "@/lib/journey";
 import { formatDayStats, type TripDayStats } from "@/lib/trip-view-model";
 import { cn, formatDateOnly } from "@/lib/utils";
 import type { AdminRequest, AdminRequestStatus, Day, Note, Photo, Place, Trip, TripMember } from "@/types/trip";
@@ -27,8 +28,8 @@ export type JourneyEntry = {
   photos: Photo[];
   momentCount: number;
   dayCount: number;
-  // The selected day, when there is one: the hero then offers to relive just
-  // that day and previews its photos.
+  // The selected day, when there is one: the hero then offers to start the
+  // journey at that day (it plays on through the trip) and previews its photos.
   day: Day | null;
   onPlay: () => void;
   onPlayDay: (dayId: string) => void;
@@ -232,8 +233,8 @@ export function DayList({ days, dayStats, dayColors, selectedDayId, onSelectDay,
                 <button
                   type="button"
                   onClick={() => onPlayDay?.(day.id)}
-                  aria-label={`Relive Day ${day.day_number}`}
-                  title={`Relive Day ${day.day_number}`}
+                  aria-label={startJourneyAtDayLabel(day.day_number)}
+                  title={startJourneyAtDayLabel(day.day_number)}
                   className="absolute right-2.5 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-stone-200 bg-white text-ember-600 shadow-sm transition hover:-translate-y-1/2 hover:scale-105 hover:border-ember-400/60 hover:bg-[#fdf1dc] hover:text-ember-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember-400/30 active:scale-95"
                 >
                   <Play className="h-4 w-4 fill-current" />

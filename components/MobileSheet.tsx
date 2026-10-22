@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { AdminRequestPanel, DayList, DayListSkeleton, LayersPanel, MemberAdminPanel, NotesPlacesList, QuickActions, type SidebarProps } from "@/components/DaySidebar";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
 import { dayColorFor } from "@/lib/day-colors";
+import { journeyEntryCopy } from "@/lib/journey";
 import { formatMediaCount } from "@/lib/trip-view-model";
 import { cn } from "@/lib/utils";
 import type { Day } from "@/types/trip";
@@ -55,6 +56,7 @@ function countsLabel(counts: PeekCounts): string {
 
 export function MobileSheet(props: MobileSheetProps) {
   const [expanded, setExpanded] = useState(false);
+  const journeyCopy = journeyEntryCopy(props.journey?.day ?? null, props.journey?.momentCount ?? 0, props.journey?.dayCount ?? 0);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const collapsedRef = useRef<HTMLDivElement | null>(null);
   const selectedDay = props.days.find((day) => day.id === props.selectedDayId) ?? null;
@@ -192,11 +194,8 @@ export function MobileSheet(props: MobileSheetProps) {
               >
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ember-400 text-stone-950"><Play className="h-4 w-4 fill-current" /></span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-bold">{props.journey.day ? `Relive Day ${props.journey.day.day_number}` : "Relive the journey"}</span>
-                  <span className="block truncate text-[11px] text-white/75">
-                    {props.journey.momentCount > 0 ? `${props.journey.momentCount} moment${props.journey.momentCount === 1 ? "" : "s"}` : "Watch the trip unfold"}
-                    {props.journey.day?.title ? ` · ${props.journey.day.title}` : ""}
-                  </span>
+                  <span className="block truncate text-sm font-bold">{journeyCopy.title}</span>
+                  <span className="block truncate text-[11px] text-white/75">{journeyCopy.subtitle}</span>
                 </span>
               </button>
             ) : null}
