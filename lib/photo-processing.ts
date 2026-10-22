@@ -1,4 +1,4 @@
-import { storedContentType } from "./media-formats";
+import { HEIC_CONTENT_TYPES, storedContentType } from "./media-formats";
 
 const MAX_IMAGE_EDGE = 2200;
 const MAX_THUMB_EDGE = 520;
@@ -12,9 +12,6 @@ const OUTPUT_TYPE = "image/jpeg";
 const IMAGE_QUALITY = 0.84;
 const THUMB_QUALITY = 0.76;
 const CANVAS_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
-// Only Safari decodes HEIC, so a stored HEIC original would be a broken image
-// for everyone else. When the browser can decode one, it is always re-encoded.
-const HEIC_TYPES = new Set(["image/heic", "image/heif"]);
 const HEIC_CONVERSION_ERROR = "Could not convert HEIC/HEIF to JPEG. Export it as JPEG and try again.";
 
 export type PreparedPhotoFiles = {
@@ -38,7 +35,7 @@ export function dimensionsFor(maxEdge: number, width: number, height: number) {
 }
 
 export function isHeic(file: File) {
-  return HEIC_TYPES.has(storedContentType(file) ?? "");
+  return HEIC_CONTENT_TYPES.has(storedContentType(file) ?? "");
 }
 
 /**
@@ -105,7 +102,7 @@ export async function prepareMarkerFile(thumbnail: File): Promise<File | null> {
 
 export async function preparePhotoFiles(file: File): Promise<PreparedPhotoFiles> {
   const contentType = storedContentType(file);
-  const mustReencode = HEIC_TYPES.has(contentType ?? "");
+  const mustReencode = HEIC_CONTENT_TYPES.has(contentType ?? "");
   if (typeof document === "undefined" || typeof createImageBitmap === "undefined" || !contentType || !CANVAS_TYPES.has(contentType)) {
     if (mustReencode) throw new Error(HEIC_CONVERSION_ERROR);
     return { imageFile: file, thumbnailFile: null, markerFile: null, optimized: false };

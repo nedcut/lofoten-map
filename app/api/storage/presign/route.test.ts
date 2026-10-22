@@ -60,6 +60,10 @@ describe("POST /api/storage/presign", () => {
     ["GIF", { contentType: "image/gif" }],
     ["WebM", { contentType: "video/webm" }],
     ["untyped bytes", { contentType: "application/octet-stream" }],
+    ["raw HEIC", { path: "lofoten-2026/abc.heic", contentType: "image/heic" }],
+    ["a video at a thumbnail path", { path: "lofoten-2026/thumbs/abc.jpg", contentType: "video/mp4" }],
+    ["a PNG at a marker path", { path: "lofoten-2026/markers/abc.jpg", contentType: "image/png" }],
+    ["a video avatar", { namespace: "avatars", path: "user/abc.jpg", contentType: "video/mp4" }],
   ])("returns 400 for %s", async (_label, overrides) => {
     const response = await post({ ...validBody, ...overrides });
     expect(response.status).toBe(400);
@@ -70,7 +74,9 @@ describe("POST /api/storage/presign", () => {
 
   // The picker admits exactly these; each must also clear the route.
   it.each([
-    ["the largest photo the picker allows", { contentType: "image/heic", contentLength: MAX_UPLOAD_BYTES.photo }],
+    ["the largest photo the picker allows", { contentLength: MAX_UPLOAD_BYTES.photo }],
+    ["a JPEG thumbnail", { path: "lofoten-2026/thumbs/abc.jpg" }],
+    ["a JPEG avatar", { namespace: "avatars", path: "user/abc.jpg" }],
     ["the largest video the picker allows", { path: "lofoten-2026/abc.mov", contentType: "video/quicktime", contentLength: MAX_UPLOAD_BYTES.video }],
     ["an MP4 video", { path: "lofoten-2026/abc.mp4", contentType: "video/mp4", contentLength: 100 * 1024 * 1024 }],
   ])("presigns %s", async (_label, overrides) => {

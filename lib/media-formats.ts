@@ -5,6 +5,8 @@
 // attributes stay broad (image/*, video/*) because iOS uses them to decide
 // which pickers to offer; this list is what actually gates a file.
 
+import type { ObjectNamespace } from "./object-store";
+
 export type MediaType = "photo" | "video";
 
 type MediaFormat = {
@@ -60,8 +62,24 @@ export function mediaTypeForContentType(contentType: string): MediaType | null {
   return formatFor(contentType)?.mediaType ?? null;
 }
 
-/** Byte cap for a stored content type; null when the type is not accepted. */
-export function maxUploadBytesFor(contentType: string): number | null {
-  const mediaType = mediaTypeForContentType(contentType);
-  return mediaType ? MAX_UPLOAD_BYTES[mediaType] : null;
+// Only Safari decodes HEIC, so the picker accepts it but the browser always
+// re-encodes it to JPEG before upload; a stored HEIC would be a broken image
+// for everyone else.
+export const HEIC_CONTENT_TYPES = new Set(["image/heic", "image/heif"]);
+
+// Thumbnails and map markers are always rendered to JPEG in the browser.
+const DERIVED_IMAGE_PATH = /^[^/]+\/(thumbs|markers)\//;
+
+/**
+ * Byte cap for uploading contentType to this object, or null when that object
+ * may not hold it. Each key holds only what the app writes there, so a member
+ * cannot park a video at a thumbnail or avatar key.
+ */
+export function maxUploadBytesFor(namespace: ObjectNamespace, path: string, contentType: string): number | null {
+  const format = formatFor(contentType);
+  if (!format || HEIC_CONTENT_TYPES.has(format.contentType)) return null;
+  const derivedImage = namespace === "trip-photos" && DERIVED_IMAGE_PATH.test(path);
+  if (derivedImage && format.contentType !== "image/jpeg") return null;
+  if ((derivedImage || namespace === "avatars") && format.mediaType !== "photo") return null;
+  return MAX_UPLOAD_BYTES[format.mediaType];
 }

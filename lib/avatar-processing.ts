@@ -2,29 +2,25 @@
 // tiny and render crisply in small circular frames. Unlike photos (which keep
 // their aspect ratio), an avatar is always output as a square JPEG.
 
+import { storedContentType } from "./media-formats";
+
 const AVATAR_EDGE = 384; // output square is AVATAR_EDGE x AVATAR_EDGE px
 const AVATAR_QUALITY = 0.85;
 const OUTPUT_TYPE = "image/jpeg";
-const CANVAS_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+// HEIC decodes only in Safari; converting it here is what lets an iPhone photo
+// become an avatar at all, since the upload route refuses raw HEIC.
+const CANVAS_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 
 export type SquareCrop = { sx: number; sy: number; size: number };
 
 /**
  * Choose the source rectangle to draw onto the square output canvas, given the
- * uploaded image's intrinsic dimensions. Returns the top-left corner (sx, sy)
- * and edge length (size) of a square region within the source image.
- *
- * TODO(you): implement a center crop — take the largest square that fits inside
- * the image and center it, so a 4000x3000 photo yields a 3000x3000 region
- * starting at x=500, y=0. This is the call that decides what a portrait photo
- * looks like once it's forced into a circle: center-crop keeps the middle (the
- * usual "face in the middle" assumption), versus, say, top-anchored to favor
- * heads. Keep it ~4 lines.
+ * uploaded image's intrinsic dimensions: the largest centered square, so a
+ * 4000x3000 photo yields a 3000x3000 region starting at x=500, y=0.
  */
 export function computeSquareCrop(width: number, height: number): SquareCrop {
-  // Replace this placeholder. It currently stretches the whole image into the
-  // square (distorting non-square photos) — which is exactly what we don't want.
-  return { sx: 0, sy: 0, size: Math.max(width, height) };
+  const size = Math.min(width, height);
+  return { sx: Math.round((width - size) / 2), sy: Math.round((height - size) / 2), size };
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
@@ -37,7 +33,7 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) 
  * posture as preparePhotoFiles).
  */
 export async function prepareAvatarFile(file: File): Promise<File> {
-  if (typeof document === "undefined" || typeof createImageBitmap === "undefined" || !CANVAS_TYPES.has(file.type)) {
+  if (typeof document === "undefined" || typeof createImageBitmap === "undefined" || !CANVAS_TYPES.has(storedContentType(file) ?? "")) {
     return file;
   }
 

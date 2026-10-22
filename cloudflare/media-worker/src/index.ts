@@ -78,6 +78,17 @@ function parseRange(request: Request, size: number, etag: string): ByteRange | "
   return { offset: start, length: Math.min(end, size - 1) - start + 1 };
 }
 
+// Built from scratch so a 416 never inherits the object's year-long cache
+// policy or its media Content-Type.
+function rangeNotSatisfiable(etag: string, size: number) {
+  const headers = responseHeaders();
+  headers.set("Cache-Control", "no-store");
+  headers.set("Content-Type", "text/plain; charset=utf-8");
+  headers.set("ETag", etag);
+  headers.set("Content-Range", `bytes */${size}`);
+  return new Response("Range not satisfiable", { status: 416, headers });
+}
+
 function edgeCacheCopy(response: Response) {
   const copy = new Response(response.clone().body, response);
   copy.headers.set("Cache-Control", `${copy.headers.get("Cache-Control")}, s-maxage=${EDGE_CACHE_SECONDS}`);
@@ -87,7 +98,11 @@ function edgeCacheCopy(response: Response) {
 async function serveObject(request: Request, env: Env, ctx: ExecutionContext, key: string, headers: Headers) {
   const isGet = request.method === "GET";
   const cache = caches.default;
-  const cacheKey = new Request(new URL(request.url).toString(), { method: "GET" });
+  // The query string never selects a different object, so leave it out of the
+  // key; otherwise any ?suffix forces a miss and another R2 read.
+  const cacheUrl = new URL(request.url);
+  cacheUrl.search = "";
+  const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
 
   // Evaluate validators and ranges just as on an R2 miss. Cache.match applies
   // Range but ignores If-Range, so never pass the original headers through.
@@ -101,20 +116,19 @@ async function serveObject(request: Request, env: Env, ctx: ExecutionContext, ke
         headers.delete("Content-Length");
         return new Response(null, { status: 304, headers });
       }
-      const range = parseRange(request, Number(cached.headers.get("Content-Length")), etag);
-      if (range === "unsatisfiable") {
-        void cached.body?.cancel();
-        const headers = new Headers(cached.headers);
-        headers.delete("Content-Length");
-        headers.set("Content-Range", `bytes */${cached.headers.get("Content-Length")}`);
-        return new Response("Range not satisfiable", { status: 416, headers });
-      }
-      if (!range) return cached;
+      // Ranges are resolved against the cached size; without a usable one,
+      // fall through to R2 rather than answer from a guess.
+      const length = cached.headers.get("Content-Length") ?? "";
+      const range = /^\d+$/.test(length) ? parseRange(request, Number(length), etag) : undefined;
+      if (range === null) return cached;
       void cached.body?.cancel();
-      const partial = await cache.match(new Request(cacheKey, {
-        headers: { Range: `bytes=${range.offset}-${range.offset + range.length - 1}` },
-      }));
-      if (partial) return partial;
+      if (range === "unsatisfiable") return rangeNotSatisfiable(etag, Number(length));
+      if (range) {
+        const partial = await cache.match(new Request(cacheKey, {
+          headers: { Range: `bytes=${range.offset}-${range.offset + range.length - 1}` },
+        }));
+        if (partial) return partial;
+      }
     }
   }
 
@@ -144,10 +158,7 @@ async function serveObject(request: Request, env: Env, ctx: ExecutionContext, ke
   if (matchesIfNoneMatch(request, metadata.httpEtag)) return new Response(null, { status: 304, headers });
 
   const range = parseRange(request, metadata.size, metadata.httpEtag);
-  if (range === "unsatisfiable") {
-    headers.set("Content-Range", `bytes */${metadata.size}`);
-    return new Response("Range not satisfiable", { status: 416, headers });
-  }
+  if (range === "unsatisfiable") return rangeNotSatisfiable(metadata.httpEtag, metadata.size);
 
   if (!range) {
     headers.set("Content-Length", String(metadata.size));
