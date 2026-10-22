@@ -1,8 +1,9 @@
 import type { BackendClient } from "@/lib/backend";
 import { mapWithConcurrency } from "./concurrency";
+import { storedContentType } from "./media-formats";
 import { prepareMediaFiles, storageFileExtension } from "./media-processing";
 import { partitionDuplicatePhotos } from "./photo-dedup";
-import { deleteObjects, IMMUTABLE_CACHE_SECONDS, PHOTO_BUCKET, uploadObject } from "./object-store";
+import { deleteObjects, IMMUTABLE_CACHE_SECONDS, markerPathFor, PHOTO_BUCKET, photoStoragePaths, uploadObject } from "./object-store";
 import type { LngLat, Photo } from "@/types/trip";
 
 export type PhotoBatchInput = {
@@ -96,8 +97,7 @@ export async function uploadPhotoBatch(options: {
   let inserted = false;
   let insertedRows: Photo[] = [];
 
-  const storagePathsOf = (pending: PendingRow[]) =>
-    pending.flatMap((row) => [row.image_path, row.thumbnail_path].filter((path): path is string => Boolean(path)));
+  const storagePathsOf = (pending: PendingRow[]) => pending.flatMap(photoStoragePaths);
 
   // A cleanup that silently fails is how the bucket filled up with unreachable
   // objects in the first place, so a failed removal is reported, not dropped.
@@ -127,7 +127,15 @@ export async function uploadPhotoBatch(options: {
   }
 
   await mapWithConcurrency(uploadCandidates.map((candidate) => candidate.input), concurrency, async (input) => {
-    const prepared = await prepareMediaFiles(input.file);
+    let prepared: Awaited<ReturnType<typeof prepareMediaFiles>>;
+    try {
+      prepared = await prepareMediaFiles(input.file);
+    } catch (error) {
+      failures.push(`${input.file.name}: ${error instanceof Error ? error.message : "Could not prepare media for upload"}`);
+      failedClientIds.push(input.clientId);
+      onItemComplete();
+      return;
+    }
     const extension = storageFileExtension(prepared.imageFile);
     // Content-addressed, so an upload is idempotent: a retry of a batch that
     // died before its insert lands on the same immutable key and reuses the
@@ -135,13 +143,23 @@ export async function uploadPhotoBatch(options: {
     // already unique in the database, so one key here is one row there.
     const path = `${trip.slug}/${input.contentHash}.${extension}`;
     const thumbnailPath = prepared.thumbnailFile ? `${trip.slug}/thumbs/${input.contentHash}.jpg` : null;
+    const markerPath = prepared.markerFile ? markerPathFor(thumbnailPath) : null;
+    // Upload the marker only after its thumbnail is stored. The marker path is
+    // derived from thumbnail_path, so a marker without a thumbnail would be
+    // an object that no row can reach.
+    const uploadThumbnailAndMarker = async () => {
+      if (!prepared.thumbnailFile || !thumbnailPath) return { thumbnailUpload: null, markerUpload: null };
+      const thumbnailUpload = await objectStore.upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, contentType: prepared.thumbnailFile.type });
+      const markerUpload = prepared.markerFile && markerPath && (!thumbnailUpload.error || isAlreadyStored(thumbnailUpload.error))
+        ? await objectStore.upload(markerPath, prepared.markerFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, contentType: prepared.markerFile.type })
+        : null;
+      return { thumbnailUpload, markerUpload };
+    };
     // The thumbnail never depends on the image upload, so both go up
     // together instead of back to back.
-    const [imageUpload, thumbnailUpload] = await Promise.all([
-      objectStore.upload(path, prepared.imageFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, contentType: prepared.imageFile.type || undefined }),
-      prepared.thumbnailFile && thumbnailPath
-        ? objectStore.upload(thumbnailPath, prepared.thumbnailFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, contentType: prepared.thumbnailFile.type })
-        : Promise.resolve(null),
+    const [imageUpload, { thumbnailUpload, markerUpload }] = await Promise.all([
+      objectStore.upload(path, prepared.imageFile, { cacheControl: IMMUTABLE_CACHE_SECONDS, contentType: storedContentType(prepared.imageFile) ?? undefined }),
+      uploadThumbnailAndMarker(),
     ]);
     if (imageUpload.error && !isAlreadyStored(imageUpload.error)) {
       if (thumbnailPath && thumbnailUpload && !thumbnailUpload.error) {
@@ -159,6 +177,10 @@ export async function uploadPhotoBatch(options: {
       } else if (thumbnailPath) {
         thumbnailStoragePath = thumbnailPath;
       }
+    }
+    if (markerUpload?.error && !isAlreadyStored(markerUpload.error)) {
+      // Non-fatal: the map marker falls back to the thumbnail.
+      warnings.push(`${input.file.name}: map marker image skipped`);
     }
     rows.push({
       client_id: input.clientId,
@@ -200,10 +222,8 @@ export async function uploadPhotoBatch(options: {
         // use UUID paths, though; in that case the hash-path uploads are unused
         // and can be removed without touching the legacy row's objects.
         const unusedClashPaths = clashedRows.flatMap((row) => {
-          const existing = clashes.get(row.content_hash)!;
-          return [row.image_path, row.thumbnail_path].filter(
-            (path): path is string => Boolean(path) && path !== existing.image_path && path !== existing.thumbnail_path,
-          );
+          const existingPaths = new Set(photoStoragePaths(clashes.get(row.content_hash)!));
+          return photoStoragePaths(row).filter((path) => !existingPaths.has(path));
         });
         await removeObjects(unusedClashPaths, "duplicate cleanup");
         failures.push(`${clashedRows.length} media item${clashedRows.length === 1 ? "" : "s"} already uploaded by someone else, skipped`);
@@ -239,9 +259,7 @@ export async function uploadPhotoBatch(options: {
             warnings.push(`rollback: skipped storage cleanup, could not confirm the objects are unreferenced (${recheckError.message})`);
           } else {
             const referencedPaths = new Set(
-              ((recheckData ?? []) as Array<{ image_path: string; thumbnail_path: string | null }>).flatMap((row) =>
-                [row.image_path, row.thumbnail_path].filter((path): path is string => Boolean(path)),
-              ),
+              ((recheckData ?? []) as Array<{ image_path: string; thumbnail_path: string | null }>).flatMap(photoStoragePaths),
             );
             await removeObjects(storagePathsOf(freshRows).filter((path) => !referencedPaths.has(path)), "rollback");
           }

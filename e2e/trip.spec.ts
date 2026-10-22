@@ -33,6 +33,20 @@ test.describe("desktop", { tag: "@desktop" }, () => {
     await expect(page).toHaveURL(/day=/);
   });
 
+  // Formats the upload route refuses, and HEIC that Chromium cannot decode,
+  // are rejected in the queue with a reason instead of failing at upload.
+  test("rejects unsupported media at selection with a reason", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Mapbox token needed" })).toBeVisible();
+    await page.getByRole("button", { name: "Upload media" }).first().click();
+    await page.locator('input[name="media"][type="file"]').setInputFiles([
+      { name: "loop.gif", mimeType: "image/gif", buffer: Buffer.from("GIF89a") },
+      { name: "IMG_0001.HEIC", mimeType: "", buffer: Buffer.from("not really heic") },
+    ]);
+    await expect(page.getByText("Unsupported file type. Use JPG, PNG, WebP, HEIC, MP4, or MOV.").first()).toBeVisible();
+    await expect(page.getByText(/This browser cannot convert HEIC photos/).first()).toBeVisible();
+  });
+
   test("photo import queue survives a reload as a restorable draft", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Mapbox token needed" })).toBeVisible();

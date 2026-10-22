@@ -49,6 +49,9 @@ export type Photo = {
   // persisted, and remain null if a path cannot be resolved.
   image_url: string | null;
   thumbnail_url: string | null;
+  // Small map-marker image derived from thumbnail_path. Absent for local and
+  // demo photos, and may 404 for rows uploaded before markers existed.
+  marker_url?: string | null;
   lat: number | null;
   lng: number | null;
   taken_at: string | null;

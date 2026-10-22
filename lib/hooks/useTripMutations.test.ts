@@ -45,7 +45,7 @@ function createFakeBackend(responses: Record<string, QueryResponse> = {}) {
 
 // Demo photos are inline data URIs with no storage path; the delete tests need
 // a photo whose files actually live in the object store.
-const storedPhoto = { ...demoTripData.photos[0], id: "photo-stored", image_path: "trip/photo.jpg", thumbnail_path: "trip/photo-thumb.jpg" };
+const storedPhoto = { ...demoTripData.photos[0], id: "photo-stored", image_path: "trip/photo.jpg", thumbnail_path: "trip/thumbs/photo.jpg" };
 const tripDataWithStoredPhoto: TripData = { ...demoTripData, photos: [storedPhoto, ...demoTripData.photos] };
 
 function renderMutations(backend: BackendClient | null, initial: TripData = demoTripData, selectedDayId: string | null = null) {
@@ -217,7 +217,7 @@ describe("useTripMutations", () => {
       });
 
       expect(calls).toEqual([{ table: "photos", op: "delete" }]);
-      expect(deleteObjectsMock).toHaveBeenCalledWith(backend, "trip-photos", ["trip/photo.jpg", "trip/photo-thumb.jpg"]);
+      expect(deleteObjectsMock).toHaveBeenCalledWith(backend, "trip-photos", ["trip/photo.jpg", "trip/thumbs/photo.jpg", "trip/markers/photo.jpg"]);
       expect(loadData).toHaveBeenCalledTimes(1);
       expect(result.current.mutations.status.message).toBe("Item deleted.");
     });

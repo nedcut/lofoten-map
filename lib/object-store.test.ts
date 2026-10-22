@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackendClient } from "./backend";
-import { AVATAR_BUCKET, deleteObjects, PHOTO_BUCKET, publicObjectUrl, resolveMemberAvatars, uploadObject } from "./object-store";
-import type { TripMember } from "@/types/trip";
+import { AVATAR_BUCKET, deleteObjects, markerPathFor, PHOTO_BUCKET, photoStoragePaths, publicObjectUrl, resolveMemberAvatars, resolvePhotoUrls, uploadObject } from "./object-store";
+import type { Photo, TripMember } from "@/types/trip";
 
 function backendWithToken(token: string | null = "token-1") {
   return {
@@ -21,6 +21,20 @@ describe("public R2 URLs", () => {
     process.env.NEXT_PUBLIC_R2_PUBLIC_URL = "https://media.example.com/";
     expect(publicObjectUrl(PHOTO_BUCKET, "lofoten 2026/ø.jpg"))
       .toBe("https://media.example.com/trip-photos/lofoten%202026/%C3%B8.jpg");
+  });
+
+  it("derives the marker image beside the thumbnail, and only from a thumbnail", () => {
+    process.env.NEXT_PUBLIC_R2_PUBLIC_URL = "https://media.example.com";
+    const photo = { image_path: "lofoten/abc.jpg", thumbnail_path: "lofoten/thumbs/abc.jpg" } as Photo;
+    expect(resolvePhotoUrls([photo])[0].marker_url).toBe("https://media.example.com/trip-photos/lofoten/markers/abc.jpg");
+    expect(resolvePhotoUrls([{ ...photo, thumbnail_path: null }])[0].marker_url).toBeNull();
+    expect(markerPathFor("lofoten/elsewhere/abc.jpg")).toBeNull();
+  });
+
+  it("lists the marker among a row's storage objects so deletes and rollbacks remove it", () => {
+    expect(photoStoragePaths({ image_path: "lofoten/abc.mp4", thumbnail_path: "lofoten/thumbs/abc.jpg" }))
+      .toEqual(["lofoten/abc.mp4", "lofoten/thumbs/abc.jpg", "lofoten/markers/abc.jpg"]);
+    expect(photoStoragePaths({ image_path: "lofoten/abc.mp4", thumbnail_path: null })).toEqual(["lofoten/abc.mp4"]);
   });
 
   it("resolves member avatars below the avatar namespace", () => {
@@ -53,6 +67,19 @@ describe("authenticated object-store requests", () => {
       method: "PUT",
       headers: expect.objectContaining({ "If-None-Match": "*" }),
     }));
+  });
+
+  it("infers HEIC from the extension instead of sending application/octet-stream", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ url: "https://r2.example/signed" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File([new Uint8Array([1])], "IMG_1.HEIC", { type: "" });
+    await uploadObject(backendWithToken(), PHOTO_BUCKET, "lofoten/a.heic", file);
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ contentType: "image/heic" });
+    expect(fetchMock.mock.calls[1][1].headers).toMatchObject({ "Content-Type": "image/heic" });
   });
 
   it("reports a conditional-write collision as already stored", async () => {
