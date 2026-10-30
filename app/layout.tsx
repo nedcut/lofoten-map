@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Fragment, type ReactNode } from "react";
+import { Fraunces, Inter } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { siteUrl } from "@/lib/site-url";
@@ -20,6 +21,13 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
+// Self-hosted by next/font: the files are downloaded at build time and served
+// from this origin, so there is still no runtime request to a font host.
+// Fraunces carries the journal-like display type (titles, day names, Journey
+// captions); Inter is the quiet workhorse for everything else.
+const displayFont = Fraunces({ subsets: ["latin"], axes: ["opsz", "SOFT"], variable: "--font-fraunces", display: "swap" });
+const bodyFont = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+
 // Origins of the Neon API and R2 public media endpoint. Preconnecting warms the
 // TLS handshakes before the first data and gallery requests.
 const backendOrigins = (() => {
@@ -35,7 +43,7 @@ const backendOrigins = (() => {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${displayFont.variable} ${bodyFont.variable}`}>
       <head>
         {/* Warm the connections the map and gallery need on first paint: Mapbox
             style/tiles/telemetry, Neon, and R2. preconnect opens the
