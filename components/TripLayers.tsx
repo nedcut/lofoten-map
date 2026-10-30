@@ -46,6 +46,13 @@ function focusPopupContent(popup: mapboxgl.Popup) {
   body.focus();
 }
 
+// A stable tilt between -4° and 4° for a photo marker, from its id.
+function markerTilt(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return ((Math.abs(hash) % 81) - 40) / 10;
+}
+
 function hasLayer(map: mapboxgl.Map, id: string) {
   if (!canUseStyle(map)) return false;
   try {
@@ -61,6 +68,12 @@ function setLayerVisibility(map: mapboxgl.Map, id: string, visible: boolean) {
 }
 
 export type MapItemKind = "photo" | "note" | "place" | "route";
+
+const ROUTE_LAYERS = ["routes-glow", "routes-shadow", "routes-line"] as const;
+const DAY_COLOR: mapboxgl.ExpressionSpecification = ["coalesce", ["get", "color"], "#0f766e"];
+const ON_FOOT_FILTER: mapboxgl.FilterSpecification = ["!", ["in", ["get", "mode"], ["literal", ["ferry", "bus"]]]];
+// How long a newly shown set of routes takes to draw itself on.
+const ROUTE_DRAW_MS = 1600;
 
 type Props = {
   map: mapboxgl.Map | null;
@@ -120,8 +133,32 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       if (cancelled || !canUseStyle(map)) return;
 
       if (!getSource(map, "routes")) {
-        map.addSource("routes", { type: "geojson", data: routeData });
-        map.addLayer({ id: "routes-shadow", type: "line", source: "routes", paint: { "line-color": "#26423b", "line-width": 8, "line-opacity": 0.28 } });
+        // lineMetrics enables line-trim-offset, which draws a day's routes on.
+        map.addSource("routes", { type: "geojson", data: routeData, lineMetrics: true });
+        // On foot is the story; transport is connective tissue. Hikes and
+        // walks get a soft glow in the day's colour and a paper casing that
+        // lifts them off the terrain; ferries and buses stay thin and quiet.
+        map.addLayer({
+          id: "routes-glow",
+          type: "line",
+          source: "routes",
+          filter: ON_FOOT_FILTER,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": DAY_COLOR,
+            "line-width": ["interpolate", ["linear"], ["zoom"], 9, 9, 14, 18],
+            "line-blur": ["interpolate", ["linear"], ["zoom"], 9, 5, 14, 10],
+            "line-opacity": 0.32,
+          },
+        });
+        map.addLayer({
+          id: "routes-shadow",
+          type: "line",
+          source: "routes",
+          filter: ON_FOOT_FILTER,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": "#fffdf6", "line-width": ["interpolate", ["linear"], ["zoom"], 9, 5, 14, 8], "line-opacity": 0.9 },
+        });
         // Colour says which day; the dash pattern says how it was travelled
         // (ferry crossings dashed, bus legs dotted, everything else solid).
         map.addLayer({
@@ -130,10 +167,10 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
           source: "routes",
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            "line-color": ["coalesce", ["get", "color"], "#0f766e"],
-            "line-width": 4,
-            "line-opacity": 0.95,
-            "line-dasharray": ["match", ["get", "mode"], "ferry", ["literal", [2, 1.6]], "bus", ["literal", [0.3, 1.6]], ["literal", [1, 0]]],
+            "line-color": DAY_COLOR,
+            "line-width": ["interpolate", ["linear"], ["zoom"], 9, ["match", ["get", "mode"], "ferry", 1.6, "bus", 2, 2.8], 14, ["match", ["get", "mode"], "ferry", 2, "bus", 2.4, 4.5]],
+            "line-opacity": ["match", ["get", "mode"], "ferry", 0.6, "bus", 0.7, 1],
+            "line-dasharray": ["match", ["get", "mode"], "ferry", ["literal", [4, 3]], "bus", ["literal", [0.6, 2.4]], ["literal", [1, 0]]],
           },
         });
       } else if (sent.get("routes") !== routeData) {
@@ -179,7 +216,7 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       }
       sent.set("places", placeData);
 
-      for (const id of ["routes-shadow", "routes-line"]) setLayerVisibility(map, id, visibility.routes);
+      for (const id of ROUTE_LAYERS) setLayerVisibility(map, id, visibility.routes);
       setLayerVisibility(map, "photos-hit", visibility.photos);
       for (const id of ["notes-circle", "places-circle"]) setLayerVisibility(map, id, visibility.notes);
     };
@@ -195,6 +232,46 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       map.off("load", addOrUpdate);
     };
   }, [map, noteData, photoData, placeData, routeData, visibility]);
+
+  // Draw the routes on whenever a different set is shown (the first load, or
+  // picking another day): each line grows from its start, so a day reads as a
+  // journey rather than a finished diagram. Keyed on the route ids, so a
+  // background refresh that leaves the same routes in place doesn't replay it.
+  const routeSignature = useMemo(() => routes.map((route) => route.id).join("|"), [routes]);
+  useEffect(() => {
+    if (!map || !routeSignature) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    let frame = 0;
+    let cancelled = false;
+    const setTrim = (start: number) => {
+      for (const id of ROUTE_LAYERS) {
+        if (hasLayer(map, id)) map.setPaintProperty(id, "line-trim-offset", start >= 1 ? [0, 0] : [start, 1]);
+      }
+    };
+    const run = () => {
+      if (cancelled) return;
+      const begin = performance.now();
+      const step = (now: number) => {
+        if (cancelled) return;
+        // rAF timestamps mark the frame's start, which can precede `begin`.
+        const t = Math.min(1, Math.max(0, (now - begin) / ROUTE_DRAW_MS));
+        setTrim(1 - (1 - t) ** 3);
+        if (t < 1) frame = requestAnimationFrame(step);
+      };
+      setTrim(0);
+      frame = requestAnimationFrame(step);
+    };
+    // The layers are created by the effect above, which can still be waiting
+    // on the style; start once they exist.
+    if (hasLayer(map, "routes-line")) run();
+    else map.once("idle", run);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      map.off("idle", run);
+      setTrim(1);
+    };
+  }, [map, routeSignature]);
 
   useEffect(() => {
     if (!map) return;
@@ -351,6 +428,14 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       // The frame and count badge take the colour of the photo's day (see
       // map-overrides.css), matching the day card and route line.
       element.style.setProperty("--day-accent", dayColorFor(dayColors, photo.day_id));
+      // Each print sits at its own slight angle, like snapshots laid on a
+      // map. Derived from the id so a marker keeps its tilt across refreshes.
+      element.style.setProperty("--marker-tilt", `${markerTilt(photo.id)}deg`);
+      // Mapbox writes the button's transform every frame to position it, so
+      // the tilt and hover lift live on this inner card instead.
+      const card = document.createElement("span");
+      card.className = "lofoten-photo-marker-card";
+      element.append(card);
       const fallbackUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
       const imageUrl = photo.marker_url || fallbackUrl;
       if (imageUrl) {
@@ -364,12 +449,12 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         image.alt = "";
         image.decoding = "async";
         image.draggable = false;
-        element.append(image);
+        card.append(image);
       } else {
         const fallback = document.createElement("span");
         fallback.className = "lofoten-photo-marker-fallback";
         fallback.textContent = photo.media_type === "video" ? "Video" : "Photo";
-        element.append(fallback);
+        card.append(fallback);
       }
       return element;
     }
