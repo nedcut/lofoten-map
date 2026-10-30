@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, MapPin, Mountain, PenLine, Play, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, MapPin, Mountain, PanelLeftClose, PenLine, Play, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { AdminDataProps } from "@/components/AdminDataPanel";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
@@ -15,6 +15,20 @@ import { cn, formatDateOnly } from "@/lib/utils";
 import type { AdminRequest, AdminRequestStatus, Day, Note, Photo, Place, Trip, TripMember } from "@/types/trip";
 
 export type LayerVisibility = { photos: boolean; notes: boolean; routes: boolean };
+
+// On desktop the sidebar floats over a full-bleed map. The page publishes how
+// much of the map's left edge it covers (0 while collapsed) here, so camera
+// framing in page.tsx and MapView can centre content in the visible part.
+export const SIDEBAR_INSET_VAR = "--sidebar-inset";
+// The open sidebar's footprint: 1rem margin + 24rem panel + 1rem breathing room.
+export const SIDEBAR_OPEN_INSET_PX = 416;
+
+export function sidebarInset() {
+  if (typeof window === "undefined" || window.innerWidth < 768) return 0;
+  const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(SIDEBAR_INSET_VAR));
+  // Unset until the page publishes it; the sidebar starts open.
+  return Number.isFinite(inset) ? Math.max(0, inset) : SIDEBAR_OPEN_INSET_PX;
+}
 
 const AdminDataPanel = dynamic(() => import("@/components/AdminDataPanel").then((mod) => mod.AdminDataPanel));
 
@@ -55,6 +69,8 @@ export type SidebarProps = {
   memberAdmin?: MemberAdminProps | null;
   adminRequest?: AdminRequestProps | null;
   notesPlaces?: NotesPlacesEntry | null;
+  // Desktop only: tucks the floating sidebar away so the map gets the screen.
+  onCollapse?: () => void;
 };
 
 // Notes and places are Mapbox map layers with click-only handlers, so there's
@@ -441,7 +457,18 @@ export function AdminRequestPanel({ status, isSaving, message, messageTone, onRe
 
 export function DaySidebar(props: SidebarProps) {
   return (
-    <aside className="flex h-full max-h-[78dvh] min-h-0 flex-col gap-4 overflow-y-auto rounded-panel border border-stone-200/80 bg-paper/94 p-4 text-stone-950 shadow-panel backdrop-blur-xl md:max-h-none md:w-96 md:p-5">
+    <aside className="relative flex h-full max-h-[78dvh] min-h-0 flex-col gap-4 overflow-y-auto rounded-panel border border-white/60 bg-paper/86 p-4 text-stone-950 shadow-panel backdrop-blur-2xl backdrop-saturate-150 md:max-h-none md:w-96 md:p-5">
+      {props.onCollapse ? (
+        <button
+          type="button"
+          onClick={props.onCollapse}
+          aria-label="Hide sidebar"
+          title="Hide sidebar"
+          className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition hover:bg-stone-900/5 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20"
+        >
+          <PanelLeftClose className="h-4 w-4" />
+        </button>
+      ) : null}
       <SidebarHeader trip={props.trip} />
       {props.journey ? (
         <JourneyHeroCard

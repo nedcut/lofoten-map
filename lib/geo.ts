@@ -5,17 +5,23 @@ export const LOFOTEN_CENTER: [number, number] = [13.0897, 67.9325];
 
 // The camera the map opens on. "All days" returns here instead of fitting every
 // item, so a few mainland photos don't pull the overview away from the islands.
-export const LOFOTEN_DEFAULT_VIEW = { center: LOFOTEN_CENTER, zoom: 10.2, pitch: 45, bearing: -20 };
+// Pitched well into the terrain so the peaks stand up against the haze.
+export const LOFOTEN_DEFAULT_VIEW = { center: LOFOTEN_CENTER, zoom: 10.2, pitch: 58, bearing: -20 };
+
+// How far the camera tilts when framing a single day: enough to read the
+// relief along the route without hiding the far end of a long hike.
+export const DAY_FRAMING_PITCH = 48;
 
 // The opening ("All days") camera for a viewport. Desktop gets
-// LOFOTEN_DEFAULT_VIEW unchanged. On a phone that zoom crops the islands
+// LOFOTEN_DEFAULT_VIEW, padded on the left by `leftInset` so the islands
+// centre in the part of the map the floating sidebar leaves visible. On a phone that zoom crops the islands
 // (Å falls off the left) and the bottom sheet hides the lower third, so
 // narrow viewports centre on the trip's islands (Å to Ramberg), pull back
 // in proportion to width (zoom ~9.1 at 390px), and pad the sheet out.
 const LOFOTEN_TRIP_CENTER: [number, number] = [13.115, 67.99];
-export function lofotenOpeningView(viewportWidth: number, sheetHeight: number) {
+export function lofotenOpeningView(viewportWidth: number, sheetHeight: number, leftInset = 0) {
   const noPadding = { top: 0, right: 0, bottom: 0, left: 0 };
-  if (viewportWidth >= 768) return { ...LOFOTEN_DEFAULT_VIEW, padding: noPadding };
+  if (viewportWidth >= 768) return { ...LOFOTEN_DEFAULT_VIEW, padding: { ...noPadding, left: Math.max(0, leftInset) } };
   const zoom = LOFOTEN_DEFAULT_VIEW.zoom - Math.log2(860 / Math.max(viewportWidth, 1));
   return { ...LOFOTEN_DEFAULT_VIEW, center: LOFOTEN_TRIP_CENTER, zoom, padding: { ...noPadding, top: 56, bottom: sheetHeight } };
 }

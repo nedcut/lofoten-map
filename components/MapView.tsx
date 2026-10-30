@@ -9,6 +9,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import "./map-overrides.css";
 import { MapPin } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { sidebarInset } from "@/components/DaySidebar";
 import { mobileSheetHeight } from "@/components/MobileSheet";
 import { Button } from "@/components/ui/Button";
 import { lofotenOpeningView } from "@/lib/geo";
@@ -77,7 +78,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
     let instance: mapboxgl.Map;
     // Same camera as "All days" (app/page.tsx). MapOptions takes no padding,
     // so it's set right after construction, before the first frame renders.
-    const { padding, ...openingView } = lofotenOpeningView(window.innerWidth, mobileSheetHeight());
+    const { padding, ...openingView } = lofotenOpeningView(window.innerWidth, mobileSheetHeight(), sidebarInset());
     try {
       instance = new mapboxgl.Map({
         container: containerRef.current,
@@ -161,7 +162,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
   }, [pendingCoordinate]);
 
   return (
-    <div className={`relative h-full min-h-[520px] overflow-hidden rounded-none bg-[#dbe7df] md:rounded-panel md:ring-1 md:ring-stone-200/80 ${tokenMissing || mapUnavailable ? "map-unavailable" : ""}`}>
+    <div className={`relative h-full min-h-[520px] overflow-hidden bg-[#dbe7df] ${tokenMissing || mapUnavailable ? "map-unavailable" : ""}`}>
       <div ref={containerRef} className="h-full w-full" />
       {tokenMissing || mapUnavailable ? (
         <div className="absolute inset-0 flex items-center justify-center bg-mist p-6 text-center">

@@ -279,6 +279,16 @@
   display: none !important;
 }
 
+/* On desktop the sidebar floats over the map's left edge (page.tsx publishes
+   its footprint as --sidebar-inset), so the Mapbox logo and attribution move
+   right to stay visible beside it. */
+@media (min-width: 768px) {
+  .mapboxgl-ctrl-bottom-left {
+    left: var(--sidebar-inset, 416px) !important;
+    transition: left 300ms ease-out;
+  }
+}
+
 /* On phones the bottom sheet floats over the map, so the zoom/compass group
    and the attribution/logo must sit above it. MobileSheet measures its own
    collapsed height into --mobile-sheet-height; the fallback matches the

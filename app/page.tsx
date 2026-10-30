@@ -5,9 +5,9 @@ import dynamic from "next/dynamic";
 // into the initial bundle and defeat MapView's dynamic() split.
 import type { Map as MapboxMap } from "mapbox-gl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Loader2, Play, Share2, Sparkles, UserRound } from "lucide-react";
-import { collectItemCoordinates, coordinateBounds, lofotenOpeningView, routeDistanceMeters } from "@/lib/geo";
-import { DayDot, DaySidebar } from "@/components/DaySidebar";
+import { AlertCircle, Loader2, PanelLeftOpen, Play, Share2, Sparkles, UserRound } from "lucide-react";
+import { collectItemCoordinates, coordinateBounds, DAY_FRAMING_PITCH, lofotenOpeningView, routeDistanceMeters } from "@/lib/geo";
+import { DayDot, DaySidebar, SIDEBAR_INSET_VAR, SIDEBAR_OPEN_INSET_PX, sidebarInset } from "@/components/DaySidebar";
 import { MobileSheet, mobileSheetHeight } from "@/components/MobileSheet";
 import { StatusPill } from "@/components/StatusPill";
 import { ClusterRelivePill } from "@/components/ClusterRelivePill";
@@ -52,10 +52,11 @@ const UploadPhotoPanel = dynamic(() => import("@/components/UploadPhotoPanel").t
 
 // Padding for fitBounds so framed content stays clear of the chrome. On phones
 // the bottom sheet's measured collapsed height (published by MobileSheet as a
-// CSS variable) replaces a guessed constant.
+// CSS variable) replaces a guessed constant; on desktop the floating sidebar's
+// footprint is added on the left.
 function mapFramingPadding() {
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
-  if (!isMobile) return { top: 80, right: 80, bottom: 80, left: 80 };
+  if (!isMobile) return { top: 80, right: 80, bottom: 80, left: 80 + sidebarInset() };
   return { top: 96, right: 48, bottom: mobileSheetHeight() + 48, left: 48 };
 }
 
@@ -111,6 +112,8 @@ export default function Home() {
   const [clusterPhotos, setClusterPhotos] = useState<Photo[] | null>(null);
   const [outlierPreview, setOutlierPreview] = useState<PhotoOutlier | null>(null);
   const [shareStatus, setShareStatus] = useState<ShareResult | null>(null);
+  // Desktop: the floating sidebar can be tucked away to give the map the screen.
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const allJourneyItems = useMemo(() => buildJourneyItems(data), [data]);
   const {
@@ -450,6 +453,14 @@ export default function Home() {
     filteredRef.current = filtered;
   }, [filtered]);
 
+  // Publish the sidebar's footprint before the framing effect below reads it
+  // (effects run in declaration order), so a toggle re-frames the map into
+  // the space that is actually visible.
+  useEffect(() => {
+    document.documentElement.style.setProperty(SIDEBAR_INSET_VAR, `${sidebarOpen ? SIDEBAR_OPEN_INSET_PX : 0}px`);
+  }, [sidebarOpen]);
+  useEffect(() => () => { document.documentElement.style.removeProperty(SIDEBAR_INSET_VAR); }, []);
+
   // Center the map on the active day whenever the selection changes: build a
   // bounding box around that day's items and fit it with padding. Mobile gets
   // extra bottom padding so the bottom sheet doesn't cover the framed content;
@@ -460,7 +471,7 @@ export default function Home() {
     if (!selectedDayId) {
       // The view carries its own padding, replacing any a previous easeTo left
       // on the camera, so this lands exactly on the view the page loads with.
-      map.easeTo({ ...lofotenOpeningView(window.innerWidth, mobileSheetHeight()), duration: 800 });
+      map.easeTo({ ...lofotenOpeningView(window.innerWidth, mobileSheetHeight(), sidebarInset()), duration: 800 });
       return;
     }
     const coords = collectItemCoordinates(filteredRef.current);
@@ -472,11 +483,13 @@ export default function Home() {
     if (!bounds) return;
 
     if (bounds.diagonalMeters < 1) {
-      map.easeTo({ center: bounds.center, zoom: 13.5, padding, duration: 800 });
+      map.easeTo({ center: bounds.center, zoom: 13.5, pitch: DAY_FRAMING_PITCH, padding, duration: 800 });
       return;
     }
-    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, duration: 800 });
-  }, [map, selectedDayId]);
+    // Tilted into the terrain, keeping the current heading, so the day's
+    // route reads against its mountains rather than as a flat line.
+    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, pitch: DAY_FRAMING_PITCH, bearing: map.getBearing(), duration: 800 });
+  }, [map, selectedDayId, sidebarOpen]);
 
   function startPanel(next: "photo" | "note" | "route") {
     if (!mapActionsEnabled && next !== "photo") return;
@@ -553,12 +566,20 @@ export default function Home() {
   return (
     <main className="relative h-dvh overflow-hidden bg-mist text-stone-950">
       <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(135deg,rgba(255,253,246,0.92),rgba(211,229,222,0.5)_44%,rgba(234,198,132,0.26))]" />
-      <div inert={overlayOpen} className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between gap-3 px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] md:px-6">
-        <HeaderPill className="flex max-w-[min(18rem,calc(100vw-11rem))] items-center gap-2 text-sm font-black text-stone-950 sm:max-w-none">
+      <div inert={overlayOpen} className="pointer-events-none absolute left-0 right-0 top-0 z-30 flex items-center justify-between gap-3 px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] md:px-6">
+        {/* The sidebar already carries the title on desktop, so this chip is
+            phones-only there, and on desktop doubles as the way to bring a
+            hidden sidebar back. */}
+        <HeaderPill className="flex max-w-[min(18rem,calc(100vw-11rem))] items-center gap-2 font-serif text-base font-semibold text-stone-950 sm:max-w-none md:hidden">
           {/* A placeholder bar while the trip loads, so the header doesn't flash
               the "Trip Logbook" fallback (as DaySidebar's TitleSkeleton avoids). */}
           <Sparkles className="h-3.5 w-3.5 shrink-0 text-ember-500" /> {loading && !data.trip ? <span aria-hidden className="h-3.5 w-28 rounded-full bg-stone-200/80 motion-safe:animate-pulse" /> : <span className="truncate">{tripTitle}</span>}
         </HeaderPill>
+        {!sidebarOpen ? (
+          <PillButton onClick={() => setSidebarOpen(true)} className="hidden font-serif text-base font-semibold text-stone-950 md:inline-flex" aria-label="Show sidebar">
+            <PanelLeftOpen className="h-4 w-4 text-stone-500" /> {tripTitle}
+          </PillButton>
+        ) : <span className="hidden md:block" />}
         <div className="flex items-center gap-2">
           {backend && user && !previewReadOnly ? <HeaderPill className="hidden sm:block">{currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only"}</HeaderPill> : null}
           {previewReadOnly ? <HeaderPill className="hidden sm:block">Preview · view only</HeaderPill> : null}
@@ -591,8 +612,10 @@ export default function Home() {
           ) : null}
         </div>
       </div>
-      <div inert={overlayOpen} className="relative z-10 grid h-full gap-4 p-0 md:grid-cols-[24rem_minmax(0,1fr)] md:p-4 md:pt-[4.5rem]">
-        <div className="z-10 hidden min-h-0 md:block"><DaySidebar trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
+      {/* The map runs full-bleed on every screen; on desktop the sidebar
+          floats over its left edge instead of pushing it into a card. */}
+      <div inert={overlayOpen} className="relative z-10 h-full">
+        <div className={cn("absolute bottom-4 left-4 top-4 z-20 hidden min-h-0 transition-[transform,opacity] duration-300 ease-out motion-reduce:transition-none md:block", !sidebarOpen && "pointer-events-none -translate-x-[110%] opacity-0")} inert={!sidebarOpen}><DaySidebar onCollapse={() => setSidebarOpen(false)} trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
             {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} days={data.days} dayColors={dayColors} visibility={layerVisibility} currentUserId={mutationUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onClusterSelect={setClusterPhotos} onReliveCluster={reliveCluster} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
@@ -603,7 +626,7 @@ export default function Home() {
                 top-left corner on desktop. Hidden while a placement prompt
                 occupies the same spot. */}
             {!mapUnavailable && selectedDay && clickMode === "idle" ? (
-              <div className="pointer-events-none absolute left-3 top-16 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-full border border-stone-200/80 bg-paper/92 py-1.5 pl-3 pr-4 text-xs font-bold text-stone-900 shadow-control backdrop-blur md:left-4 md:top-4">
+              <div className={cn("pointer-events-none absolute left-3 top-16 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-full border border-stone-200/80 bg-paper/92 py-1.5 pl-3 pr-4 text-xs font-bold text-stone-900 shadow-control backdrop-blur md:transition-[left,top] md:duration-300", sidebarOpen ? "md:left-[27rem] md:top-4" : "md:left-6 md:top-[4.25rem]")}>
                 <DayDot color={dayColorFor(dayColors, selectedDay.id)} className="h-3 w-3" />
                 <span className="truncate">Day {selectedDay.day_number}{selectedDay.date ? ` · ${formatDateOnly(selectedDay.date)}` : ""}{selectedDay.title ? ` · ${selectedDay.title}` : ""}</span>
               </div>
