@@ -223,7 +223,7 @@ export function MobileSheet(props: MobileSheetProps) {
                   {props.days.length === 0 && props.trip === null ? (
                     <DayListSkeleton />
                   ) : (
-                    <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} showStepButtons={false} />
+                    <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} dayPhotos={props.dayPhotos} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} showStepButtons={false} />
                   )}
                   {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
                   {props.notesPlaces ? <NotesPlacesList {...props.notesPlaces} /> : null}

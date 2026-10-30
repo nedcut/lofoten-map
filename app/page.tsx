@@ -158,6 +158,17 @@ export default function Home() {
   // One accent colour per day, shared by the day cards, route lines, marker
   // badges, and the on-map day chip.
   const dayColors = useMemo(() => dayColorMap(data.days), [data.days]);
+  // Each day's photos, for the filmstrips on the day cards.
+  const dayPhotos = useMemo(() => {
+    const byDay = new Map<string, Photo[]>();
+    for (const photo of data.photos) {
+      if (!photo.day_id) continue;
+      const list = byDay.get(photo.day_id);
+      if (list) list.push(photo);
+      else byDay.set(photo.day_id, [photo]);
+    }
+    return byDay;
+  }, [data.photos]);
   const selectedDay = useMemo(() => data.days.find((day) => day.id === selectedDayId) ?? null, [data.days, selectedDayId]);
   // These render a modal overlay on top of the header/sidebar/map, so those
   // stay `inert` (unfocusable, hidden from assistive tech) underneath rather
@@ -615,7 +626,7 @@ export default function Home() {
       {/* The map runs full-bleed on every screen; on desktop the sidebar
           floats over its left edge instead of pushing it into a card. */}
       <div inert={overlayOpen} className="relative z-10 h-full">
-        <div className={cn("absolute bottom-4 left-4 top-4 z-20 hidden min-h-0 transition-[transform,opacity] duration-300 ease-out motion-reduce:transition-none md:block", !sidebarOpen && "pointer-events-none -translate-x-[110%] opacity-0")} inert={!sidebarOpen}><DaySidebar onCollapse={() => setSidebarOpen(false)} trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
+        <div className={cn("absolute bottom-4 left-4 top-4 z-20 hidden min-h-0 transition-[transform,opacity] duration-300 ease-out motion-reduce:transition-none md:block", !sidebarOpen && "pointer-events-none -translate-x-[110%] opacity-0")} inert={!sidebarOpen}><DaySidebar onCollapse={() => setSidebarOpen(false)} trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} dayPhotos={dayPhotos} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
             {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} days={data.days} dayColors={dayColors} visibility={layerVisibility} currentUserId={mutationUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onClusterSelect={setClusterPhotos} onReliveCluster={reliveCluster} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
@@ -634,7 +645,7 @@ export default function Home() {
           </MapView>
         </div>
       </div>
-      {!panel ? <div inert={overlayOpen}><MobileSheet trip={data.trip} loading={loading} days={data.days} dayStats={dayStats} dayColors={dayColors} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.filter((photo) => photo.media_type !== "video").length, videos: filtered.photos.filter((photo) => photo.media_type === "video").length, notes: filtered.notes.length, places: filtered.places.length }} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div> : null}
+      {!panel ? <div inert={overlayOpen}><MobileSheet trip={data.trip} loading={loading} days={data.days} dayStats={dayStats} dayColors={dayColors} dayPhotos={dayPhotos} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.filter((photo) => photo.media_type !== "video").length, videos: filtered.photos.filter((photo) => photo.media_type === "video").length, notes: filtered.notes.length, places: filtered.places.length }} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div> : null}
       {loading && !backendLoadError ? <StatusPill><Loader2 className="h-4 w-4 motion-safe:animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {shareStatus && !error ? <StatusPill>{shareStatus === "copied" ? "Link copied" : shareStatus === "shared" ? "Link shared" : "Couldn’t copy the link"}</StatusPill> : null}

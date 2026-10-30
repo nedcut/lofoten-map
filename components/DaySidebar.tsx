@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Loader2, Map, MapPin, Mountain, PanelLeftClose, PenLine, Play, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { Anchor, Bus, CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Footprints, Loader2, Map, MapPin, Mountain, PanelLeftClose, PenLine, Play, Route, ShieldCheck, UserPlus, Users, Video, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { AdminDataProps } from "@/components/AdminDataPanel";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
@@ -10,9 +10,9 @@ import { InlineMessage } from "@/components/ui/InlineMessage";
 import { SectionCard } from "@/components/ui/SectionCard";
 import { dayColorFor } from "@/lib/day-colors";
 import { startJourneyAtDayLabel } from "@/lib/journey";
-import { formatDayStats, type TripDayStats } from "@/lib/trip-view-model";
+import { formatDayStats, formatKm, type TripDayStats } from "@/lib/trip-view-model";
 import { cn, formatDateOnly } from "@/lib/utils";
-import type { AdminRequest, AdminRequestStatus, Day, Note, Photo, Place, Trip, TripMember } from "@/types/trip";
+import type { AdminRequest, AdminRequestStatus, Day, Note, Photo, Place, RouteMode, Trip, TripMember } from "@/types/trip";
 
 export type LayerVisibility = { photos: boolean; notes: boolean; routes: boolean };
 
@@ -55,6 +55,8 @@ export type SidebarProps = {
   days: Day[];
   dayStats?: Map<string, DayStats>;
   dayColors: Map<string, string>;
+  // Each day's photos, for the filmstrip on its card.
+  dayPhotos?: Map<string, Photo[]>;
   selectedDayId: string | null;
   onSelectDay: (dayId: string | null) => void;
   onStepDay: (direction: 1 | -1) => void;
@@ -180,14 +182,81 @@ export function DayDot({ color, className }: { color: string; className?: string
   return <span aria-hidden className={cn("inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white", className)} style={{ backgroundColor: color }} />;
 }
 
-type DayListProps = Pick<SidebarProps, "days" | "dayStats" | "dayColors" | "selectedDayId" | "onSelectDay" | "onStepDay"> & {
+type DayListProps = Pick<SidebarProps, "days" | "dayStats" | "dayColors" | "dayPhotos" | "selectedDayId" | "onSelectDay" | "onStepDay"> & {
   onPlayDay?: (dayId: string) => void;
   // The mobile sheet already has a day stepper in its peek header, so it
   // hides this one rather than showing two.
   showStepButtons?: boolean;
 };
 
-export function DayList({ days, dayStats, dayColors, selectedDayId, onSelectDay, onStepDay, onPlayDay, showStepButtons = true }: DayListProps) {
+// A day's covers: up to four of its photos spread across the day, as small
+// square prints. marker_url is the 144px square the map already loads, so the
+// strip usually costs nothing; older photos without one fall back to the
+// thumbnail.
+const FILMSTRIP_COUNT = 4;
+
+export function dayFilmstripPhotos(photos: Photo[]): Photo[] {
+  const stills = photos
+    .filter((photo) => photo.media_type !== "video" && (photo.marker_url || photo.thumbnail_url))
+    .sort((a, b) => (a.taken_at || a.created_at).localeCompare(b.taken_at || b.created_at));
+  if (stills.length <= FILMSTRIP_COUNT) return stills;
+  const step = stills.length / FILMSTRIP_COUNT;
+  return Array.from({ length: FILMSTRIP_COUNT }, (_, index) => stills[Math.floor(index * step + step / 2)]);
+}
+
+function DayFilmstrip({ photos }: { photos: Photo[] }) {
+  if (photos.length === 0) return null;
+  return (
+    <span aria-hidden className="mb-3 grid h-16 grid-cols-4 gap-1 overflow-hidden rounded-lg">
+      {photos.map((photo) => {
+        const fallback = photo.thumbnail_url ?? undefined;
+        return (
+          // eslint-disable-next-line @next/next/no-img-element -- user media URLs from R2
+          <img
+            key={photo.id}
+            src={photo.marker_url || fallback}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            onError={(event) => {
+              if (fallback && event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+            }}
+            className="h-full w-full bg-stone-200 object-cover transition-transform duration-500 group-hover:scale-[1.04] motion-reduce:transition-none"
+          />
+        );
+      })}
+    </span>
+  );
+}
+
+const MODE_ICON: Record<RouteMode, typeof Footprints> = { hike: Footprints, walk: Footprints, bus: Bus, ferry: Anchor, other: Route };
+const MODE_STAT_ORDER: RouteMode[] = ["hike", "walk", "bus", "ferry", "other"];
+
+// The day's numbers as small icon-and-figure pairs: media, journal pins, and
+// distance by how it was covered. Read aloud via the card's own label.
+function DayStatsRow({ stats }: { stats: DayStats | undefined }) {
+  if (!stats) return null;
+  const items: Array<{ key: string; icon: typeof Camera; label: string }> = [];
+  if (stats.photos) items.push({ key: "photos", icon: Camera, label: String(stats.photos) });
+  if (stats.videos) items.push({ key: "videos", icon: Video, label: String(stats.videos) });
+  if (stats.journal) items.push({ key: "pins", icon: MapPin, label: String(stats.journal) });
+  for (const mode of MODE_STAT_ORDER) {
+    const km = formatKm(stats.distanceByMode[mode] ?? 0);
+    if (km) items.push({ key: mode, icon: MODE_ICON[mode], label: km });
+  }
+  if (items.length === 0) return null;
+  return (
+    <span aria-hidden className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium tabular-nums text-stone-600">
+      {items.map(({ key, icon: Icon, label }) => (
+        <span key={key} className="inline-flex items-center gap-1">
+          <Icon className="h-3.5 w-3.5 text-stone-400" /> {label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+export function DayList({ days, dayStats, dayColors, dayPhotos, selectedDayId, onSelectDay, onStepDay, onPlayDay, showStepButtons = true }: DayListProps) {
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2 text-sm font-bold text-stone-900">
@@ -199,7 +268,7 @@ export function DayList({ days, dayStats, dayColors, selectedDayId, onSelectDay,
           </span>
         ) : null}
       </div>
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         <button
           onClick={() => onSelectDay(null)}
           aria-pressed={selectedDayId === null}
@@ -219,31 +288,34 @@ export function DayList({ days, dayStats, dayColors, selectedDayId, onSelectDay,
           const color = dayColorFor(dayColors, day.id);
           const selected = selectedDayId === day.id;
           const statsLabel = formatDayStats(stats);
+          const strip = dayFilmstripPhotos(dayPhotos?.get(day.id) ?? []);
+          const title = `Day ${day.day_number}: ${day.title ?? "Open trail"}`;
           return (
             <div key={day.id} className="group relative">
               <button
                 onClick={() => onSelectDay(day.id)}
                 aria-pressed={selected}
-                // The left edge carries the day's colour; selection thickens it
-                // and tints the card so the active day reads at a glance.
-                style={{ borderLeftColor: color }}
+                aria-label={[title, day.date ? formatDateOnly(day.date) : null, day.summary, statsLabel].filter(Boolean).join(". ")}
+                // Selection tints the whole card in the day's own colour, so
+                // the list and the route on the map visibly belong together.
+                style={selected
+                  ? { borderColor: `color-mix(in srgb, ${color} 45%, transparent)`, backgroundColor: `color-mix(in srgb, ${color} 9%, var(--color-paper))`, boxShadow: `0 10px 28px -12px color-mix(in srgb, ${color} 55%, transparent)` }
+                  : undefined}
                 className={cn(
-                  "w-full rounded-xl border border-l-4 px-4 py-3 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20",
-                  canPlay && "pr-14",
-                  selected ? "border-teal-700/35 bg-teal-50 shadow-sm" : "border-stone-200 bg-white/75 hover:border-stone-300 hover:bg-white",
+                  "w-full overflow-hidden rounded-xl border p-3 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20",
+                  !selected && "border-stone-200/90 bg-white/75 hover:border-stone-300 hover:bg-white",
                 )}
               >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex min-w-0 items-start gap-2 font-bold text-stone-950">
-                    <DayDot color={color} className="mt-[0.45em]" />
-                    <span className="min-w-0">Day {day.day_number}: {day.title ?? "Open trail"}</span>
+                <DayFilmstrip photos={strip} />
+                <span className={cn("block px-1", canPlay && strip.length === 0 && "pr-11")}>
+                  <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">
+                    <DayDot color={color} className="h-2 w-2 ring-0" />
+                    Day {day.day_number}{day.date ? ` · ${formatDateOnly(day.date)}` : ""}
                   </span>
-                  {day.date ? <span className="shrink-0 rounded-full bg-teal-700/10 px-2 py-0.5 text-xs font-bold text-teal-800">{formatDateOnly(day.date)}</span> : null}
-                </div>
-                {day.summary ? <div className="mt-1 text-[13px] leading-5 text-stone-500">{day.summary}</div> : null}
-                {statsLabel ? (
-                  <div className="mt-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-teal-900/80">{statsLabel}</div>
-                ) : null}
+                  <span className="mt-0.5 block font-serif text-lg font-semibold leading-snug text-stone-950">{day.title ?? "Open trail"}</span>
+                  {day.summary ? <span className="mt-0.5 block text-[13px] leading-5 text-stone-500">{day.summary}</span> : null}
+                  <DayStatsRow stats={stats} />
+                </span>
               </button>
               {canPlay ? (
                 <button
@@ -251,7 +323,12 @@ export function DayList({ days, dayStats, dayColors, selectedDayId, onSelectDay,
                   onClick={() => onPlayDay?.(day.id)}
                   aria-label={startJourneyAtDayLabel(day.day_number)}
                   title={startJourneyAtDayLabel(day.day_number)}
-                  className="absolute right-2.5 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-stone-200 bg-white text-ember-600 shadow-sm transition hover:-translate-y-1/2 hover:scale-105 hover:border-ember-400/60 hover:bg-[#fdf1dc] hover:text-ember-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember-400/30 active:scale-95"
+                  // Sits on the filmstrip's corner like a play badge on a
+                  // video; without a strip, in the card's top-right corner.
+                  className={cn(
+                    "absolute right-[1.4rem] inline-flex h-9 w-9 items-center justify-center rounded-full bg-paper/95 text-ember-600 shadow-md ring-1 ring-stone-900/5 backdrop-blur transition hover:scale-105 hover:bg-[#fdf1dc] hover:text-ember-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember-400/30 active:scale-95",
+                    strip.length > 0 ? "top-[1.4rem]" : "top-3.5",
+                  )}
                 >
                   <Play className="h-4 w-4 fill-current" />
                 </button>
@@ -484,7 +561,7 @@ export function DaySidebar(props: SidebarProps) {
       {props.days.length === 0 && props.trip === null ? (
         <DayListSkeleton />
       ) : (
-        <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} />
+        <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} dayPhotos={props.dayPhotos} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} />
       )}
       {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
       {props.notesPlaces ? <NotesPlacesList {...props.notesPlaces} /> : null}
