@@ -8,6 +8,8 @@ export const LOFOTEN_CENTER: [number, number] = [13.0897, 67.9325];
 // Pitched well into the terrain so the peaks stand up against the haze.
 export const LOFOTEN_DEFAULT_VIEW = { center: LOFOTEN_CENTER, zoom: 10.2, pitch: 58, bearing: -20 };
 
+export const MOBILE_OPENING_PITCH = 45;
+
 // How far the camera tilts when framing a single day: enough to read the
 // relief along the route without hiding the far end of a long hike.
 export const DAY_FRAMING_PITCH = 48;
@@ -23,7 +25,9 @@ export function lofotenOpeningView(viewportWidth: number, sheetHeight: number, l
   const noPadding = { top: 0, right: 0, bottom: 0, left: 0 };
   if (viewportWidth >= 768) return { ...LOFOTEN_DEFAULT_VIEW, padding: { ...noPadding, left: Math.max(0, leftInset) } };
   const zoom = LOFOTEN_DEFAULT_VIEW.zoom - Math.log2(860 / Math.max(viewportWidth, 1));
-  return { ...LOFOTEN_DEFAULT_VIEW, center: LOFOTEN_TRIP_CENTER, zoom, padding: { ...noPadding, top: 56, bottom: sheetHeight } };
+  // A tall, narrow screen at the desktop tilt spends its top third on empty
+  // sea toward the horizon, so phones tilt a little less.
+  return { ...LOFOTEN_DEFAULT_VIEW, center: LOFOTEN_TRIP_CENTER, zoom, pitch: MOBILE_OPENING_PITCH, padding: { ...noPadding, top: 56, bottom: sheetHeight } };
 }
 
 export type CoordinateBounds = { sw: [number, number]; ne: [number, number]; center: [number, number]; diagonalMeters: number };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coordinateBounds, LOFOTEN_DEFAULT_VIEW, lineDistanceMeters, lofotenOpeningView, routeDistanceMeters, routeGeometry } from "./geo";
+import { coordinateBounds, LOFOTEN_DEFAULT_VIEW, MOBILE_OPENING_PITCH, lineDistanceMeters, lofotenOpeningView, routeDistanceMeters, routeGeometry } from "./geo";
 
 describe("lofotenOpeningView", () => {
   it("keeps the desktop opening view exactly as before", () => {
@@ -12,7 +12,7 @@ describe("lofotenOpeningView", () => {
     expect(view.zoom).toBeLessThan(LOFOTEN_DEFAULT_VIEW.zoom - 0.9);
     expect(view.zoom).toBeGreaterThan(8.5);
     expect(view.padding.bottom).toBe(240);
-    expect(view.pitch).toBe(LOFOTEN_DEFAULT_VIEW.pitch);
+    expect(view.pitch).toBe(MOBILE_OPENING_PITCH);
     expect(view.bearing).toBe(LOFOTEN_DEFAULT_VIEW.bearing);
   });
 
