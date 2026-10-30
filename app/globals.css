@@ -66,3 +66,59 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .journey-hero-kenburns { animation: none; }
 }
+
+/* Journey Mode. Each photo fades up over the last one, then drifts slowly
+   (alternating the drift's anchor so consecutive photos don't move alike).
+   Chapter cards rise into place between days. All of it holds still for
+   reduced-motion users. */
+.journey-photo-in {
+  animation: journey-photo-in 900ms ease-out both;
+}
+.journey-photo-in.journey-drift-a {
+  transform-origin: 30% 40%;
+  animation: journey-photo-in 900ms ease-out both, journey-drift 14s ease-out both;
+}
+.journey-photo-in.journey-drift-b {
+  transform-origin: 70% 60%;
+  animation: journey-photo-in 900ms ease-out both, journey-drift 14s ease-out both;
+}
+.journey-photo-out {
+  animation: journey-photo-out 700ms ease-in both;
+}
+.journey-backdrop-in {
+  animation: journey-photo-in 1200ms ease-out both;
+}
+.journey-chapter-in {
+  animation: journey-chapter-in 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.journey-chapter-in .journey-chapter-line {
+  animation: journey-chapter-in 900ms 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes journey-photo-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes journey-photo-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes journey-drift {
+  from { transform: scale(1); }
+  to { transform: scale(1.045); }
+}
+@keyframes journey-chapter-in {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journey-photo-in,
+  .journey-photo-in.journey-drift-a,
+  .journey-photo-in.journey-drift-b,
+  .journey-photo-out,
+  .journey-backdrop-in,
+  .journey-chapter-in,
+  .journey-chapter-in .journey-chapter-line { animation: none; }
+  .journey-photo-out { opacity: 0; }
+}

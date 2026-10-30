@@ -20,6 +20,9 @@ type Props = {
   activeItem: JourneyItem;
   onInteraction: () => void;
   onSelectItem: (id: string) => void;
+  // During a Journey interlude (a new day, a long leg) the map grows from its
+  // corner to fill the screen and becomes the stage; the photo returns after.
+  stage?: boolean;
 };
 
 function getSource(map: mapboxgl.Map, id: string) {
@@ -193,7 +196,7 @@ function progressedRoutes(routes: RouteSegment[], days: Day[], activeDayNumber: 
   });
 }
 
-export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction, onSelectItem }: Props) {
+export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction, onSelectItem, stage = false }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // State rather than a ref: Retry replaces the instance, and every effect
   // that wires into the map has to re-run against the new one.
@@ -254,14 +257,15 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   // and is allowed to cover the controls while the pointer is on it.
   useEffect(() => {
     const node = rootRef.current;
-    if (!node || expanded || typeof ResizeObserver === "undefined") return;
+    // The full-screen stage is transient too; keep the last collapsed width.
+    if (!node || expanded || stage || typeof ResizeObserver === "undefined") return;
     const root = document.documentElement;
     const publish = () => root.style.setProperty(MINIMAP_WIDTH_VAR, `${Math.round(node.getBoundingClientRect().width)}px`);
     publish();
     const observer = new ResizeObserver(publish);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [expanded, sizeIndex]);
+  }, [expanded, sizeIndex, stage]);
   useEffect(() => () => { document.documentElement.style.removeProperty(MINIMAP_WIDTH_VAR); }, []);
 
   useEffect(() => {
@@ -596,7 +600,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   }, [activeItem.coord, cancelFlight, expanded, map, routes]);
 
   function expand() {
-    if (performance.now() - sizeChangedAtRef.current < 800) return;
+    if (stage || performance.now() - sizeChangedAtRef.current < 800) return;
     onInteraction();
     if (collapseTimerRef.current) window.clearTimeout(collapseTimerRef.current);
     setExpanded(true);
@@ -656,21 +660,32 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   return (
     // data-journey-minimap lets JourneyPlayback's swipe handler ignore touches
     // that start here, so panning the map doesn't also flip the slide.
-    <div ref={rootRef} data-journey-minimap className="absolute right-3 top-[calc(4rem+env(safe-area-inset-top))] z-40 md:right-6 md:top-auto md:bottom-6" onMouseLeave={queueCollapse}>
+    <div
+      ref={rootRef}
+      data-journey-minimap
+      className={cn(
+        "absolute transition-[right,top,bottom] duration-700 ease-in-out motion-reduce:transition-none",
+        // On stage it sits under the viewer's header (z-20) and bar (z-30).
+        stage ? "right-0 top-0 z-[15] md:bottom-0 md:right-0 md:top-auto" : "right-3 top-[calc(4rem+env(safe-area-inset-top))] z-40 md:bottom-6 md:right-6 md:top-auto",
+      )}
+      onMouseLeave={queueCollapse}
+    >
       {/* Size controls float above the collapsed map (outside the hover-expand
           zone, so reaching for them doesn't balloon the map mid-click) and
           move inside the top-right corner once expanded. Phones skip the
           floating pair: it landed on top of the header's filter and Share
           buttons, and tap-to-expand already offers the sizes inside. */}
-      {!expanded ? <div className="absolute -top-9 right-0 hidden items-center gap-1 md:flex">{sizeControls}</div> : null}
+      {!expanded && !stage ? <div className="absolute -top-9 right-0 hidden items-center gap-1 md:flex">{sizeControls}</div> : null}
       <div
         className={cn(
-          "relative overflow-hidden rounded-2xl border border-white/20 bg-stone-950/70 shadow-2xl transition-all duration-300",
-          expanded ? EXPANDED_SIZES[expandedSizeIndex] : COLLAPSED_SIZES[sizeIndex],
+          "relative overflow-hidden border-white/20 bg-stone-950/70 shadow-2xl transition-all ease-in-out motion-reduce:transition-none",
+          stage
+            ? "h-dvh w-screen rounded-none border-0 duration-700"
+            : cn("rounded-2xl border duration-300", expanded ? EXPANDED_SIZES[expandedSizeIndex] : COLLAPSED_SIZES[sizeIndex]),
         )}
         onMouseEnter={expand}
       >
-        {expanded ? (
+        {expanded && !stage ? (
           <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1">
             {sizeControls}
             {/* Pointer users leave by moving the mouse away; touch users need
@@ -689,7 +704,7 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
             </button>
           </div>
         ) : null}
-        {!unavailable && loadState !== "failed" ? (
+        {!unavailable && loadState !== "failed" && !stage ? (
           <div className="absolute bottom-1.5 right-1.5 z-10 flex items-center gap-1">
             <button type="button" onClick={() => rotateBy(-15)} className={controlButton} aria-label="Rotate map left" title="Rotate left 15°">
               <RotateCcw className="h-3.5 w-3.5" />
