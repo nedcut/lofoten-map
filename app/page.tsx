@@ -26,6 +26,7 @@ import { useTripMutations } from "@/lib/hooks/useTripMutations";
 import { useTripCreation } from "@/lib/hooks/useTripCreation";
 import { useJourneyState } from "@/lib/hooks/useJourneyState";
 import { useTripUrlState } from "@/lib/hooks/useTripUrlState";
+import { markOpeningFlightPlayed, OPENING_FLIGHT_MS, shouldPlayOpeningFlight } from "@/lib/opening-flight";
 import { buildJourneyItems, firstJourneyPhotoId } from "@/lib/journey";
 import type { PhotoOutlier } from "@/lib/photo-outliers";
 import { shareJourneyLink, type ShareResult } from "@/lib/share";
@@ -477,12 +478,23 @@ export default function Home() {
   // extra bottom padding so the bottom sheet doesn't cover the framed content;
   // a lone point falls back to an eased zoom since a zero-area box can't be
   // fit. "All days" returns to the opening Lofoten view instead.
+  // Decided once, on the first framing: whether this load plays the opening
+  // flight (MapView started the camera high above to match).
+  const openingFlightRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (!map) return;
+    if (openingFlightRef.current === null) {
+      openingFlightRef.current = shouldPlayOpeningFlight();
+      if (openingFlightRef.current) markOpeningFlightPlayed();
+    }
+    const flyIn = openingFlightRef.current;
+    openingFlightRef.current = false;
     if (!selectedDayId) {
       // The view carries its own padding, replacing any a previous easeTo left
       // on the camera, so this lands exactly on the view the page loads with.
-      map.easeTo({ ...lofotenOpeningView(window.innerWidth, mobileSheetHeight(), sidebarInset()), duration: 800 });
+      const view = lofotenOpeningView(window.innerWidth, mobileSheetHeight(), sidebarInset());
+      if (flyIn) map.flyTo({ ...view, duration: OPENING_FLIGHT_MS, curve: 1.2 });
+      else map.easeTo({ ...view, duration: 800 });
       return;
     }
     const coords = collectItemCoordinates(filteredRef.current);
@@ -499,7 +511,7 @@ export default function Home() {
     }
     // Tilted into the terrain, keeping the current heading, so the day's
     // route reads against its mountains rather than as a flat line.
-    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, pitch: DAY_FRAMING_PITCH, bearing: map.getBearing(), duration: 800 });
+    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, pitch: DAY_FRAMING_PITCH, bearing: map.getBearing(), duration: flyIn ? OPENING_FLIGHT_MS : 800 });
   }, [map, selectedDayId, sidebarOpen]);
 
   function startPanel(next: "photo" | "note" | "route") {

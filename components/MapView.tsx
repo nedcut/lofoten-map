@@ -14,6 +14,7 @@ import { mobileSheetHeight } from "@/components/MobileSheet";
 import { Button } from "@/components/ui/Button";
 import { lofotenOpeningView } from "@/lib/geo";
 import { applyLofotenAtmosphere } from "@/lib/map-atmosphere";
+import { OPENING_FLIGHT_START, shouldPlayOpeningFlight } from "@/lib/opening-flight";
 import { watchMapInit } from "@/lib/map-init";
 import type { LngLat, MapClickMode } from "@/types/trip";
 
@@ -83,7 +84,9 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
       instance = new mapboxgl.Map({
         container: containerRef.current,
         style: "mapbox://styles/mapbox/outdoors-v12",
-        ...openingView,
+        // A first visit starts high above and flies in (page.tsx); every
+        // other load opens directly on the islands.
+        ...(shouldPlayOpeningFlight() ? OPENING_FLIGHT_START : openingView),
         attributionControl: false,
       });
       instance.setPadding(padding);

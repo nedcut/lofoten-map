@@ -22,6 +22,9 @@ const BASEMAP_PAINT: Array<[layer: string, property: string, value: unknown]> = 
   ["water-shadow", "fill-color", WATER_SHADOW],
   ["waterway", "line-color", WATER],
   ["waterway-shadow", "line-color", WATER_SHADOW],
+  // Open sea darkens with depth instead of the stock bright-cyan wash, which
+  // dominates the view from far out.
+  ["water-depth", "fill-color", ["interpolate", ["linear"], ["get", "min_depth"], 0, "hsla(201, 33%, 60%, 0)", 200, "hsla(203, 36%, 44%, 0.35)", 7000, "hsla(206, 40%, 30%, 0.55)"]],
   ["water-point-label", "text-color", "hsl(200, 40%, 94%)"],
   ["water-line-label", "text-color", "hsl(200, 40%, 94%)"],
   ["water-point-label", "text-halo-color", "hsla(203, 34%, 40%, 0.35)"],
