@@ -12,6 +12,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { mobileSheetHeight } from "@/components/MobileSheet";
 import { Button } from "@/components/ui/Button";
 import { lofotenOpeningView } from "@/lib/geo";
+import { applyLofotenAtmosphere } from "@/lib/map-atmosphere";
 import { watchMapInit } from "@/lib/map-init";
 import type { LngLat, MapClickMode } from "@/types/trip";
 
@@ -108,6 +109,9 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
       setCanRetry(true);
       markUnavailable("The map couldn't load. Check your connection and try again. The trip details are still available.");
     });
+    // Terrain, haze and the toned basemap. style.load (not load) so they are
+    // in place before the first frame the user sees, and survive style swaps.
+    instance.on("style.load", () => applyLofotenAtmosphere(instance));
     instance.on("load", () => {
       document.body.classList.remove("map-unavailable-active");
       onMapReady(instance);

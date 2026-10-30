@@ -11,6 +11,7 @@ import type { JourneyItem } from "@/lib/journey";
 import type { Day, LngLat, RouteSegment } from "@/types/trip";
 import { canUseStyle } from "@/lib/map-style";
 import { isFatalMapError, MAP_STYLE_TIMEOUT_MS } from "@/lib/map-init";
+import { applyLofotenAtmosphere } from "@/lib/map-atmosphere";
 
 type Props = {
   routes: RouteSegment[];
@@ -314,11 +315,9 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
     });
     // 3D terrain sells the hike: the fjords rise around the camera as it
     // follows the path. style.load (not load) so terrain survives style swaps.
-    map.on("style.load", () => {
-      if (map.getSource("mapbox-dem")) return;
-      map.addSource("mapbox-dem", { type: "raster-dem", url: "mapbox://mapbox.mapbox-terrain-dem-v1", tileSize: 512, maxzoom: 14 });
-      map.setTerrain({ source: "mapbox-dem", exaggeration: 1.35 });
-    });
+    // Shares the main map's look (lib/map-atmosphere.ts), slightly more
+    // exaggerated since this camera flies low along the trail.
+    map.on("style.load", () => applyLofotenAtmosphere(map, { exaggeration: 1.35 }));
     // No NavigationControl: the zoom buttons crowd a map this small and read as
     // clutter. Pan/scroll/pinch still work for anyone who wants to explore.
     // Dev-only handle for inspecting camera state (pitch/zoom/terrain) from the
