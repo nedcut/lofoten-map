@@ -350,8 +350,10 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   useEffect(() => {
     if (!map) return;
     // A user grabbing the map takes the camera back: stop any in-flight follow
-    // animation so it doesn't wrestle the drag.
-    const noteInteraction = () => {
+    // animation so it doesn't wrestle the drag. Only real input counts: the
+    // flights themselves fire these events too, without an originalEvent.
+    const noteInteraction = (event: object) => {
+      if (!("originalEvent" in event && event.originalEvent)) return;
       cancelFlight();
       onInteraction();
     };

@@ -93,17 +93,21 @@ async function pickCover(photos: PhotoRow[]): Promise<string | null> {
   if (photos.length === 0) return null;
   const order = Array.from({ length: 8 }, (_, i) => photos[Math.floor((0.6 + (i % 2 ? 1 : -1) * 0.07 * Math.ceil(i / 2)) * photos.length)])
     .filter((photo): photo is PhotoRow => Boolean(photo));
+  // One time budget for all probes, not one each: a stalled photo host must
+  // not hold the build past Next's 60s page-generation limit.
+  const budget = AbortSignal.timeout(FETCH_TIMEOUT_MS);
   for (const photo of order) {
     const probeUrl = publicObjectUrl(PHOTO_BUCKET, photo.thumbnail_path ?? photo.image_path);
     if (!probeUrl) continue;
     try {
-      const response = await fetch(probeUrl, { headers: { Range: "bytes=0-65535" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      const response = await fetch(probeUrl, { headers: { Range: "bytes=0-65535" }, signal: budget });
       const size = jpegSize(new Uint8Array(await response.arrayBuffer()));
       if (size && size.width > size.height * 1.2) return publicObjectUrl(PHOTO_BUCKET, photo.image_path);
     } catch {
       // Try the next candidate.
     }
   }
+  if (budget.aborted) return null;
   return publicObjectUrl(PHOTO_BUCKET, order[0]?.image_path ?? null);
 }
 

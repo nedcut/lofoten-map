@@ -606,14 +606,16 @@ export function JourneyPlayback({
     setIntroOpen(false);
     onSelectIndex(0);
     setIsPlaying(true);
-    openChapter(items[0]?.dayId ?? null);
+    openChapter(items[0]);
   }
 
   // The first day's chapter when a journey begins (stepping into later days
   // opens theirs automatically).
-  function openChapter(dayId: string | null = activeItem.dayId) {
-    previousItemRef.current = null;
-    setInterlude({ kind: "chapter", dayId, durationMs: CHAPTER_MS, key: performance.now() });
+  // The ref is seeded with the item the chapter opens on, so stepping to it
+  // (on replay) opens nothing more, and the next step still compares against it.
+  function openChapter(item: JourneyItem | undefined = activeItem) {
+    previousItemRef.current = item ?? null;
+    setInterlude({ kind: "chapter", dayId: item?.dayId ?? null, durationMs: CHAPTER_MS, key: performance.now() });
   }
 
   function touchStart(event: React.TouchEvent) {
