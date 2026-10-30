@@ -56,21 +56,34 @@
   height: 44px;
   cursor: pointer;
   overflow: visible;
-  border: 3px solid var(--color-paper);
-  border-radius: 12px;
+  border: 0;
   /* --day-accent is set per marker by TripLayers from the photo's day. */
-  background: var(--day-accent, var(--color-ember-400));
+  background: transparent;
   padding: 0;
   /* --marker-depth is screen Y so nearer thumbnails overlap ones behind. */
   z-index: var(--marker-depth, 0);
-  box-shadow:
-    0 2px 5px rgba(28, 25, 23, 0.22),
-    0 10px 22px rgba(46, 61, 54, 0.22);
   /* Mapbox positions this element with an inline transform on every map
      frame, so transform must never be transitioned: easing it made the
-     thumbnails trail the basemap during pans and zooms. */
-  transition: box-shadow 160ms ease, opacity 160ms ease;
+     thumbnails trail the basemap during pans and zooms. The visible print
+     is the inner card, which owns its own tilt and hover lift. */
+  transition: opacity 160ms ease;
   animation: lofoten-photo-marker-in 180ms ease-out;
+}
+
+/* The print itself: a paper-bordered snapshot at a slight angle. */
+.lofoten-photo-marker-card {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  border: 3px solid var(--color-paper);
+  border-radius: 10px;
+  background: var(--day-accent, var(--color-ember-400));
+  box-shadow:
+    0 1px 2px rgba(28, 25, 23, 0.25),
+    0 8px 18px rgba(28, 25, 23, 0.26);
+  transform: rotate(var(--marker-tilt, 0deg));
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1.2), box-shadow 220ms ease;
 }
 
 @keyframes lofoten-photo-marker-in {
@@ -90,10 +103,13 @@
 @media (prefers-reduced-motion: reduce) {
   .lofoten-photo-marker {
     animation: none;
+  }
+  .lofoten-photo-marker-card {
     transition: box-shadow 160ms ease;
   }
 }
 
+/* Cluster depth: two more prints fanned out underneath the top one. */
 .lofoten-photo-marker::before,
 .lofoten-photo-marker::after {
   content: "";
@@ -101,9 +117,9 @@
   z-index: -1;
   inset: 2px;
   border: 2px solid var(--color-paper);
-  border-radius: 11px;
+  border-radius: 9px;
   background: #d6ccb8;
-  box-shadow: 0 4px 10px rgba(28, 25, 23, 0.16);
+  box-shadow: 0 4px 10px rgba(28, 25, 23, 0.18);
 }
 
 .lofoten-photo-marker:not(.lofoten-photo-marker-cluster)::before,
@@ -117,44 +133,38 @@
 }
 
 .lofoten-photo-marker-cluster::before {
-  transform: translate(5px, -4px) rotate(7deg);
+  transform: translate(6px, -4px) rotate(calc(var(--marker-tilt, 0deg) + 8deg));
 }
 
 .lofoten-photo-marker-cluster::after {
-  transform: translate(-5px, 4px) rotate(-5deg);
+  transform: translate(-5px, 4px) rotate(calc(var(--marker-tilt, 0deg) - 7deg));
 }
 
 .lofoten-photo-marker img {
   display: block;
   width: 100%;
   height: 100%;
-  border-radius: 9px;
   object-fit: cover;
   background: #dbe7df;
 }
 
-/* At the whole-trip zoom, retain a 44px control while visually quieting the
-   thumbnail within it. Clusters use the same compact footprint, so a rich
-   archive reads as a handful of places rather than a wall of cards. */
-.lofoten-photo-marker-overview {
-  width: 44px;
-  height: 44px;
-  padding: 2px;
-  box-shadow:
-    0 2px 4px rgba(28, 25, 23, 0.16),
-    0 7px 15px rgba(46, 61, 54, 0.15);
-}
-
-.lofoten-photo-marker-overview img {
-  border-radius: 7px;
+/* At the whole-trip zoom the prints shrink a little so a rich archive reads
+   as a handful of places rather than a wall of cards. The 44px button keeps
+   the touch target. */
+.lofoten-photo-marker-overview .lofoten-photo-marker-card {
+  inset: 3px;
+  border-width: 2.5px;
+  border-radius: 8px;
 }
 
 .lofoten-photo-marker-cluster.lofoten-photo-marker-overview::before {
-  transform: translate(3px, -3px) rotate(5deg);
+  inset: 4px;
+  transform: translate(4px, -3px) rotate(calc(var(--marker-tilt, 0deg) + 7deg));
 }
 
 .lofoten-photo-marker-cluster.lofoten-photo-marker-overview::after {
-  transform: translate(-3px, 3px) rotate(-4deg);
+  inset: 4px;
+  transform: translate(-4px, 3px) rotate(calc(var(--marker-tilt, 0deg) - 6deg));
 }
 
 /* Pulsing ring around the photo currently open in the editor. The outer div is
@@ -235,38 +245,48 @@
   text-transform: uppercase;
 }
 
+/* A small paper tag in the day's colour: present, but quieter than the
+   photo it belongs to. */
 .lofoten-photo-marker-count {
   position: absolute;
-  top: -10px;
-  right: -10px;
-  min-width: 25px;
-  height: 25px;
-  padding: 0 7px;
+  z-index: 1;
+  top: -8px;
+  right: -9px;
+  min-width: 21px;
+  height: 19px;
+  padding: 0 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid var(--color-paper);
   border-radius: 999px;
-  background: var(--day-accent, var(--color-fjord));
-  color: white;
-  font-size: 0.7rem;
-  font-weight: 800;
+  background: var(--color-paper);
+  color: var(--day-accent, var(--color-fjord));
+  font-size: 0.66rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
-  box-shadow: 0 4px 10px rgba(28, 25, 23, 0.24);
+  box-shadow: 0 0 0 1px rgba(28, 25, 23, 0.08), 0 3px 8px rgba(28, 25, 23, 0.2);
 }
 
 .lofoten-photo-marker:hover,
 .lofoten-photo-marker:focus-visible {
   /* Above any screen-Y depth; contained by the isolated canvas layer. */
   z-index: 10000;
+}
+
+/* Picked up off the map: the print straightens, lifts, and its shadow grows. */
+.lofoten-photo-marker:hover .lofoten-photo-marker-card,
+.lofoten-photo-marker:focus-visible .lofoten-photo-marker-card {
+  transform: translateY(-3px) rotate(0deg) scale(1.08);
   box-shadow:
-    0 3px 7px rgba(28, 25, 23, 0.24),
-    0 14px 28px rgba(46, 61, 54, 0.28);
+    0 2px 4px rgba(28, 25, 23, 0.22),
+    0 16px 30px rgba(28, 25, 23, 0.32);
 }
 
 .lofoten-photo-marker:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--color-fjord) 55%, transparent);
   outline-offset: 4px;
+  border-radius: 12px;
 }
 
 .map-unavailable .mapboxgl-ctrl,

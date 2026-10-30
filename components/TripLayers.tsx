@@ -46,6 +46,13 @@ function focusPopupContent(popup: mapboxgl.Popup) {
   body.focus();
 }
 
+// A stable tilt between -4° and 4° for a photo marker, from its id.
+function markerTilt(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return ((Math.abs(hash) % 81) - 40) / 10;
+}
+
 function hasLayer(map: mapboxgl.Map, id: string) {
   if (!canUseStyle(map)) return false;
   try {
@@ -421,6 +428,14 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       // The frame and count badge take the colour of the photo's day (see
       // map-overrides.css), matching the day card and route line.
       element.style.setProperty("--day-accent", dayColorFor(dayColors, photo.day_id));
+      // Each print sits at its own slight angle, like snapshots laid on a
+      // map. Derived from the id so a marker keeps its tilt across refreshes.
+      element.style.setProperty("--marker-tilt", `${markerTilt(photo.id)}deg`);
+      // Mapbox writes the button's transform every frame to position it, so
+      // the tilt and hover lift live on this inner card instead.
+      const card = document.createElement("span");
+      card.className = "lofoten-photo-marker-card";
+      element.append(card);
       const fallbackUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
       const imageUrl = photo.marker_url || fallbackUrl;
       if (imageUrl) {
@@ -434,12 +449,12 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         image.alt = "";
         image.decoding = "async";
         image.draggable = false;
-        element.append(image);
+        card.append(image);
       } else {
         const fallback = document.createElement("span");
         fallback.className = "lofoten-photo-marker-fallback";
         fallback.textContent = photo.media_type === "video" ? "Video" : "Photo";
-        element.append(fallback);
+        card.append(fallback);
       }
       return element;
     }
