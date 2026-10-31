@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Loader2, MapIcon, MapPinned, Pencil, Plus, RotateCcw, Save, Share2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, Gauge, Loader2, MapIcon, MapPinned, Pencil, Plus, RotateCcw, Save, Share2, Sun, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { JourneyMiniMap } from "@/components/JourneyMiniMap";
 import { Button } from "@/components/ui/Button";
@@ -8,14 +8,17 @@ import { IconButton } from "@/components/ui/IconButton";
 import { useCaptionDraft } from "@/lib/hooks/useCaptionDraft";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { friendlyPersonName, personFilterOptions } from "@/lib/display-name";
-import { cn, formatDateTime } from "@/lib/utils";
+import { cn, formatDateOnly, formatDateTime } from "@/lib/utils";
+import { distanceKm } from "@/lib/geo";
+import { nightLight, nightLightLabel } from "@/lib/sun";
+import { formatDistanceByMode } from "@/lib/trip-view-model";
 import { journeyItemTitle, type JourneyAttachedItem, type JourneyItem } from "@/lib/journey";
 import { syncJourneyVideo, videoFallbackDurationMs } from "@/lib/journey-video";
 import { dayColorMap } from "@/lib/day-colors";
 import { journeyDayStops, journeyTimelineTicks } from "@/lib/journey-timeline";
 import { initialMinimapVisible, MINIMAP_VISIBLE_STORAGE_KEY } from "@/lib/journey-minimap";
 import { shareJourneyLink, type ShareResult } from "@/lib/share";
-import type { Day, Photo, RouteSegment, Trip } from "@/types/trip";
+import type { Day, Photo, RouteMode, RouteSegment, Trip } from "@/types/trip";
 
 export type JourneyFilter = "all" | "photos" | "journal";
 
@@ -95,6 +98,91 @@ function attachedText(attached: JourneyAttachedItem) {
   return [attached.item.name, attached.item.description].filter(Boolean).join(" · ");
 }
 
+// Interludes: while autoplaying, a new day opens with a chapter card, and a
+// long hop between consecutive photos hands the screen to the map, which
+// grows from its corner and flies the leg before the next photo fades up.
+const TRAVEL_INTERLUDE_KM = 2.5;
+const CHAPTER_MS = 4200;
+
+type Interlude = { kind: "chapter" | "travel"; dayId: string | null; durationMs: number; key: number };
+
+// Matches the camera: walking legs take about 1s per km (JourneyMiniMap),
+// long legs arc with flyTo for up to 4.5s.
+function travelMs(km: number) {
+  if (km > 12) return 4800;
+  return Math.min(4400, Math.max(2800, km * 1000 + 800));
+}
+
+// What a day's chapter card says beneath its title: how much it holds and how
+// far it went ("41 moments · 13 km hike").
+function chapterStats(items: JourneyItem[], routes: RouteSegment[], dayId: string | null) {
+  const moments = items.filter((item) => item.dayId === dayId).length;
+  const byMode: Partial<Record<RouteMode, number>> = {};
+  let total = 0;
+  for (const route of routes) {
+    if (route.day_id !== dayId || !route.distance_meters) continue;
+    byMode[route.mode] = (byMode[route.mode] ?? 0) + route.distance_meters;
+    total += route.distance_meters;
+  }
+  return [moments ? `${moments} moment${moments === 1 ? "" : "s"}` : null, formatDistanceByMode(byMode, total)].filter(Boolean).join(" · ");
+}
+
+// Candidates for the intro's cover: still photos sampled across the trip,
+// nearest the middle first (arrival-day logistics rarely make the best cover).
+function heroCandidates(items: JourneyItem[]): Photo[] {
+  const photos = items.flatMap((item) => item.kind === "photo" && item.primary.media_type !== "video" && item.primary.image_url ? [item.primary] : []);
+  if (photos.length === 0) return [];
+  const picks = new Map<string, Photo>();
+  for (let i = 0; i < 10; i += 1) {
+    const photo = photos[Math.floor(((0.15 + 0.08 * i) % 1) * photos.length)];
+    if (photo) picks.set(photo.id, photo);
+  }
+  const middle = photos.length * 0.6;
+  return [...picks.values()].sort((a, b) => Math.abs(photos.indexOf(a) - middle) - Math.abs(photos.indexOf(b) - middle));
+}
+
+// The photo stage: the incoming photo fades up over the outgoing one once it
+// has actually decoded (so a slow download never flashes black), then drifts.
+function JourneyPhoto({ url, alt, index }: { url: string; alt: string; index: number }) {
+  const [current, setCurrent] = useState(url);
+  const [previous, setPrevious] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<string | null>(null);
+  // Adjusting state while rendering (React's sanctioned pattern for state
+  // derived from a changed prop): the outgoing photo is kept only if it was
+  // ever on screen.
+  if (url !== current) {
+    setPrevious(loaded === current ? current : previous);
+    setCurrent(url);
+  }
+  const ready = loaded === current;
+  useEffect(() => {
+    if (!ready || !previous) return;
+    const id = window.setTimeout(() => setPrevious(null), 750);
+    return () => window.clearTimeout(id);
+  }, [ready, previous]);
+  const frame = "absolute inset-0 m-auto max-h-full max-w-full rounded-lg shadow-[0_36px_100px_rgba(0,0,0,0.5)]";
+  return (
+    <div className="relative h-full w-full">
+      {previous && previous !== current ? (
+        // eslint-disable-next-line @next/next/no-img-element -- User-uploaded image URLs are rendered directly in the viewer.
+        <img key={previous} src={previous} alt="" aria-hidden decoding="async" className={cn(frame, ready && "journey-photo-out")} />
+      ) : null}
+      {/* eslint-disable-next-line @next/next/no-img-element -- User-uploaded image URLs are rendered directly in the viewer. */}
+      <img
+        key={current}
+        ref={(node) => { if (node?.complete && node.naturalWidth > 0 && loaded !== current) setLoaded(current); }}
+        src={current}
+        alt={alt}
+        decoding="async"
+        fetchPriority="high"
+        onLoad={() => setLoaded(current)}
+        onError={() => setLoaded(current)}
+        className={cn(frame, ready ? cn("journey-photo-in", index % 2 === 0 ? "journey-drift-a" : "journey-drift-b") : "opacity-0")}
+      />
+    </div>
+  );
+}
+
 export function JourneyPlayback({
   trip,
   showIntro,
@@ -128,6 +216,11 @@ export function JourneyPlayback({
   const [introOpen, setIntroOpen] = useState(showIntro);
   const [complete, setComplete] = useState(false);
   const [shareStatus, setShareStatus] = useState<ShareResult | null>(null);
+  const [interlude, setInterlude] = useState<Interlude | null>(null);
+  // The previous item, so a step can tell whether it crossed into a new day
+  // or covered real distance.
+  const previousItemRef = useRef<JourneyItem | null>(null);
+  const [heroUrl, setHeroUrl] = useState<string | null>(null);
   // The mini-map can be hidden entirely so the photo is never covered. The
   // choice lasts for the browser session; with no choice yet, short screens
   // start without it. The viewer is client-only, so reading storage here is safe.
@@ -251,13 +344,41 @@ export function JourneyPlayback({
   }
 
   function noteInteraction() {
+    // Any tap, swipe, or key skips an interlude straight to the photo.
+    setInterlude(null);
     setInteractionHold(true);
     if (resumeTimerRef.current) window.clearTimeout(resumeTimerRef.current);
     resumeTimerRef.current = window.setTimeout(() => setInteractionHold(false), 3000);
   }
 
+  // An interlude only shows while autoplay runs and no overlay is up; derived
+  // rather than cleared, so pausing simply hides it until its timer ends.
+  const showInterlude = interlude !== null && isPlaying && !introOpen && !complete;
+
+  // Open a chapter or a travel interlude when autoplay steps into a new day or
+  // across a long leg. Manual stepping while paused never triggers one.
+  const activeItemId = activeItem?.id;
   useEffect(() => {
-    if (!isPlaying || interactionHold || !activeItem || (activeItem.kind === "photo" && activeItem.primary.media_type === "video")) return;
+    const previous = previousItemRef.current;
+    previousItemRef.current = activeItem ?? null;
+    if (!activeItem || !previous || previous.id === activeItem.id || !isPlayingRef.current) return;
+    const km = previous.coord && activeItem.coord ? distanceKm(previous.coord, activeItem.coord) : 0;
+    const far = mapVisible && km > TRAVEL_INTERLUDE_KM;
+    const travel = far ? travelMs(km) : 0;
+    if (previous.dayId !== activeItem.dayId) setInterlude({ kind: "chapter", dayId: activeItem.dayId, durationMs: Math.max(CHAPTER_MS, travel), key: performance.now() });
+    else if (far) setInterlude({ kind: "travel", dayId: activeItem.dayId, durationMs: travel, key: performance.now() });
+    // Keyed on the item id: stepping is what matters, not a data refresh of the same item.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeItemId]);
+
+  useEffect(() => {
+    if (!interlude) return;
+    const id = window.setTimeout(() => setInterlude(null), interlude.durationMs);
+    return () => window.clearTimeout(id);
+  }, [interlude]);
+
+  useEffect(() => {
+    if (!isPlaying || interactionHold || showInterlude || !activeItem || (activeItem.kind === "photo" && activeItem.primary.media_type === "video")) return;
     const baseDuration = activeItem.kind === "photo" && !activeItem.primary.caption ? 5000 : 7000;
     const duration = baseDuration / speed;
     const isLast = activeIndex >= items.length - 1;
@@ -270,7 +391,7 @@ export function JourneyPlayback({
     return () => {
       if (autoplayTimerRef.current) window.clearTimeout(autoplayTimerRef.current);
     };
-  }, [activeIndex, activeItem, interactionHold, isPlaying, items.length, onNext, speed]);
+  }, [activeIndex, activeItem, interactionHold, isPlaying, items.length, onNext, showInterlude, speed]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -345,6 +466,29 @@ export function JourneyPlayback({
     };
   }, []);
 
+  // The intro's cover: probe a few sampled photos' thumbnails and use the
+  // first landscape one, full-bleed. Until one answers, the intro shows over
+  // the blurred backdrop as before.
+  const heroPool = useMemo(() => heroCandidates(items), [items]);
+  useEffect(() => {
+    if (!introOpen || heroUrl || heroPool.length === 0) return;
+    let cancelled = false;
+    const probes = heroPool.map((photo) => {
+      const probe = new window.Image();
+      probe.onload = () => {
+        if (cancelled || probe.naturalWidth <= probe.naturalHeight) return;
+        cancelled = true;
+        setHeroUrl(photo.image_url);
+      };
+      probe.src = photo.thumbnail_url ?? photo.image_url ?? "";
+      return probe;
+    });
+    return () => {
+      cancelled = true;
+      probes.forEach((probe) => { probe.onload = null; });
+    };
+  }, [heroPool, heroUrl, introOpen]);
+
   // The bottom bar's height depends on the caption and attached notes, so the
   // media area reads it from a CSS variable instead of guessing with a fixed
   // padding. Without this a long caption on a phone covers the photo.
@@ -414,6 +558,8 @@ export function JourneyPlayback({
 
   const title = journeyItemTitle(activeItem);
   const date = formatDateTime(itemDate(activeItem));
+  // Late-night photos at this latitude are often in full daylight; say so.
+  const light = activeItem.kind === "photo" && activeItem.coord ? nightLight(activeItem.primary.taken_at, activeItem.coord.lat, activeItem.coord.lng) : null;
   const canEditCaption = activeItem.kind === "photo" && photoCanEdit(activeItem.primary, currentUserId, isAdmin);
   const progress = items.length <= 1 ? 1 : activeIndex / (items.length - 1);
   // The backdrop is heavily blurred, so the small thumbnail is indistinguishable
@@ -460,6 +606,16 @@ export function JourneyPlayback({
     setIntroOpen(false);
     onSelectIndex(0);
     setIsPlaying(true);
+    openChapter(items[0]);
+  }
+
+  // The first day's chapter when a journey begins (stepping into later days
+  // opens theirs automatically).
+  // The ref is seeded with the item the chapter opens on, so stepping to it
+  // (on replay) opens nothing more, and the next step still compares against it.
+  function openChapter(item: JourneyItem | undefined = activeItem) {
+    previousItemRef.current = item ?? null;
+    setInterlude({ kind: "chapter", dayId: item?.dayId ?? null, durationMs: CHAPTER_MS, key: performance.now() });
   }
 
   function touchStart(event: React.TouchEvent) {
@@ -497,8 +653,8 @@ export function JourneyPlayback({
       {backgroundUrl ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element -- User-uploaded image URLs are rendered directly in the viewer. */}
-          <img src={backgroundUrl} alt="" aria-hidden decoding="async" className="absolute inset-0 h-full w-full scale-110 object-cover opacity-35 blur-2xl" />
-          <div className="absolute inset-0 bg-stone-950/46" />
+          <img key={backgroundUrl} src={backgroundUrl} alt="" aria-hidden decoding="async" className="journey-backdrop-in absolute inset-0 h-full w-full scale-110 object-cover opacity-55 blur-2xl saturate-150" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(12,10,9,0.25),rgba(12,10,9,0.7))]" />
         </>
       ) : (
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_24%_16%,rgba(231,161,61,0.22),transparent_32%),linear-gradient(135deg,#1c1917,#263f38_58%,#0c1715)]" />
@@ -510,8 +666,11 @@ export function JourneyPlayback({
             <X className="h-5 w-5" />
           </IconButton>
           <div className="min-w-0">
-            <div className="truncate text-xs font-bold uppercase tracking-[0.14em] text-white/65">Journey Mode</div>
-            <div className="truncate text-sm font-bold text-white">{dayLabel(days, activeItem.dayId)}</div>
+            <div className="truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-white/55">Journey Mode</div>
+            <div className="flex min-w-0 items-center gap-2 font-serif text-base font-semibold text-white">
+              {activeDayColor ? <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: activeDayColor }} /> : null}
+              <span className="truncate">{dayLabel(days, activeItem.dayId)}</span>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -533,17 +692,26 @@ export function JourneyPlayback({
         // The overlay scrolls and the inner wrapper centres only while there is
         // room, so a long description on a short screen never pushes the
         // buttons out of reach.
-        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-intro-title" className="absolute inset-0 z-50 overflow-y-auto overscroll-contain bg-stone-950/72 backdrop-blur-md">
-          <div className="flex min-h-full items-center justify-center px-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(4rem+env(safe-area-inset-top))]">
+        <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="journey-intro-title" className={cn("absolute inset-0 z-50 overflow-y-auto overscroll-contain", heroUrl ? "bg-stone-950" : "bg-stone-950/72 backdrop-blur-md")}>
+          {/* The cover: one of the trip's own landscapes, sharp and full-bleed,
+              drifting slowly behind the title. */}
+          {heroUrl ? (
+            <div aria-hidden className="pointer-events-none fixed inset-0 overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element -- User-uploaded image URLs are rendered directly in the viewer. */}
+              <img src={heroUrl} alt="" decoding="async" className="journey-photo-in journey-drift-a h-full w-full object-cover" />
+              <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(12,10,9,0.35),rgba(12,10,9,0.25)_40%,rgba(12,10,9,0.85))]" />
+            </div>
+          ) : null}
+          <div className="relative flex min-h-full items-center justify-center px-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(4rem+env(safe-area-inset-top))]">
             <section className="max-w-xl text-center">
-              <div className="text-xs font-black uppercase tracking-[0.24em] text-ember-400">A shared travel story</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.28em] text-ember-300 [text-shadow:0_1px_12px_rgba(0,0,0,0.5)]">A shared travel story</div>
               {/* h2, not h1 — the app already has an h1 for the trip title (DaySidebar),
                   and this overlay is transient. */}
-              <h2 id="journey-intro-title" className="mt-4 font-serif text-4xl font-semibold sm:text-5xl md:text-7xl">{trip?.title ?? "this trip"}</h2>
-              {trip?.description ? <p className="mx-auto mt-5 max-w-lg text-base leading-7 text-white/75">{trip.description}</p> : null}
-              <p className="mt-3 text-sm text-white/55">{items.length} moments across {days.length} days</p>
+              <h2 id="journey-intro-title" className="mt-4 font-serif text-5xl font-semibold leading-[0.95] [text-shadow:0_4px_40px_rgba(0,0,0,0.45)] sm:text-6xl md:text-8xl">{trip?.title ?? "this trip"}</h2>
+              {trip?.description ? <p className="mx-auto mt-5 max-w-lg text-lg leading-7 text-white/85 [text-shadow:0_1px_16px_rgba(0,0,0,0.5)]">{trip.description}</p> : null}
+              <p className="mt-3 text-sm text-white/65">{items.length} moments across {days.length} days</p>
               <div className="mt-8 flex flex-wrap justify-center gap-3">
-                <Button onClick={() => { setIntroOpen(false); setIsPlaying(true); }} className="rounded-full px-6"><CirclePlay className="h-5 w-5" /> Begin journey</Button>
+                <Button onClick={() => { setIntroOpen(false); setIsPlaying(true); openChapter(); }} className="rounded-full px-6"><CirclePlay className="h-5 w-5" /> Begin journey</Button>
                 <button type="button" onClick={onClose} className="rounded-full bg-white/12 px-5 py-3 font-bold text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25">Return to map</button>
               </div>
             </section>
@@ -575,8 +743,10 @@ export function JourneyPlayback({
 
       {/* Media fills whatever the header and the measured bottom bar leave
           free; the 2rem lets it run into the bar's transparent gradient top. */}
-      <div className="relative z-10 flex h-full items-center justify-center px-2 pb-[calc(var(--journey-bar-height,13rem)-2rem)] pt-[calc(4.25rem+env(safe-area-inset-top))] md:px-16 md:pt-24">
-        {videoUrl ? (
+      <div className={cn("relative z-10 flex h-full items-center justify-center px-2 pb-[calc(var(--journey-bar-height,13rem)-2rem)] pt-[calc(4.25rem+env(safe-area-inset-top))] transition-[opacity,transform] duration-700 ease-out motion-reduce:transition-none md:px-16 md:pt-24", showInterlude && "pointer-events-none scale-[0.97] opacity-0")}>
+        {/* A video waits out the interlude unmounted, so it starts from the top
+            once the screen is back. */}
+        {videoUrl && showInterlude ? null : videoUrl ? (
           <div className="flex h-full w-full items-center justify-center">
             <video
               ref={videoRef}
@@ -607,10 +777,7 @@ export function JourneyPlayback({
             />
           </div>
         ) : imageUrl ? (
-          <div className="flex h-full w-full items-center justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element -- User-uploaded image URLs are rendered directly in the viewer. */}
-            <img src={imageUrl} alt={title} decoding="async" fetchPriority="high" className="max-h-full max-w-full rounded-lg object-contain shadow-[0_36px_100px_rgba(0,0,0,0.45)]" />
-          </div>
+          <JourneyPhoto url={imageUrl} alt={title} index={activeIndex} />
         ) : (
           <article className="mx-auto max-w-2xl rounded-xl border border-white/15 bg-paper/94 p-6 text-stone-950 shadow-[0_36px_100px_rgba(0,0,0,0.3)]">
             <div className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-teal-800">{itemKindLabel(activeItem)}</div>
@@ -627,19 +794,48 @@ export function JourneyPlayback({
         <ChevronRight className="h-6 w-6" />
       </IconButton>
 
+      {showInterlude && interlude.kind === "chapter" ? (() => {
+        const day = days.find((entry) => entry.id === interlude.dayId) ?? null;
+        const color = day ? dayColors.get(day.id) : null;
+        const stats = chapterStats(items, routes, interlude.dayId);
+        return (
+          // A title card over the map stage: which day this is, what it was,
+          // how far it went. Purely presentational; the journey continues.
+          <div key={interlude.key} aria-live="polite" className="journey-chapter-in pointer-events-none absolute inset-0 z-[25] flex items-end bg-[linear-gradient(0deg,rgba(12,10,9,0.9),rgba(12,10,9,0.5)_50%,transparent_85%)] px-6 pb-[calc(var(--journey-bar-height,13rem)+0.5rem)] md:px-16">
+            <div className="max-w-3xl">
+              <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.28em] text-white/70">
+                <span aria-hidden className="h-px w-10" style={{ backgroundColor: color ?? "#e7a13d" }} />
+                {day ? `Day ${day.day_number}` : "Unsorted"}{day?.date ? ` · ${formatDateOnly(day.date)}` : ""}
+              </div>
+              <h2 className="mt-4 font-serif text-5xl font-semibold leading-[0.95] text-white [text-shadow:0_4px_40px_rgba(0,0,0,0.4)] md:text-7xl">{day?.title ?? "Along the way"}</h2>
+              <div className="journey-chapter-line">
+                {day?.summary ? <p className="mt-4 max-w-xl text-lg leading-7 text-white/85">{day.summary}</p> : null}
+                {stats ? <p className="mt-3 text-sm font-medium text-white/60">{stats}</p> : null}
+              </div>
+            </div>
+          </div>
+        );
+      })() : null}
+
       {/* On desktop the mini-map sits in the bottom-right corner; JourneyMiniMap
           publishes its width so the bar can keep its controls clear of it. */}
       <div ref={barRef} className={cn("absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-stone-950 via-stone-950/86 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-12 md:px-6 md:pb-5 md:pt-16", mapVisible && "md:pr-[calc(var(--journey-minimap-width,18rem)+3rem)]")}>
         <div className="mx-auto max-w-5xl">
           <div className="mb-4 max-w-2xl">
-            <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-white/58">
+            <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium text-white/60">
               <span>{itemKindLabel(activeItem)}</span>
+              <span aria-hidden>·</span>
               <span>{date}</span>
-              {activeItem.kind === "photo" && activeItem.primary.uploader_name ? <span>by {friendlyPersonName(activeItem.primary.uploader_name)}</span> : null}
-              {!activeItem.coord ? <span>location unknown</span> : null}
+              {activeItem.kind === "photo" && activeItem.primary.uploader_name ? <><span aria-hidden>·</span><span>by {friendlyPersonName(activeItem.primary.uploader_name)}</span></> : null}
+              {!activeItem.coord ? <><span aria-hidden>·</span><span>location unknown</span></> : null}
+              {light ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-ember-400/15 px-2 py-0.5 font-semibold text-ember-300 ring-1 ring-inset ring-ember-300/30" title={light === "midnight-sun" ? "The sun was still above the horizon" : "The sun had set, but it never got dark"}>
+                  <Sun className="h-3 w-3" /> {nightLightLabel(light)}
+                </span>
+              ) : null}
             </div>
             {activeItem.kind === "photo" && !activeItem.primary.caption && !canEditCaption && activeItem.attached.length === 0 ? null : activeItem.kind === "photo" ? (
-              <div className="max-h-[40vh] overflow-y-auto rounded-xl border border-white/15 bg-stone-950/45 p-3 backdrop-blur md:max-w-xl">
+              <div className={cn("max-h-[40vh] overflow-y-auto md:max-w-2xl", editingCaption && "rounded-xl border border-white/15 bg-stone-950/45 p-3 backdrop-blur")}>
                 {editingCaption ? (
                   <div className="space-y-2">
                     <textarea value={captionDraft} onChange={(event) => setCaptionDraft(event.target.value)} className="min-h-20 w-full rounded-lg border border-white/15 bg-white/95 px-3 py-2 text-sm text-stone-950 outline-none focus:ring-4 focus:ring-white/25" placeholder="Caption" />
@@ -653,7 +849,7 @@ export function JourneyPlayback({
                 ) : (
                   <div className="flex items-start gap-3">
                     {activeItem.primary.caption ? (
-                      <p className="min-w-0 flex-1 text-sm leading-6 text-white">{activeItem.primary.caption}</p>
+                      <p className="min-w-0 flex-1 font-serif text-xl leading-snug text-white [text-shadow:0_2px_18px_rgba(0,0,0,0.5)] md:text-2xl">{activeItem.primary.caption}</p>
                     ) : (
                       // Only reachable by people who can edit (see the guard
                       // above), so the empty state is an action, not a shrug.
@@ -773,7 +969,7 @@ export function JourneyPlayback({
         </div>
       </div>
 
-      {mapVisible ? <JourneyMiniMap routes={routes} days={days} items={items} activeItem={activeItem} onInteraction={noteInteraction} onSelectItem={onSelectItem} /> : null}
+      {mapVisible ? <JourneyMiniMap routes={routes} days={days} items={items} activeItem={activeItem} onInteraction={noteInteraction} onSelectItem={onSelectItem} stage={showInterlude} /> : null}
     </div>
   );
 }

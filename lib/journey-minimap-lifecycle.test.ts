@@ -23,6 +23,9 @@ const maps = vi.hoisted(() => {
     getStyle() { return undefined; }
     getSource() { return undefined; }
     addSource() {}
+    getLayer() { return undefined; }
+    setPaintProperty() {}
+    setFog() {}
     setTerrain() {}
     resize() {}
     remove() { this.emit("remove"); }
