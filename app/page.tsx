@@ -510,8 +510,10 @@ export default function Home() {
       return;
     }
     // Tilted into the terrain, keeping the current heading, so the day's
-    // route reads against its mountains rather than as a flat line.
-    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, pitch: DAY_FRAMING_PITCH, bearing: map.getBearing(), duration: flyIn ? OPENING_FLIGHT_MS : 800 });
+    // route reads against its mountains rather than as a flat line. Linear
+    // because fitBounds otherwise flies (zooms out, then back in), which in
+    // 800ms reads as the camera bobbing up and down between days.
+    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, pitch: DAY_FRAMING_PITCH, bearing: map.getBearing(), duration: flyIn ? OPENING_FLIGHT_MS : 800, linear: !flyIn });
   }, [map, selectedDayId, sidebarOpen]);
 
   function startPanel(next: "photo" | "note" | "route") {
@@ -577,7 +579,7 @@ export default function Home() {
     ];
     const bounds = coordinateBounds(coords);
     if (!bounds) return;
-    map.fitBounds([bounds.sw, bounds.ne], { padding: mapFramingPadding(), maxZoom: 14, duration: 800 });
+    map.fitBounds([bounds.sw, bounds.ne], { padding: mapFramingPadding(), maxZoom: 14, duration: 800, linear: true });
   }
 
   async function deleteFromMap(kind: MapItemKind, id: string) {
