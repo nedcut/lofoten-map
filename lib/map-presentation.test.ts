@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  markerOverlapWinners,
   PHOTO_CLUSTER_MAX_ZOOM,
   PHOTO_CLUSTER_RADIUS,
   PHOTO_MARKER_OVERVIEW_ZOOM,
@@ -58,5 +59,39 @@ describe("clusterTapZoomsIn", () => {
     expect(clusterTapZoomsIn(14, 14)).toBe(false);
     expect(clusterTapZoomsIn(14, 14.5)).toBe(false);
     expect(clusterTapZoomsIn(14, 13.8)).toBe(false);
+  });
+});
+
+describe("markerOverlapWinners", () => {
+  it("keeps markers that are far enough apart", () => {
+    const kept = markerOverlapWinners([
+      { key: "a", x: 0, y: 0, count: 3 },
+      { key: "b", x: 40, y: 0, count: 2 },
+    ], 32);
+    expect([...kept].sort()).toEqual(["a", "b"]);
+  });
+
+  it("keeps the bigger cluster of an overlapping pair", () => {
+    const kept = markerOverlapWinners([
+      { key: "small", x: 0, y: 100, count: 2 },
+      { key: "big", x: 10, y: 90, count: 9 },
+    ], 32);
+    expect([...kept]).toEqual(["big"]);
+  });
+
+  it("breaks a count tie toward the nearer marker", () => {
+    const kept = markerOverlapWinners([
+      { key: "far", x: 0, y: 50, count: 4 },
+      { key: "near", x: 5, y: 60, count: 4 },
+    ], 32);
+    expect([...kept]).toEqual(["near"]);
+  });
+
+  it("keeps a pinned marker without hiding its neighbours", () => {
+    const kept = markerOverlapWinners([
+      { key: "dragged", x: 0, y: 0, count: 1, pinned: true },
+      { key: "cluster", x: 4, y: 4, count: 12 },
+    ], 32);
+    expect([...kept].sort()).toEqual(["cluster", "dragged"]);
   });
 });

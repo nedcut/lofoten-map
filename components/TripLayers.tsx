@@ -6,7 +6,7 @@ import { canManageItem } from "@/lib/access";
 import { dayColorFor } from "@/lib/day-colors";
 import { friendlyPersonName } from "@/lib/display-name";
 import { noteFeatureCollection, photoFeatureCollection, placeFeatureCollection, routeFeatureCollection } from "@/lib/geo";
-import { PHOTO_CLUSTER_MAX_ZOOM, PHOTO_CLUSTER_RADIUS, clusterTapZoomsIn, photoMarkerPresentation } from "@/lib/map-presentation";
+import { MARKER_OVERLAP_PX, PHOTO_CLUSTER_MAX_ZOOM, PHOTO_CLUSTER_RADIUS, clusterTapZoomsIn, markerOverlapWinners, photoMarkerPresentation } from "@/lib/map-presentation";
 import { MOBILE_SHEET_HEIGHT_VAR } from "@/components/MobileSheet";
 import { formatDateTime } from "@/lib/utils";
 import type { Day, Note, Photo, Place, RouteSegment } from "@/types/trip";
@@ -574,9 +574,22 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         projected.y >= -margin &&
         projected.x <= canvas.clientWidth + margin &&
         projected.y <= bottomLimit;
+      // Once the map has settled with the photos loaded, a marker inside the
+      // visible map that matched no feature belongs to a cluster that has
+      // since split or merged; keeping it left a stale print on top of its
+      // successors. Mid-motion it is kept, so markers don't blink while the
+      // clusters re-form.
+      const settled = !activeMap.isMoving() && activeMap.isSourceLoaded("photos");
+      const inVisibleMap = (projected: { x: number; y: number }) =>
+        projected.x >= 0 &&
+        projected.y >= 0 &&
+        projected.x <= canvas.clientWidth &&
+        projected.y <= canvas.clientHeight - sheetInset();
       const setMarkerDepth = (entry: MarkerEntry, projected: { y: number }) => {
         entry.element.style.setProperty("--marker-depth", String(Math.max(0, Math.round(projected.y))));
       };
+      type Candidate = { key: string; photo: Photo; coordinates: [number, number]; projected: { x: number; y: number }; isCluster: boolean; clusterId: number; count: number };
+      const candidates: Candidate[] = [];
       for (const feature of features) {
         if (!feature.geometry || feature.geometry.type !== "Point") continue;
         const coordinates = feature.geometry.coordinates as [number, number];
@@ -595,6 +608,30 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         if (seen.has(key)) key = `cluster-${clusterId}`;
         if (seen.has(key)) continue;
         seen.add(key);
+        candidates.push({ key, photo, coordinates, projected, isCluster, clusterId, count });
+      }
+
+      // Clustering works on a flat pixel grid, so two neighbouring clusters
+      // can still land almost on top of each other on screen (more so on the
+      // tilted map, where distance compresses toward the horizon). Their
+      // prints and count tags then pile into an unreadable heap. Keep the
+      // bigger (then nearer) of any such pair; the other fades out until a
+      // zoom pulls them apart. A photo being dragged is always kept.
+      const kept = markerOverlapWinners(candidates.map((candidate) => ({
+        key: candidate.key,
+        x: candidate.projected.x,
+        y: candidate.projected.y,
+        count: candidate.count,
+        pinned: candidate.key === draggingKey,
+      })), MARKER_OVERLAP_PX);
+      const hidden = new Set<string>();
+
+      for (const { key, photo, coordinates, projected, isCluster, clusterId, count } of candidates) {
+        if (!kept.has(key)) {
+          hidden.add(key);
+          seen.delete(key);
+          continue;
+        }
         let entry = markers.get(key);
         if (!entry) {
           entry = createEntry(key, photo, coordinates);
@@ -618,7 +655,7 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       for (const [key, entry] of markers) {
         if (seen.has(key) || key === draggingKey) continue;
         const projected = activeMap.project(entry.coordinates);
-        if (inKeepAliveArea(projected)) {
+        if (!hidden.has(key) && inKeepAliveArea(projected) && !(settled && inVisibleMap(projected))) {
           if (entry.leaveTimer) {
             window.clearTimeout(entry.leaveTimer);
             entry.leaveTimer = 0;
