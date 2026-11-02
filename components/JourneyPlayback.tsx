@@ -160,7 +160,7 @@ function JourneyPhoto({ url, alt, index }: { url: string; alt: string; index: nu
     const id = window.setTimeout(() => setPrevious(null), 750);
     return () => window.clearTimeout(id);
   }, [ready, previous]);
-  const frame = "absolute inset-0 m-auto max-h-full max-w-full rounded-lg shadow-[0_36px_100px_rgba(0,0,0,0.5)]";
+  const frame = "absolute inset-0 m-auto max-h-full max-w-full rounded-lg shadow-photo";
   return (
     <div className="relative h-full w-full">
       {previous && previous !== current ? (
@@ -779,13 +779,13 @@ export function JourneyPlayback({
                 if (!isPlayingRef.current) return;
                 scheduleVideoAdvance(5000);
               }}
-              className="max-h-full max-w-full rounded-lg object-contain shadow-[0_36px_100px_rgba(0,0,0,0.45)]"
+              className="max-h-full max-w-full rounded-lg object-contain shadow-photo"
             />
           </div>
         ) : imageUrl ? (
           <JourneyPhoto url={imageUrl} alt={title} index={activeIndex} />
         ) : (
-          <article className="mx-auto max-w-2xl rounded-xl border border-white/15 bg-paper/94 p-6 text-stone-950 shadow-[0_36px_100px_rgba(0,0,0,0.3)]">
+          <article className="mx-auto max-w-2xl rounded-xl border border-white/15 bg-paper/94 p-6 text-stone-950 shadow-photo">
             <div className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-teal-800">{itemKindLabel(activeItem)}</div>
             <h2 className="font-serif text-3xl font-semibold leading-tight">{title}</h2>
             {activeItem.kind === "place" && activeItem.primary.description ? <p className="mt-4 text-sm leading-6 text-stone-700">{activeItem.primary.description}</p> : null}

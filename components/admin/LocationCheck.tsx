@@ -35,7 +35,7 @@ function OutlierRow({ outlier, isSaving, pinned, onMove, onDismiss, onHover, onS
           // eslint-disable-next-line @next/next/no-img-element -- Existing remote URLs come from user uploads.
           <img src={photo.thumbnail_url ?? photo.image_url ?? ""} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full items-center justify-center text-[10px] font-bold text-stone-500">{photo.media_type === "video" ? "Video" : "Photo"}</div>
+          <div className="flex h-full items-center justify-center text-[11px] font-bold text-stone-500">{photo.media_type === "video" ? "Video" : "Photo"}</div>
         )}
       </div>
       <div className="min-w-0 space-y-1.5">
