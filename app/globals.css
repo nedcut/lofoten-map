@@ -51,6 +51,13 @@ body {
   font-variation-settings: "SOFT" 50;
 }
 
+/* A thin, track-less scrollbar for panels floating over the map, so a
+   classic grey gutter doesn't cut down the edge of a frosted card. */
+.scroll-quiet {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(120 113 108 / 0.35) transparent;
+}
+
 /* Slow drift on the active Journey hero slide — ambient motion that hints the
    trip can be played. Disabled for reduced-motion users. Lives here (not in the
    map overrides) because the hero card renders independently of the map. */

@@ -218,7 +218,7 @@ export function MobileSheet(props: MobileSheetProps) {
           <div className={cn("grid transition-[grid-template-rows] duration-300 ease-out", expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
             <div className="overflow-hidden">
               {expanded ? (
-                <div className="max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
+                <div className="scroll-quiet max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
                   {props.journey ? (
                     <JourneyHeroCard
                       photos={props.journey.photos}
