@@ -270,6 +270,9 @@ export function JourneyPlayback({
     const activePx = active ? toPx(active.left) : null;
     let lastLabelledPx = -Infinity;
     for (const tick of dayTicks) {
+      // Undated items get a hollow, unlabelled dot: a "—" label read as a
+      // glitch and took the slot from the real day beside it.
+      if (!tick.day) continue;
       const px = toPx(tick.left);
       const isActive = tick === active;
       if (!isActive && (px - lastLabelledPx < minGapPx || (activePx !== null && Math.abs(activePx - px) < minGapPx))) continue;
@@ -742,8 +745,11 @@ export function JourneyPlayback({
       ) : null}
 
       {/* Media fills whatever the header and the measured bottom bar leave
-          free; the 2rem lets it run into the bar's transparent gradient top. */}
-      <div className={cn("relative z-10 flex h-full items-center justify-center px-2 pb-[calc(var(--journey-bar-height,13rem)-2rem)] pt-[calc(4.25rem+env(safe-area-inset-top))] transition-[opacity,transform] duration-700 ease-out motion-reduce:transition-none md:px-16 md:pt-24", showInterlude && "pointer-events-none scale-[0.97] opacity-0")}>
+          free; the 2rem lets it run into the bar's transparent gradient top.
+          On desktop the docked mini-map's column is kept clear too, so it
+          never sits on the photo. Landscape shots are height-bound there, so
+          the reserved column rarely costs the photo any size. */}
+      <div className={cn("relative z-10 flex h-full items-center justify-center px-2 pb-[calc(var(--journey-bar-height,13rem)-2rem)] pt-[calc(4.25rem+env(safe-area-inset-top))] transition-[opacity,transform] duration-700 ease-out motion-reduce:transition-none md:px-16 md:pt-24", mapVisible && "md:pr-[calc(var(--journey-minimap-width,18rem)+3rem)]", showInterlude && "pointer-events-none scale-[0.97] opacity-0")}>
         {/* A video waits out the interlude unmounted, so it starts from the top
             once the screen is back. */}
         {videoUrl && showInterlude ? null : videoUrl ? (
@@ -942,9 +948,13 @@ export function JourneyPlayback({
                     className="pointer-events-none absolute top-0 flex -translate-x-1/2 flex-col items-center"
                     style={{ left: `${left}%` }}
                   >
-                    <span className={cn("h-4 w-4 rounded-full border-2 border-stone-950 shadow transition-transform", isActiveDay && "scale-110")} style={{ backgroundColor: color }} />
-                    {labelledTicks.has(index) ? (
-                      <span className={cn("mt-0.5 text-[10px] font-bold uppercase tabular-nums leading-none", isActiveDay ? "text-white" : "text-white/55")}>{day ? `D${day.day_number}` : "—"}</span>
+                    {day ? (
+                      <span className={cn("h-4 w-4 rounded-full border-2 border-stone-950 shadow transition-transform", isActiveDay && "scale-110")} style={{ backgroundColor: color }} />
+                    ) : (
+                      <span className={cn("h-4 w-4 rounded-full border-2 border-white/45 bg-stone-950 transition-transform", isActiveDay && "scale-110 border-white")} />
+                    )}
+                    {day && labelledTicks.has(index) ? (
+                      <span className={cn("mt-0.5 text-[11px] font-bold uppercase tabular-nums leading-none", isActiveDay ? "text-white" : "text-white/55")}>D{day.day_number}</span>
                     ) : null}
                   </span>
                 );
