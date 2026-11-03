@@ -53,6 +53,8 @@ const ManualRoutePanel = dynamic(() => import("@/components/ManualRoutePanel").t
 const ProfilePanel = dynamic(() => import("@/components/ProfilePanel").then((mod) => mod.ProfilePanel));
 const UploadPhotoPanel = dynamic(() => import("@/components/UploadPhotoPanel").then((mod) => mod.UploadPhotoPanel));
 
+const PANEL_CLICK_MODE = { photo: "place-photo", note: "add-note", route: "draw-route" } as const satisfies Record<"photo" | "note" | "route", MapClickMode>;
+
 // Padding for fitBounds so framed content stays clear of the chrome. On phones
 // the bottom sheet's measured collapsed height (published by MobileSheet as a
 // CSS variable) replaces a guessed constant; on desktop the floating sidebar's
@@ -121,7 +123,6 @@ export default function Home() {
   });
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const [layerVisibility, setLayerVisibility] = useState({ photos: true, notes: true, routes: true });
-  const [clickMode, setClickMode] = useState<MapClickMode>("idle");
   const [pendingCoordinate, setPendingCoordinate] = useState<LngLat | null>(null);
   const [routeDraftPoints, setRouteDraftPoints] = useState<LngLat[]>([]);
   const [map, setMap] = useState<MapboxMap | null>(null);
@@ -191,8 +192,10 @@ export default function Home() {
   }, [data.photos]);
   const selectedDay = useMemo(() => data.days.find((day) => day.id === selectedDayId) ?? null, [data.days, selectedDayId]);
   // The selected day read as a story. Only once the day itself is known, so a
-  // ?story=1 link waits for the trip to load.
-  const storyOpen = storyRequested && selectedDay !== null;
+  // ?story=1 link waits for the trip to load. A creation panel takes the
+  // story's screen edge, so it wins if history navigation brings ?story=1
+  // back while one is open; the story returns when the panel closes.
+  const storyOpen = storyRequested && selectedDay !== null && !panel;
   const storyItems = useMemo(() => (selectedDayId ? allJourneyItems.filter((item) => item.dayId === selectedDayId) : []), [allJourneyItems, selectedDayId]);
   // The entry the story is reading; the map eases to it.
   const [storyActiveId, setStoryActiveId] = useState<string | null>(null);
@@ -271,7 +274,6 @@ export default function Home() {
 
   const closePanel = useCallback(() => {
     setPanel(null);
-    setClickMode("idle");
     setPendingCoordinate(null);
     setRouteDraftPoints([]);
   }, []);
@@ -322,6 +324,9 @@ export default function Home() {
     : null;
   const routeDraftDistance = useMemo(() => routeDistanceMeters(routeDraftPoints), [routeDraftPoints]);
   const mapActionsEnabled = !mapUnavailable;
+  // What a map tap does follows from the open panel. Derived, not stored, so
+  // it comes back on its own when a failed map recovers via Retry.
+  const clickMode: MapClickMode = panel && mapActionsEnabled ? PANEL_CLICK_MODE[panel] : "idle";
   const adminData = isAdmin
     ? {
       trip: data.trip,
@@ -483,7 +488,6 @@ export default function Home() {
   const handleMapUnavailable = useCallback(() => {
     setMap(null);
     setMapUnavailable(true);
-    setClickMode("idle");
     setPendingCoordinate(null);
     setRouteDraftPoints([]);
     // Media selection and draft recovery work without Mapbox; only workflows
@@ -573,17 +577,13 @@ export default function Home() {
 
   function startPanel(next: "photo" | "note" | "route") {
     if (!mapActionsEnabled && next !== "photo") return;
-    // The panels take the same screen edge as the story on phones.
-    if (storyOpen) closeStory();
+    // The panels take the same screen edge as the story on phones, and they
+    // replace an open editor rather than stacking beside it.
+    if (storyRequested) closeStory();
+    if (editTargetRef) closeEditItem();
     setPanel(next);
     setPendingCoordinate(null);
-    if (next === "route") {
-      setRouteDraftPoints([]);
-      setClickMode("draw-route");
-    } else {
-      setRouteDraftPoints([]);
-      setClickMode(next === "photo" && mapActionsEnabled ? "place-photo" : next === "note" ? "add-note" : "idle");
-    }
+    setRouteDraftPoints([]);
   }
 
   // Opened from a map popup. RLS enforces who may write; the popup only shows the
