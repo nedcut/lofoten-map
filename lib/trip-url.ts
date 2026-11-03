@@ -43,6 +43,8 @@ export type TripUrlState = {
   day: string | null;
   journey: string | null;
   item: string | null;
+  /** "1" while the selected day is open as a story. Ignored without a day. */
+  story: string | null;
 };
 
 export function readTripUrlState(href: string): TripUrlState {
@@ -51,12 +53,13 @@ export function readTripUrlState(href: string): TripUrlState {
     day: params.get("day"),
     journey: params.get("journey"),
     item: params.get("item"),
+    story: params.get("story"),
   };
 }
 
 export function applyTripUrlState(href: string, patch: Partial<TripUrlState>, mode: "push" | "replace" = "replace"): string {
   const url = new URL(href);
-  for (const key of ["day", "journey", "item"] as const) {
+  for (const key of ["day", "journey", "item", "story"] as const) {
     if (!(key in patch)) continue;
     const value = patch[key];
     if (value) url.searchParams.set(key, value);

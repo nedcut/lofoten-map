@@ -5,11 +5,13 @@ import dynamic from "next/dynamic";
 // into the initial bundle and defeat MapView's dynamic() split.
 import type { Map as MapboxMap } from "mapbox-gl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Loader2, PanelLeftOpen, Play, Share2, Sparkles, UserRound } from "lucide-react";
+import { AlertCircle, Camera, FileText, Loader2, PanelLeftOpen, PenLine, Play, Share2, Sparkles, UserRound } from "lucide-react";
 import { collectItemCoordinates, coordinateBounds, DAY_FRAMING_PITCH, lofotenOpeningView, routeDistanceMeters } from "@/lib/geo";
 import { DayDot, DaySidebar, SIDEBAR_INSET_VAR, SIDEBAR_OPEN_INSET_PX, sidebarInset } from "@/components/DaySidebar";
 import { MobileSheet, mobileSheetHeight } from "@/components/MobileSheet";
 import { StatusPill } from "@/components/StatusPill";
+import { DayStory, STORY_INSET_PX } from "@/components/DayStory";
+import { AddMenu, type AddAction } from "@/components/AddMenu";
 import { ClusterRelivePill } from "@/components/ClusterRelivePill";
 import { HeaderPill, PillButton } from "@/components/ui/HeaderPill";
 import type { MapItemKind } from "@/components/TripLayers";
@@ -59,6 +61,23 @@ function mapFramingPadding() {
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
   if (!isMobile) return { top: 80, right: 80, bottom: 80, left: 80 + sidebarInset() };
   return { top: 96, right: 48, bottom: mobileSheetHeight() + 48, left: 48 };
+}
+
+// Frame a day's routes, photos and pins, tilted into the terrain and keeping
+// the current heading so the route reads against its mountains rather than
+// as a flat line. Linear because fitBounds otherwise flies (zooms out, then
+// back in), which in 800ms reads as the camera bobbing between days.
+function frameDay(map: MapboxMap, items: Parameters<typeof collectItemCoordinates>[0], flyIn: boolean) {
+  const coords = collectItemCoordinates(items);
+  if (coords.length === 0) return;
+  const padding = mapFramingPadding();
+  const bounds = coordinateBounds(coords);
+  if (!bounds) return;
+  if (bounds.diagonalMeters < 1) {
+    map.easeTo({ center: bounds.center, zoom: 13.5, pitch: DAY_FRAMING_PITCH, padding, duration: 800 });
+    return;
+  }
+  map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, pitch: DAY_FRAMING_PITCH, bearing: map.getBearing(), duration: flyIn ? OPENING_FLIGHT_MS : 800, linear: !flyIn });
 }
 
 export default function Home() {
@@ -140,7 +159,7 @@ export default function Home() {
     openJourneyFromMap,
     playDayJourney,
   } = useJourneyState({ allJourneyItems });
-  const { selectedDayId, selectDay: selectUrlDay, editTargetRef, openEditItem, closeEditItem } = useTripUrlState({
+  const { selectedDayId, selectDay: selectUrlDay, storyOpen: storyRequested, openStory, closeStory, editTargetRef, openEditItem, closeEditItem } = useTripUrlState({
     data,
     allJourneyItems,
     loading,
@@ -171,6 +190,14 @@ export default function Home() {
     return byDay;
   }, [data.photos]);
   const selectedDay = useMemo(() => data.days.find((day) => day.id === selectedDayId) ?? null, [data.days, selectedDayId]);
+  // The selected day read as a story. Only once the day itself is known, so a
+  // ?story=1 link waits for the trip to load.
+  const storyOpen = storyRequested && selectedDay !== null;
+  const storyItems = useMemo(() => (selectedDayId ? allJourneyItems.filter((item) => item.dayId === selectedDayId) : []), [allJourneyItems, selectedDayId]);
+  // The entry the story is reading; the map eases to it.
+  const [storyActiveId, setStoryActiveId] = useState<string | null>(null);
+  const storyActiveItem = useMemo(() => (storyOpen && storyActiveId ? storyItems.find((item) => item.id === storyActiveId) ?? null : null), [storyActiveId, storyItems, storyOpen]);
+  const storyDayIndex = selectedDay ? data.days.findIndex((day) => day.id === selectedDay.id) : -1;
   // These render a modal overlay on top of the header/sidebar/map, so those
   // stay `inert` (unfocusable, hidden from assistive tech) underneath rather
   // than merely obscured. The note, media, route, and edit panels are
@@ -421,6 +448,16 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handler, true);
   }, [activeJourneyId, authPanelOpen, editTargetRef, panel, profilePanelOpen, stepDay]);
 
+  // Escape closes a story, unless something on top of it owns the key.
+  useEffect(() => {
+    if (!storyOpen || activeJourneyId || panel || editTargetRef || authPanelOpen || profilePanelOpen) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeStory();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeJourneyId, authPanelOpen, closeStory, editTargetRef, panel, profilePanelOpen, storyOpen]);
+
   // While Journey Mode is open the main map is hidden (display:none) behind the
   // full-screen viewer, so only the mini-map renders a live WebGL context. A
   // display:none canvas loses its dimensions, so resize it once we return.
@@ -469,8 +506,8 @@ export default function Home() {
   // (effects run in declaration order), so a toggle re-frames the map into
   // the space that is actually visible.
   useEffect(() => {
-    document.documentElement.style.setProperty(SIDEBAR_INSET_VAR, `${sidebarOpen ? SIDEBAR_OPEN_INSET_PX : 0}px`);
-  }, [sidebarOpen]);
+    document.documentElement.style.setProperty(SIDEBAR_INSET_VAR, `${storyOpen ? STORY_INSET_PX : sidebarOpen ? SIDEBAR_OPEN_INSET_PX : 0}px`);
+  }, [sidebarOpen, storyOpen]);
   useEffect(() => () => { document.documentElement.style.removeProperty(SIDEBAR_INSET_VAR); }, []);
 
   // Center the map on the active day whenever the selection changes: build a
@@ -497,27 +534,47 @@ export default function Home() {
       else map.easeTo({ ...view, duration: 800 });
       return;
     }
-    const coords = collectItemCoordinates(filteredRef.current);
-    if (coords.length === 0) return;
+    frameDay(map, filteredRef.current, flyIn);
+  }, [map, selectedDayId, sidebarOpen, storyOpen]);
 
-    const padding = mapFramingPadding();
-
-    const bounds = coordinateBounds(coords);
-    if (!bounds) return;
-
-    if (bounds.diagonalMeters < 1) {
-      map.easeTo({ center: bounds.center, zoom: 13.5, pitch: DAY_FRAMING_PITCH, padding, duration: 800 });
+  // While a story is read, the map follows it: each entry with a location
+  // brings the camera there, and scrolling back to the day's opening returns
+  // to the whole day. Keyed on the coordinates so a data poll that rebuilds
+  // the same item doesn't tug the camera back after the reader has panned.
+  const storyFocusLng = storyActiveItem?.coord?.lng ?? null;
+  const storyFocusLat = storyActiveItem?.coord?.lat ?? null;
+  const storyFocusedRef = useRef(false);
+  useEffect(() => {
+    if (!map || !storyOpen) {
+      storyFocusedRef.current = false;
       return;
     }
-    // Tilted into the terrain, keeping the current heading, so the day's
-    // route reads against its mountains rather than as a flat line. Linear
-    // because fitBounds otherwise flies (zooms out, then back in), which in
-    // 800ms reads as the camera bobbing up and down between days.
-    map.fitBounds([bounds.sw, bounds.ne], { padding, maxZoom: 14, pitch: DAY_FRAMING_PITCH, bearing: map.getBearing(), duration: flyIn ? OPENING_FLIGHT_MS : 800, linear: !flyIn });
-  }, [map, selectedDayId, sidebarOpen]);
+    if (storyFocusLng === null || storyFocusLat === null) {
+      if (storyFocusedRef.current && !storyActiveId) frameDay(map, filteredRef.current, false);
+      storyFocusedRef.current = false;
+      return;
+    }
+    storyFocusedRef.current = true;
+    map.easeTo({
+      center: [storyFocusLng, storyFocusLat],
+      zoom: Math.min(15, Math.max(map.getZoom(), 13.2)),
+      pitch: DAY_FRAMING_PITCH,
+      padding: mapFramingPadding(),
+      duration: 1400,
+    });
+  }, [map, storyOpen, storyActiveId, storyFocusLng, storyFocusLat]);
+
+  // Contributor tools for the header's Add menu, in the order people reach
+  // for them. Notes and routes need map clicks, so they wait for the map.
+  const addActions: AddAction[] = [];
+  if (canContribute) addActions.push({ key: "photo", label: "Upload media", hint: "Photos and videos place themselves", icon: Camera, onSelect: () => startPanel("photo") });
+  if (canContribute && mapActionsEnabled) addActions.push({ key: "note", label: "Add note", hint: "Pin a thought to the map", icon: FileText, onSelect: () => startPanel("note") });
+  if (isAdmin && mapActionsEnabled) addActions.push({ key: "route", label: "Draw route", hint: "Trace a day's path by hand", icon: PenLine, onSelect: () => startPanel("route") });
 
   function startPanel(next: "photo" | "note" | "route") {
     if (!mapActionsEnabled && next !== "photo") return;
+    // The panels take the same screen edge as the story on phones.
+    if (storyOpen) closeStory();
     setPanel(next);
     setPendingCoordinate(null);
     if (next === "route") {
@@ -600,7 +657,7 @@ export default function Home() {
               the "Trip Logbook" fallback (as DaySidebar's TitleSkeleton avoids). */}
           <Sparkles className="h-3.5 w-3.5 shrink-0 text-ember-500" /> {loading && !data.trip ? <span aria-hidden className="h-3.5 w-28 rounded-full bg-stone-200/80 motion-safe:animate-pulse" /> : <span className="truncate">{tripTitle}</span>}
         </HeaderPill>
-        {!sidebarOpen ? (
+        {!sidebarOpen && !storyOpen ? (
           <PillButton onClick={() => setSidebarOpen(true)} className="hidden font-serif text-base font-semibold text-stone-950 md:inline-flex" aria-label="Show sidebar">
             <PanelLeftOpen className="h-4 w-4 text-stone-500" /> {tripTitle}
           </PillButton>
@@ -609,9 +666,14 @@ export default function Home() {
           {backend && user && !previewReadOnly ? <HeaderPill className="hidden sm:block">{currentMember ? `Signed in ${user.email ?? ""}` : "Signed in · view only"}</HeaderPill> : null}
           {previewReadOnly ? <HeaderPill className="hidden sm:block">Preview · view only</HeaderPill> : null}
           {!backendConfigured ? <HeaderPill className="hidden sm:block">Local demo mode</HeaderPill> : null}
-          <PillButton onClick={startJourney} disabled={journeyItems.length === 0} aria-label="Relive the journey">
-            <Play className="h-3.5 w-3.5 fill-current text-ember-500" /> <span className="hidden sm:inline">Relive</span>
-          </PillButton>
+          <AddMenu actions={addActions} />
+          {/* The sidebar's hero card and the phone sheet's Relive row are the
+              usual way in; this only stands in while the sidebar is hidden. */}
+          {!sidebarOpen && !storyOpen ? (
+            <PillButton onClick={startJourney} disabled={journeyItems.length === 0} aria-label="Relive the journey" className="hidden md:inline-flex">
+              <Play className="h-3.5 w-3.5 fill-current text-ember-500" /> Relive
+            </PillButton>
+          ) : null}
           <PillButton onClick={shareView} aria-label={selectedDay ? `Share Day ${selectedDay.day_number}` : "Share this trip"} title="Copy a link to this view">
             <Share2 className="h-3.5 w-3.5 text-teal-700" /> <span className="hidden sm:inline">Share</span>
           </PillButton>
@@ -640,10 +702,26 @@ export default function Home() {
       {/* The map runs full-bleed on every screen; on desktop the sidebar
           floats over its left edge instead of pushing it into a card. */}
       <div inert={overlayOpen} className="relative z-10 h-full">
-        <div className={cn("absolute bottom-4 left-4 top-4 z-20 hidden min-h-0 transition-[transform,opacity] duration-300 ease-out motion-reduce:transition-none md:block", !sidebarOpen && "pointer-events-none -translate-x-[110%] opacity-0")} inert={!sidebarOpen}><DaySidebar onCollapse={() => setSidebarOpen(false)} trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} dayPhotos={dayPhotos} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
+        <div className={cn("absolute bottom-4 left-4 top-4 z-20 hidden min-h-0 transition-[transform,opacity] duration-300 ease-out motion-reduce:transition-none md:block", (!sidebarOpen || storyOpen) && "pointer-events-none -translate-x-[110%] opacity-0")} inert={!sidebarOpen || storyOpen}><DaySidebar onReadDay={openStory} onCollapse={() => setSidebarOpen(false)} trip={data.trip} days={data.days} dayStats={dayStats} dayColors={dayColors} dayPhotos={dayPhotos} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} journey={journeyEntry} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div>
+        {storyOpen && selectedDay ? (
+          <DayStory
+            key={selectedDay.id}
+            day={selectedDay}
+            color={dayColorFor(dayColors, selectedDay.id)}
+            stats={dayStats.get(selectedDay.id)}
+            items={storyItems}
+            previousDay={storyDayIndex > 0 ? data.days[storyDayIndex - 1] : null}
+            nextDay={storyDayIndex >= 0 && storyDayIndex < data.days.length - 1 ? data.days[storyDayIndex + 1] : null}
+            onSelectDay={selectDay}
+            onClose={closeStory}
+            onPlayDay={playDayJourney}
+            onOpenPhoto={openJourneyFromMap}
+            onActiveItemChange={setStoryActiveId}
+          />
+        ) : null}
         <div className={cn("h-full min-h-0", journeyOpen && "hidden")}>
           <MapView clickMode={clickMode} pendingCoordinate={pendingCoordinate} onMapReady={handleMapReady} onMapUnavailable={handleMapUnavailable} onCoordinatePick={handleCoordinatePick}>
-            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} days={data.days} dayColors={dayColors} visibility={layerVisibility} currentUserId={mutationUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onClusterSelect={setClusterPhotos} onReliveCluster={reliveCluster} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} outlierPreview={outlierOverlay} /> : null}
+            {!mapUnavailable ? <TripLayers map={map} routes={filtered.routes} photos={filtered.photos} notes={filtered.notes} places={filtered.places} days={data.days} dayColors={dayColors} visibility={layerVisibility} currentUserId={mutationUserId} isAdmin={isAdmin} onEditItem={startEditFromMap} onDeleteItem={deleteFromMap} onOpenJourney={openJourneyFromMap} onClusterSelect={setClusterPhotos} onReliveCluster={reliveCluster} onPhotoFocus={setLastFocusedPhotoId} onPhotoBlur={handlePhotoBlur} onMovePhoto={movePhoto} highlightedPhotoId={editTarget?.kind === "photo" ? editTarget.item.id : null} focusPoint={storyActiveItem?.coord ?? null} outlierPreview={outlierOverlay} /> : null}
             {!mapUnavailable ? <RouteDraftLayer map={map} points={routeDraftPoints} /> : null}
             {!mapUnavailable && clusterPhotos && clickMode === "idle" && !journeyOpen ? <ClusterRelivePill photos={clusterPhotos} onRelive={reliveClusterPhotos} onDismiss={dismissClusterPhotos} /> : null}
             {/* Which day the map is filtered to. Sits under the header on
@@ -651,7 +729,7 @@ export default function Home() {
                 top-left corner on desktop. Hidden while a placement prompt
                 occupies the same spot. */}
             {!mapUnavailable && selectedDay && clickMode === "idle" ? (
-              <div className={cn("pointer-events-none absolute left-3 top-16 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-full border border-stone-200/80 bg-paper/92 py-1.5 pl-3 pr-4 text-xs font-bold text-stone-900 shadow-control backdrop-blur md:transition-[left,top] md:duration-300", sidebarOpen ? "md:left-[27rem] md:top-4" : "md:left-6 md:top-[4.25rem]")}>
+              <div className={cn(storyOpen && "md:hidden", "pointer-events-none absolute left-3 top-16 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-full border border-stone-200/80 bg-paper/92 py-1.5 pl-3 pr-4 text-xs font-bold text-stone-900 shadow-control backdrop-blur md:transition-[left,top] md:duration-300", sidebarOpen ? "md:left-[27rem] md:top-4" : "md:left-6 md:top-[4.25rem]")}>
                 <DayDot color={dayColorFor(dayColors, selectedDay.id)} className="h-3 w-3" />
                 <span className="truncate">Day {selectedDay.day_number}{selectedDay.date ? ` · ${formatDateOnly(selectedDay.date)}` : ""}{selectedDay.title ? ` · ${selectedDay.title}` : ""}</span>
               </div>
@@ -659,7 +737,7 @@ export default function Home() {
           </MapView>
         </div>
       </div>
-      {!panel ? <div inert={overlayOpen}><MobileSheet trip={data.trip} loading={loading} days={data.days} dayStats={dayStats} dayColors={dayColors} dayPhotos={dayPhotos} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} onStartPhotoUpload={canContribute ? () => startPanel("photo") : undefined} onStartAddNote={canContribute && mapActionsEnabled ? () => startPanel("note") : undefined} onStartRouteDraw={isAdmin && mapActionsEnabled ? () => startPanel("route") : undefined} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.filter((photo) => photo.media_type !== "video").length, videos: filtered.photos.filter((photo) => photo.media_type === "video").length, notes: filtered.notes.length, places: filtered.places.length }} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div> : null}
+      {!panel && !storyOpen ? <div inert={overlayOpen}><MobileSheet onReadDay={openStory} trip={data.trip} loading={loading} days={data.days} dayStats={dayStats} dayColors={dayColors} dayPhotos={dayPhotos} selectedDayId={selectedDayId} onSelectDay={selectDay} onStepDay={stepDay} layerVisibility={layerVisibility} onLayerVisibilityChange={setLayerVisibility} showLayerControls={mapActionsEnabled} mapAvailable={mapActionsEnabled} journey={journeyEntry} counts={{ routes: filtered.routes.length, photos: filtered.photos.filter((photo) => photo.media_type !== "video").length, videos: filtered.photos.filter((photo) => photo.media_type === "video").length, notes: filtered.notes.length, places: filtered.places.length }} notesPlaces={notesPlacesEntry} adminData={adminData} memberAdmin={memberAdmin} adminRequest={adminRequest} /></div> : null}
       {loading && !backendLoadError ? <StatusPill><Loader2 className="h-4 w-4 motion-safe:animate-spin text-teal-700" /> Loading trip data…</StatusPill> : null}
       {notice && !error ? <StatusPill onDismiss={() => setNotice(null)}>{notice}</StatusPill> : null}
       {shareStatus && !error ? <StatusPill>{shareStatus === "copied" ? "Link copied" : shareStatus === "shared" ? "Link shared" : "Couldn’t copy the link"}</StatusPill> : null}

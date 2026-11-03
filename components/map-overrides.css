@@ -209,6 +209,30 @@
   .lofoten-photo-highlight-ring { animation: none; }
 }
 
+/* The spot a Day story is reading: a soft glow under the marker rather than
+   the editor's pulsing, draggable ring. */
+.lofoten-story-focus {
+  width: 92px;
+  height: 92px;
+  /* Under the photo markers (whose z-index is their screen Y). */
+  z-index: 0;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--color-ember-400) 38%, transparent) 0%, color-mix(in srgb, var(--color-ember-400) 14%, transparent) 55%, transparent 72%);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-ember-400) 55%, transparent);
+  animation: lofoten-story-focus-in 500ms ease-out both;
+}
+
+@keyframes lofoten-story-focus-in {
+  /* Opacity only: Mapbox positions the marker with its transform. */
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lofoten-story-focus { animation: none; }
+}
+
 /* Location-check preview: the flagged photo's time-neighbors and the
    suggested corrected spot. */
 .lofoten-outlier-neighbor {
@@ -266,6 +290,19 @@
   font-variant-numeric: tabular-nums;
   line-height: 1;
   box-shadow: 0 0 0 1px rgba(28, 25, 23, 0.08), 0 3px 8px rgba(28, 25, 23, 0.2);
+}
+
+/* On touch screens the stacks are smaller than a fingertip at the opening
+   zoom, so the count fills with the day's colour to read at a glance. */
+@media (pointer: coarse) {
+  .lofoten-photo-marker-count {
+    min-width: 23px;
+    height: 21px;
+    background: var(--day-accent, var(--color-fjord));
+    color: var(--color-paper);
+    font-size: 0.7rem;
+    box-shadow: 0 0 0 2px var(--color-paper), 0 3px 8px rgba(28, 25, 23, 0.25);
+  }
 }
 
 .lofoten-photo-marker:hover,

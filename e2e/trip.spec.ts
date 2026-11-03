@@ -85,7 +85,7 @@ test.describe("desktop", { tag: "@desktop" }, () => {
   test("journey mode renders the seeded demo photo pipeline", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: /Day 1: Reine arrival/ }).click();
-    await page.getByRole("button", { name: "Relive the journey" }).first().click();
+    await page.getByRole("button", { name: /^Start journey at Day 1 — / }).click();
     await expect(page.getByText("Reine harbor at golden hour")).toBeVisible();
     await expect(page.getByRole("img", { name: "Reine harbor at golden hour" })).toBeVisible();
     const uploaderFilter = page.getByRole("combobox", { name: "Filter journey by uploader" });
@@ -110,6 +110,26 @@ test.describe("desktop", { tag: "@desktop" }, () => {
     await expect(page.getByText("A shared travel story")).toBeHidden();
   });
 
+  test("a selected day opens as a story that links, steps days, and closes", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: /Day 1: Reine arrival/ }).click();
+    await page.getByRole("button", { name: "Read Day 1" }).click();
+    const story = page.getByRole("article", { name: "Reine arrival" });
+    await expect(story.getByText("Reine harbor at golden hour", { exact: true })).toBeVisible();
+    await expect(story.getByText("Sunset light on Reinebringen looked unreal from the harbor.")).toBeVisible();
+    await expect(page).toHaveURL(/day=1&story=1/);
+
+    await story.getByRole("button", { name: /Day 2/ }).click();
+    await expect(page.getByRole("article", { name: "Kjerkfjorden hike" })).toBeVisible();
+    await expect(page).toHaveURL(/day=2&story=1/);
+
+    await page.reload();
+    await expect(page.getByRole("article", { name: "Kjerkfjorden hike" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("article")).toHaveCount(0);
+    await expect(page).not.toHaveURL(/story=/);
+  });
+
   test("journey share confirms the exact deep link was shared", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.goto("/?journey=photo%3Aphoto-demo-1");
@@ -120,7 +140,7 @@ test.describe("desktop", { tag: "@desktop" }, () => {
   test("browser Back exits a Journey opened from the map", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: /Day 1: Reine arrival/ }).click();
-    await page.getByRole("button", { name: "Relive the journey" }).first().click();
+    await page.getByRole("button", { name: /^Start journey at Day 1 — / }).click();
     await expect(page.getByText("Journey Mode")).toBeVisible();
     await page.goBack();
     await expect(page.getByText("Journey Mode")).toBeHidden();

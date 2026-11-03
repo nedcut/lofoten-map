@@ -103,12 +103,14 @@ type Props = {
   // The photo currently open in the editor, marked on the map with a pulsing
   // ring so it's obvious which marker is being edited.
   highlightedPhotoId: string | null;
+  /** The spot a Day story is reading, marked with a soft, non-draggable ring. */
+  focusPoint?: { lng: number; lat: number } | null;
   // A location-check preview: the flagged photo, its time-neighbor group,
   // and the suggested corrected position.
   outlierPreview: { photo: { lng: number; lat: number }; suggested: { lng: number; lat: number }; neighbors: Array<{ lng: number; lat: number }> } | null;
 };
 
-export function TripLayers({ map, routes, photos, notes, places, days, dayColors, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onReliveCluster, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId, outlierPreview }: Props) {
+export function TripLayers({ map, routes, photos, notes, places, days, dayColors, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onReliveCluster, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId, focusPoint = null, outlierPreview }: Props) {
   // Popup click handlers are attached once (keyed on [map]); this ref lets those
   // long-lived closures read the latest permissions/callbacks without re-binding.
   const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onReliveCluster, onPhotoFocus, onPhotoBlur, onMovePhoto });
@@ -820,6 +822,20 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       marker.remove();
     };
   }, [highlightedPhotoId, map, photos]);
+
+  // Where a Day story is reading. Only the coordinates matter, so the ring
+  // also marks notes and places, and it never takes the pointer.
+  const focusLng = focusPoint?.lng ?? null;
+  const focusLat = focusPoint?.lat ?? null;
+  useEffect(() => {
+    if (!map || focusLng === null || focusLat === null) return;
+    const element = document.createElement("div");
+    element.className = "lofoten-story-focus";
+    const marker = new mapboxgl.Marker({ element, anchor: "center" }).setLngLat([focusLng, focusLat]).addTo(map);
+    return () => {
+      marker.remove();
+    };
+  }, [focusLat, focusLng, map]);
 
   // Location-check preview: a pulsing ring on the flagged photo, a dot on
   // each time-neighbor, a dashed ring at the suggested spot, and a line

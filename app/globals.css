@@ -122,3 +122,15 @@ body {
   .journey-chapter-in .journey-chapter-line { animation: none; }
   .journey-photo-out { opacity: 0; }
 }
+
+/* The header's Add menu drops open from its button. */
+.lofoten-menu-in {
+  animation: lofoten-menu-in 160ms ease-out both;
+}
+@keyframes lofoten-menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lofoten-menu-in { animation: none; }
+}

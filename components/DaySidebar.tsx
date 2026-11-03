@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Anchor, Bus, CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, Footprints, Loader2, Map, MapPin, Mountain, PanelLeftClose, PenLine, Play, Route, ShieldCheck, UserPlus, Users, Video, X } from "lucide-react";
+import { Anchor, BookOpen, Bus, CalendarDays, Camera, Check, ChevronLeft, ChevronRight, Footprints, Loader2, Map, MapPin, Mountain, PanelLeftClose, Play, Route, ShieldCheck, UserPlus, Users, Video, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { AdminDataProps } from "@/components/AdminDataPanel";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
@@ -63,10 +63,9 @@ export type SidebarProps = {
   layerVisibility: LayerVisibility;
   onLayerVisibilityChange: (next: LayerVisibility) => void;
   showLayerControls?: boolean;
-  onStartPhotoUpload?: () => void;
-  onStartAddNote?: () => void;
-  onStartRouteDraw?: () => void;
   journey?: JourneyEntry | null;
+  /** Open a day as a story to read, the map following along. */
+  onReadDay?: (dayId: string) => void;
   adminData?: AdminDataProps | null;
   memberAdmin?: MemberAdminProps | null;
   adminRequest?: AdminRequestProps | null;
@@ -153,36 +152,12 @@ export function SidebarHeader({ trip, compact = false }: { trip: Trip | null; co
   );
 }
 
-export function QuickActions({ onStartPhotoUpload, onStartAddNote, onStartRouteDraw }: Pick<SidebarProps, "onStartPhotoUpload" | "onStartAddNote" | "onStartRouteDraw">) {
-  if (!onStartPhotoUpload && !onStartAddNote && !onStartRouteDraw) return null;
-
-  return (
-    <div className="grid grid-cols-2 gap-2">
-      {onStartPhotoUpload ? (
-        <Button onClick={onStartPhotoUpload} size="sm" className="text-sm hover:-translate-y-0.5 active:translate-y-0">
-          <Camera className="h-4 w-4" /> Upload media
-        </Button>
-      ) : null}
-      {onStartAddNote ? (
-        <Button onClick={onStartAddNote} variant="secondary" size="sm" className="text-sm hover:-translate-y-0.5 hover:shadow-md active:translate-y-0">
-          <FileText className="h-4 w-4" /> Add note
-        </Button>
-      ) : null}
-      {onStartRouteDraw ? (
-        <Button onClick={onStartRouteDraw} variant="secondary" tone="fjord" size="sm" className="col-span-full text-sm hover:-translate-y-0.5 hover:shadow-md active:translate-y-0">
-          <PenLine className="h-4 w-4" /> Draw route
-        </Button>
-      ) : null}
-    </div>
-  );
-}
-
 // The little colour dot that ties a day card to its route line and markers.
 export function DayDot({ color, className }: { color: string; className?: string }) {
   return <span aria-hidden className={cn("inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white", className)} style={{ backgroundColor: color }} />;
 }
 
-type DayListProps = Pick<SidebarProps, "days" | "dayStats" | "dayColors" | "dayPhotos" | "selectedDayId" | "onSelectDay" | "onStepDay"> & {
+type DayListProps = Pick<SidebarProps, "days" | "dayStats" | "dayColors" | "dayPhotos" | "selectedDayId" | "onSelectDay" | "onStepDay" | "onReadDay"> & {
   onPlayDay?: (dayId: string) => void;
   // The mobile sheet already has a day stepper in its peek header, so it
   // hides this one rather than showing two.
@@ -234,7 +209,7 @@ const MODE_STAT_ORDER: RouteMode[] = ["hike", "walk", "bus", "ferry", "other"];
 
 // The day's numbers as small icon-and-figure pairs: media, journal pins, and
 // distance by how it was covered. Read aloud via the card's own label.
-function DayStatsRow({ stats }: { stats: DayStats | undefined }) {
+export function DayStatsRow({ stats }: { stats: DayStats | undefined }) {
   if (!stats) return null;
   const items: Array<{ key: string; icon: typeof Camera; label: string }> = [];
   if (stats.photos) items.push({ key: "photos", icon: Camera, label: String(stats.photos) });
@@ -256,7 +231,7 @@ function DayStatsRow({ stats }: { stats: DayStats | undefined }) {
   );
 }
 
-export function DayList({ days, dayStats, dayColors, dayPhotos, selectedDayId, onSelectDay, onStepDay, onPlayDay, showStepButtons = true }: DayListProps) {
+export function DayList({ days, dayStats, dayColors, dayPhotos, selectedDayId, onSelectDay, onStepDay, onPlayDay, onReadDay, showStepButtons = true }: DayListProps) {
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2 text-sm font-bold text-stone-900">
@@ -304,6 +279,7 @@ export function DayList({ days, dayStats, dayColors, dayPhotos, selectedDayId, o
                 className={cn(
                   "w-full overflow-hidden rounded-xl border p-3 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/20",
                   !selected && "border-stone-200/90 bg-white/75 hover:border-stone-300 hover:bg-white",
+                  selected && onReadDay && canPlay && "pb-14",
                 )}
               >
                 <DayFilmstrip photos={strip} />
@@ -317,6 +293,19 @@ export function DayList({ days, dayStats, dayColors, dayPhotos, selectedDayId, o
                   <DayStatsRow stats={stats} />
                 </span>
               </button>
+              {/* The selected day offers itself as a story to read. A
+                  sibling of the card (buttons can't nest), sitting in the
+                  stats row's free right-hand end. */}
+              {selected && onReadDay && canPlay ? (
+                <button
+                  type="button"
+                  onClick={() => onReadDay(day.id)}
+                  aria-label={`Read Day ${day.day_number}`}
+                  className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full bg-[#0f3b32] px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-[#13493e] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-teal-700/25 active:scale-95"
+                >
+                  <BookOpen className="h-3.5 w-3.5" /> Read the day
+                </button>
+              ) : null}
               {canPlay ? (
                 <button
                   type="button"
@@ -557,11 +546,10 @@ export function DaySidebar(props: SidebarProps) {
           disabled={props.journey.disabled}
         />
       ) : null}
-      <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} onStartRouteDraw={props.onStartRouteDraw} />
       {props.days.length === 0 && props.trip === null ? (
         <DayListSkeleton />
       ) : (
-        <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} dayPhotos={props.dayPhotos} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} />
+        <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} dayPhotos={props.dayPhotos} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} onReadDay={props.onReadDay} />
       )}
       {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
       {props.notesPlaces ? <NotesPlacesList {...props.notesPlaces} /> : null}

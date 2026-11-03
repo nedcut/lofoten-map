@@ -1,6 +1,6 @@
 "use client";
 
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ComponentPropsWithRef, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 // The floating pill chrome shared by the app header: trip title chip, status
@@ -13,7 +13,7 @@ export function HeaderPill({ className, children }: { className?: string; childr
   return <div className={cn(PILL_BASE, "px-4 py-2 text-xs font-semibold text-stone-700", className)}>{children}</div>;
 }
 
-export function PillButton({ className, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode }) {
+export function PillButton({ className, children, ...props }: ComponentPropsWithRef<"button"> & { children: ReactNode }) {
   return (
     <button
       type="button"
