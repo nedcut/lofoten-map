@@ -388,7 +388,7 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
                 // target centered on the same spot via negative offsets, so the
                 // touch target grows without the control looking any bigger.
                 <button type="button" onClick={() => onToggleSelected(item.id)} className="absolute -left-2.5 -top-2.5 flex h-10 w-10 items-center justify-center" aria-label={`${selectedIds.has(item.id) ? "Deselect" : "Select"} ${item.file.name} for group placement`} aria-pressed={selectedIds.has(item.id)}>
-                  <span className={cn("flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-black transition", selectedIds.has(item.id) ? "border-teal-700 bg-teal-700 text-white" : "border-stone-300 bg-white/90 text-transparent")} aria-hidden>✓</span>
+                  <span className={cn("flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-black transition", selectedIds.has(item.id) ? "border-teal-700 bg-teal-700 text-white" : "border-stone-300 bg-white/90 text-transparent")} aria-hidden>✓</span>
                 </button>
               ) : null}
               <span className={cn("absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full ring-1 ring-white", statusDotClass(item))} aria-hidden />

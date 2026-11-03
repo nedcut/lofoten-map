@@ -21,21 +21,40 @@ type UseTripUrlStateOptions = {
 };
 
 /**
- * Owns the two pieces of selection state that live in the URL: the selected
- * day (`?day=`) and the item open in the editor (`?item=`). Writes them back
+ * Owns the selection state that lives in the URL: the selected day
+ * (`?day=`), whether that day is open as a story (`?story=1`), and the item
+ * open in the editor (`?item=`). Writes them back
  * on change, applies them once after the first data load, and re-applies them
  * on browser back/forward so history navigation restores the same view.
  */
 export function useTripUrlState({ data, allJourneyItems, loading, onJourneyFromUrl }: UseTripUrlStateOptions) {
   const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
+  const [storyOpen, setStoryOpen] = useState(false);
   const [editTargetRef, setEditTargetRef] = useState<MapItemRef | null>(null);
   const [deepLinkChecked, setDeepLinkChecked] = useState(false);
 
+  // A story is always of one day, so "All days" also closes it; stepping to
+  // another day keeps reading.
   const selectDay = useCallback((dayId: string | null) => {
     setSelectedDayId(dayId);
+    if (!dayId) setStoryOpen(false);
     if (typeof window === "undefined") return;
-    applyTripUrlState(window.location.href, { day: formatDayParam(dayId, data.days) });
+    // Keep `story=1` only while a story is actually open; a flag the page
+    // ignored (no day named) must not turn into a story link on reload.
+    applyTripUrlState(window.location.href, { day: formatDayParam(dayId, data.days), ...(dayId && storyOpen ? {} : { story: null }) });
+  }, [data.days, storyOpen]);
+
+  // Opening a story pushes history so the back button returns to the map.
+  const openStory = useCallback((dayId: string) => {
+    setSelectedDayId(dayId);
+    setStoryOpen(true);
+    applyTripUrlState(window.location.href, { day: formatDayParam(dayId, data.days), story: "1", journey: null }, "push");
   }, [data.days]);
+
+  const closeStory = useCallback(() => {
+    setStoryOpen(false);
+    applyTripUrlState(window.location.href, { story: null });
+  }, []);
 
   // Opening an item's editor pushes history so the back button closes it, and
   // clears any journey param since the editor replaces the viewer.
@@ -50,8 +69,10 @@ export function useTripUrlState({ data, allJourneyItems, loading, onJourneyFromU
   }, []);
 
   const applyDeepLinkFromUrl = useCallback((href: string) => {
-    const { day, journey, item } = readTripUrlState(href);
-    setSelectedDayId(resolveDayParam(day, data.days));
+    const { day, journey, item, story } = readTripUrlState(href);
+    const dayId = resolveDayParam(day, data.days);
+    setSelectedDayId(dayId);
+    setStoryOpen(story === "1" && dayId !== null);
 
     const journeyToken = journey && allJourneyItems.some((entry) => entry.id === journey) ? journey : null;
     const itemRef = parseItemToken(item);
@@ -93,6 +114,9 @@ export function useTripUrlState({ data, allJourneyItems, loading, onJourneyFromU
   return {
     selectedDayId,
     selectDay,
+    storyOpen,
+    openStory,
+    closeStory,
     editTargetRef,
     openEditItem,
     closeEditItem,

@@ -2,18 +2,20 @@ import type { Day } from "@/types/trip";
 
 // One accent per trip day, used consistently on the day cards, route lines,
 // photo-marker badges, and the on-map day chip so a colour always means the
-// same day everywhere. Hues are picked to stay legible over the Mapbox
-// outdoors style (mostly greens, greys, and blues) and to be distinguishable
-// from each other. Trips longer than the palette wrap around.
+// same day everywhere. The hues are taken from the islands themselves (fjord
+// water, cloudberries, the red rorbu fishing cabins, slate sea, heather,
+// glacier melt, lingonberries, birch in low sun) so the routes sit in the
+// landscape instead of on top of it, while staying distinct from each other
+// and legible over the terrain basemap. Trips longer than the palette wrap.
 export const DAY_COLORS = [
-  "#0f766e", // teal
-  "#d0872f", // ember
-  "#7c3aed", // violet
-  "#e11d48", // rose
-  "#1d4ed8", // blue
-  "#c026d3", // fuchsia
-  "#0891b2", // cyan
-  "#a16207", // gold
+  "#0f766e", // fjord
+  "#d0872f", // cloudberry
+  "#b23a2b", // rorbu red
+  "#2f5f9e", // slate sea
+  "#7b4f9e", // heather
+  "#1b8aa0", // glacier
+  "#b0305f", // lingonberry
+  "#9a7419", // birch gold
 ] as const;
 
 // Fallback for items that belong to no day (or an unknown one).

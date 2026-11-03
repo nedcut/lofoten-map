@@ -5,8 +5,9 @@
    only target DOM that exists once the map has mounted. */
 
 @theme inline {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-serif: ui-serif, Georgia, "Times New Roman", serif;
+  /* --font-inter and --font-fraunces are self-hosted by next/font (layout.tsx). */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: var(--font-fraunces), ui-serif, Georgia, "Times New Roman", serif;
 
   /* Brand palette — cream/teal/amber. Consolidated from ~40 hard-coded
      hex/rgba sites across components and map-overrides.css. */
@@ -25,6 +26,15 @@
   --radius-control: 0.5rem;
   --shadow-panel: 0 24px 80px rgba(46, 61, 54, 0.22);
   --shadow-control: 0 12px 30px rgba(46, 61, 54, 0.18);
+  /* A photo or card floating over Journey Mode's dark stage. */
+  --shadow-photo: 0 36px 100px rgba(0, 0, 0, 0.45);
+
+  /* Motion: two curves. ease-arrive for things that appear (cards, chapter
+     titles, popups): a quick start and a long, soft landing. ease-travel for
+     things that move from one place to another. Quick UI feedback (hover,
+     press) keeps Tailwind's defaults. */
+  --ease-arrive: cubic-bezier(0.25, 0.8, 0.25, 1);
+  --ease-travel: cubic-bezier(0.45, 0, 0.1, 1);
 }
 
 :root {
@@ -43,9 +53,18 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Display headings keep a quiet editorial feel without remote font fetches. */
+/* Display headings: Fraunces with a little of its "soft" axis, so titles read
+   like a printed field journal rather than a newspaper. */
 .font-serif {
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
+  font-variation-settings: "SOFT" 50;
+}
+
+/* A thin, track-less scrollbar for panels floating over the map, so a
+   classic grey gutter doesn't cut down the edge of a frosted card. */
+.scroll-quiet {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(120 113 108 / 0.35) transparent;
 }
 
 /* Slow drift on the active Journey hero slide — ambient motion that hints the
@@ -62,4 +81,72 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .journey-hero-kenburns { animation: none; }
+}
+
+/* Journey Mode. Each photo fades up over the last one, then drifts slowly
+   (alternating the drift's anchor so consecutive photos don't move alike).
+   Chapter cards rise into place between days. All of it holds still for
+   reduced-motion users. */
+.journey-photo-in {
+  animation: journey-photo-in 900ms ease-out both;
+}
+.journey-photo-in.journey-drift-a {
+  transform-origin: 30% 40%;
+  animation: journey-photo-in 900ms ease-out both, journey-drift 14s ease-out both;
+}
+.journey-photo-in.journey-drift-b {
+  transform-origin: 70% 60%;
+  animation: journey-photo-in 900ms ease-out both, journey-drift 14s ease-out both;
+}
+.journey-photo-out {
+  animation: journey-photo-out 700ms ease-in both;
+}
+.journey-backdrop-in {
+  animation: journey-photo-in 1200ms ease-out both;
+}
+.journey-chapter-in {
+  animation: journey-chapter-in 900ms var(--ease-arrive) both;
+}
+.journey-chapter-in .journey-chapter-line {
+  animation: journey-chapter-in 900ms 180ms var(--ease-arrive) both;
+}
+
+@keyframes journey-photo-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes journey-photo-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes journey-drift {
+  from { transform: scale(1); }
+  to { transform: scale(1.045); }
+}
+@keyframes journey-chapter-in {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journey-photo-in,
+  .journey-photo-in.journey-drift-a,
+  .journey-photo-in.journey-drift-b,
+  .journey-photo-out,
+  .journey-backdrop-in,
+  .journey-chapter-in,
+  .journey-chapter-in .journey-chapter-line { animation: none; }
+  .journey-photo-out { opacity: 0; }
+}
+
+/* The header's Add menu drops open from its button. */
+.lofoten-menu-in {
+  animation: lofoten-menu-in 160ms ease-out both;
+}
+@keyframes lofoten-menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lofoten-menu-in { animation: none; }
 }

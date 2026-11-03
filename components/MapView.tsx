@@ -9,9 +9,12 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import "./map-overrides.css";
 import { MapPin } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { sidebarInset } from "@/components/DaySidebar";
 import { mobileSheetHeight } from "@/components/MobileSheet";
 import { Button } from "@/components/ui/Button";
 import { lofotenOpeningView } from "@/lib/geo";
+import { applyLofotenAtmosphere } from "@/lib/map-atmosphere";
+import { OPENING_FLIGHT_START, shouldPlayOpeningFlight } from "@/lib/opening-flight";
 import { watchMapInit } from "@/lib/map-init";
 import type { LngLat, MapClickMode } from "@/types/trip";
 
@@ -76,12 +79,14 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
     let instance: mapboxgl.Map;
     // Same camera as "All days" (app/page.tsx). MapOptions takes no padding,
     // so it's set right after construction, before the first frame renders.
-    const { padding, ...openingView } = lofotenOpeningView(window.innerWidth, mobileSheetHeight());
+    const { padding, ...openingView } = lofotenOpeningView(window.innerWidth, mobileSheetHeight(), sidebarInset());
     try {
       instance = new mapboxgl.Map({
         container: containerRef.current,
         style: "mapbox://styles/mapbox/outdoors-v12",
-        ...openingView,
+        // A first visit starts high above and flies in (page.tsx); every
+        // other load opens directly on the islands.
+        ...(shouldPlayOpeningFlight() ? OPENING_FLIGHT_START : openingView),
         attributionControl: false,
       });
       instance.setPadding(padding);
@@ -108,6 +113,9 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
       setCanRetry(true);
       markUnavailable("The map couldn't load. Check your connection and try again. The trip details are still available.");
     });
+    // Terrain, haze and the toned basemap. style.load (not load) so they are
+    // in place before the first frame the user sees, and survive style swaps.
+    instance.on("style.load", () => applyLofotenAtmosphere(instance));
     instance.on("load", () => {
       document.body.classList.remove("map-unavailable-active");
       onMapReady(instance);
@@ -157,7 +165,7 @@ export function MapView({ clickMode, pendingCoordinate, onMapReady, onMapUnavail
   }, [pendingCoordinate]);
 
   return (
-    <div className={`relative h-full min-h-[520px] overflow-hidden rounded-none bg-[#dbe7df] md:rounded-panel md:ring-1 md:ring-stone-200/80 ${tokenMissing || mapUnavailable ? "map-unavailable" : ""}`}>
+    <div className={`relative h-full min-h-[520px] overflow-hidden bg-[#dbe7df] ${tokenMissing || mapUnavailable ? "map-unavailable" : ""}`}>
       <div ref={containerRef} className="h-full w-full" />
       {tokenMissing || mapUnavailable ? (
         <div className="absolute inset-0 flex items-center justify-center bg-mist p-6 text-center">

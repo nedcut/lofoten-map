@@ -19,6 +19,16 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(", ");
 
+// Whether the last input was a pointer (mouse, touch, pen) rather than a key.
+// A dialog opened by a click or tap moves focus to its first control without
+// the keyboard ring, which otherwise reads as a stray outline around Close.
+// Keyboard users still get the ring.
+let lastInputWasPointer = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("pointerdown", () => { lastInputWasPointer = true; }, { capture: true, passive: true });
+  window.addEventListener("keydown", () => { lastInputWasPointer = false; }, { capture: true, passive: true });
+}
+
 function isVisible(element: HTMLElement) {
   return element.offsetParent !== null || element === document.activeElement;
 }
@@ -62,7 +72,7 @@ export function useDialogFocus(
 
     const initial = getFocusable()[0];
     if (initial) {
-      initial.focus();
+      initial.focus(lastInputWasPointer ? { focusVisible: false } : undefined);
     } else if (document.activeElement !== container) {
       container.setAttribute("tabindex", "-1");
       container.focus();

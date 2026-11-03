@@ -4,7 +4,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 async function openIntro(page: Page) {
   await page.goto("/");
-  const opener = page.getByRole("button", { name: "Relive the journey", exact: true });
+  // The sidebar hero on desktop, the sheet's Relive row on phones.
+  const opener = page.getByRole("button", { name: /^Relive the journey/ }).filter({ visible: true }).first();
   await opener.click();
   await expect(page.getByText("A shared travel story")).toBeVisible();
   return opener;

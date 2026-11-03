@@ -6,7 +6,7 @@ import { canManageItem } from "@/lib/access";
 import { dayColorFor } from "@/lib/day-colors";
 import { friendlyPersonName } from "@/lib/display-name";
 import { noteFeatureCollection, photoFeatureCollection, placeFeatureCollection, routeFeatureCollection } from "@/lib/geo";
-import { PHOTO_CLUSTER_MAX_ZOOM, PHOTO_CLUSTER_RADIUS, clusterTapZoomsIn, photoMarkerPresentation } from "@/lib/map-presentation";
+import { MARKER_OVERLAP_PX, PHOTO_CLUSTER_MAX_ZOOM, PHOTO_CLUSTER_RADIUS, clusterTapZoomsIn, markerOverlapWinners, photoMarkerPresentation } from "@/lib/map-presentation";
 import { MOBILE_SHEET_HEIGHT_VAR } from "@/components/MobileSheet";
 import { formatDateTime } from "@/lib/utils";
 import type { Day, Note, Photo, Place, RouteSegment } from "@/types/trip";
@@ -46,6 +46,13 @@ function focusPopupContent(popup: mapboxgl.Popup) {
   body.focus();
 }
 
+// A stable tilt between -4° and 4° for a photo marker, from its id.
+function markerTilt(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return ((Math.abs(hash) % 81) - 40) / 10;
+}
+
 function hasLayer(map: mapboxgl.Map, id: string) {
   if (!canUseStyle(map)) return false;
   try {
@@ -61,6 +68,12 @@ function setLayerVisibility(map: mapboxgl.Map, id: string, visible: boolean) {
 }
 
 export type MapItemKind = "photo" | "note" | "place" | "route";
+
+const ROUTE_LAYERS = ["routes-glow", "routes-shadow", "routes-line"] as const;
+const DAY_COLOR: mapboxgl.ExpressionSpecification = ["coalesce", ["get", "color"], "#0f766e"];
+const ON_FOOT_FILTER: mapboxgl.FilterSpecification = ["!", ["in", ["get", "mode"], ["literal", ["ferry", "bus"]]]];
+// How long a newly shown set of routes takes to draw itself on.
+const ROUTE_DRAW_MS = 1600;
 
 type Props = {
   map: mapboxgl.Map | null;
@@ -90,12 +103,14 @@ type Props = {
   // The photo currently open in the editor, marked on the map with a pulsing
   // ring so it's obvious which marker is being edited.
   highlightedPhotoId: string | null;
+  /** The spot a Day story is reading, marked with a soft, non-draggable ring. */
+  focusPoint?: { lng: number; lat: number } | null;
   // A location-check preview: the flagged photo, its time-neighbor group,
   // and the suggested corrected position.
   outlierPreview: { photo: { lng: number; lat: number }; suggested: { lng: number; lat: number }; neighbors: Array<{ lng: number; lat: number }> } | null;
 };
 
-export function TripLayers({ map, routes, photos, notes, places, days, dayColors, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onReliveCluster, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId, outlierPreview }: Props) {
+export function TripLayers({ map, routes, photos, notes, places, days, dayColors, visibility, currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onReliveCluster, onPhotoFocus, onPhotoBlur, onMovePhoto, highlightedPhotoId, focusPoint = null, outlierPreview }: Props) {
   // Popup click handlers are attached once (keyed on [map]); this ref lets those
   // long-lived closures read the latest permissions/callbacks without re-binding.
   const actionsRef = useRef({ currentUserId, isAdmin, onEditItem, onDeleteItem, onOpenJourney, onClusterSelect, onReliveCluster, onPhotoFocus, onPhotoBlur, onMovePhoto });
@@ -120,8 +135,32 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       if (cancelled || !canUseStyle(map)) return;
 
       if (!getSource(map, "routes")) {
-        map.addSource("routes", { type: "geojson", data: routeData });
-        map.addLayer({ id: "routes-shadow", type: "line", source: "routes", paint: { "line-color": "#26423b", "line-width": 8, "line-opacity": 0.28 } });
+        // lineMetrics enables line-trim-offset, which draws a day's routes on.
+        map.addSource("routes", { type: "geojson", data: routeData, lineMetrics: true });
+        // On foot is the story; transport is connective tissue. Hikes and
+        // walks get a soft glow in the day's colour and a paper casing that
+        // lifts them off the terrain; ferries and buses stay thin and quiet.
+        map.addLayer({
+          id: "routes-glow",
+          type: "line",
+          source: "routes",
+          filter: ON_FOOT_FILTER,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": DAY_COLOR,
+            "line-width": ["interpolate", ["linear"], ["zoom"], 9, 9, 14, 18],
+            "line-blur": ["interpolate", ["linear"], ["zoom"], 9, 5, 14, 10],
+            "line-opacity": 0.32,
+          },
+        });
+        map.addLayer({
+          id: "routes-shadow",
+          type: "line",
+          source: "routes",
+          filter: ON_FOOT_FILTER,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": "#fffdf6", "line-width": ["interpolate", ["linear"], ["zoom"], 9, 5, 14, 8], "line-opacity": 0.9 },
+        });
         // Colour says which day; the dash pattern says how it was travelled
         // (ferry crossings dashed, bus legs dotted, everything else solid).
         map.addLayer({
@@ -130,10 +169,10 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
           source: "routes",
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            "line-color": ["coalesce", ["get", "color"], "#0f766e"],
-            "line-width": 4,
-            "line-opacity": 0.95,
-            "line-dasharray": ["match", ["get", "mode"], "ferry", ["literal", [2, 1.6]], "bus", ["literal", [0.3, 1.6]], ["literal", [1, 0]]],
+            "line-color": DAY_COLOR,
+            "line-width": ["interpolate", ["linear"], ["zoom"], 9, ["match", ["get", "mode"], "ferry", 1.6, "bus", 2, 2.8], 14, ["match", ["get", "mode"], "ferry", 2, "bus", 2.4, 4.5]],
+            "line-opacity": ["match", ["get", "mode"], "ferry", 0.6, "bus", 0.7, 1],
+            "line-dasharray": ["match", ["get", "mode"], "ferry", ["literal", [4, 3]], "bus", ["literal", [0.6, 2.4]], ["literal", [1, 0]]],
           },
         });
       } else if (sent.get("routes") !== routeData) {
@@ -179,7 +218,7 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       }
       sent.set("places", placeData);
 
-      for (const id of ["routes-shadow", "routes-line"]) setLayerVisibility(map, id, visibility.routes);
+      for (const id of ROUTE_LAYERS) setLayerVisibility(map, id, visibility.routes);
       setLayerVisibility(map, "photos-hit", visibility.photos);
       for (const id of ["notes-circle", "places-circle"]) setLayerVisibility(map, id, visibility.notes);
     };
@@ -195,6 +234,46 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       map.off("load", addOrUpdate);
     };
   }, [map, noteData, photoData, placeData, routeData, visibility]);
+
+  // Draw the routes on whenever a different set is shown (the first load, or
+  // picking another day): each line grows from its start, so a day reads as a
+  // journey rather than a finished diagram. Keyed on the route ids, so a
+  // background refresh that leaves the same routes in place doesn't replay it.
+  const routeSignature = useMemo(() => routes.map((route) => route.id).join("|"), [routes]);
+  useEffect(() => {
+    if (!map || !routeSignature) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    let frame = 0;
+    let cancelled = false;
+    const setTrim = (start: number) => {
+      for (const id of ROUTE_LAYERS) {
+        if (hasLayer(map, id)) map.setPaintProperty(id, "line-trim-offset", start >= 1 ? [0, 0] : [start, 1]);
+      }
+    };
+    const run = () => {
+      if (cancelled) return;
+      const begin = performance.now();
+      const step = (now: number) => {
+        if (cancelled) return;
+        // rAF timestamps mark the frame's start, which can precede `begin`.
+        const t = Math.min(1, Math.max(0, (now - begin) / ROUTE_DRAW_MS));
+        setTrim(1 - (1 - t) ** 3);
+        if (t < 1) frame = requestAnimationFrame(step);
+      };
+      setTrim(0);
+      frame = requestAnimationFrame(step);
+    };
+    // The layers are created by the effect above, which can still be waiting
+    // on the style; start once they exist.
+    if (hasLayer(map, "routes-line")) run();
+    else map.once("idle", run);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      map.off("idle", run);
+      setTrim(1);
+    };
+  }, [map, routeSignature]);
 
   useEffect(() => {
     if (!map) return;
@@ -351,6 +430,14 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       // The frame and count badge take the colour of the photo's day (see
       // map-overrides.css), matching the day card and route line.
       element.style.setProperty("--day-accent", dayColorFor(dayColors, photo.day_id));
+      // Each print sits at its own slight angle, like snapshots laid on a
+      // map. Derived from the id so a marker keeps its tilt across refreshes.
+      element.style.setProperty("--marker-tilt", `${markerTilt(photo.id)}deg`);
+      // Mapbox writes the button's transform every frame to position it, so
+      // the tilt and hover lift live on this inner card instead.
+      const card = document.createElement("span");
+      card.className = "lofoten-photo-marker-card";
+      element.append(card);
       const fallbackUrl = photo.media_type === "video" ? photo.thumbnail_url : (photo.thumbnail_url || photo.image_url);
       const imageUrl = photo.marker_url || fallbackUrl;
       if (imageUrl) {
@@ -364,12 +451,12 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         image.alt = "";
         image.decoding = "async";
         image.draggable = false;
-        element.append(image);
+        card.append(image);
       } else {
         const fallback = document.createElement("span");
         fallback.className = "lofoten-photo-marker-fallback";
         fallback.textContent = photo.media_type === "video" ? "Video" : "Photo";
-        element.append(fallback);
+        card.append(fallback);
       }
       return element;
     }
@@ -487,9 +574,22 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         projected.y >= -margin &&
         projected.x <= canvas.clientWidth + margin &&
         projected.y <= bottomLimit;
+      // Once the map has settled with the photos loaded, a marker inside the
+      // visible map that matched no feature belongs to a cluster that has
+      // since split or merged; keeping it left a stale print on top of its
+      // successors. Mid-motion it is kept, so markers don't blink while the
+      // clusters re-form.
+      const settled = !activeMap.isMoving() && activeMap.isSourceLoaded("photos");
+      const inVisibleMap = (projected: { x: number; y: number }) =>
+        projected.x >= 0 &&
+        projected.y >= 0 &&
+        projected.x <= canvas.clientWidth &&
+        projected.y <= canvas.clientHeight - sheetInset();
       const setMarkerDepth = (entry: MarkerEntry, projected: { y: number }) => {
         entry.element.style.setProperty("--marker-depth", String(Math.max(0, Math.round(projected.y))));
       };
+      type Candidate = { key: string; photo: Photo; coordinates: [number, number]; projected: { x: number; y: number }; isCluster: boolean; clusterId: number; count: number };
+      const candidates: Candidate[] = [];
       for (const feature of features) {
         if (!feature.geometry || feature.geometry.type !== "Point") continue;
         const coordinates = feature.geometry.coordinates as [number, number];
@@ -508,6 +608,30 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         if (seen.has(key)) key = `cluster-${clusterId}`;
         if (seen.has(key)) continue;
         seen.add(key);
+        candidates.push({ key, photo, coordinates, projected, isCluster, clusterId, count });
+      }
+
+      // Clustering works on a flat pixel grid, so two neighbouring clusters
+      // can still land almost on top of each other on screen (more so on the
+      // tilted map, where distance compresses toward the horizon). Their
+      // prints and count tags then pile into an unreadable heap. Keep the
+      // bigger (then nearer) of any such pair; the other fades out until a
+      // zoom pulls them apart. A photo being dragged is always kept.
+      const kept = markerOverlapWinners(candidates.map((candidate) => ({
+        key: candidate.key,
+        x: candidate.projected.x,
+        y: candidate.projected.y,
+        count: candidate.count,
+        pinned: candidate.key === draggingKey,
+      })), MARKER_OVERLAP_PX);
+      const hidden = new Set<string>();
+
+      for (const { key, photo, coordinates, projected, isCluster, clusterId, count } of candidates) {
+        if (!kept.has(key)) {
+          hidden.add(key);
+          seen.delete(key);
+          continue;
+        }
         let entry = markers.get(key);
         if (!entry) {
           entry = createEntry(key, photo, coordinates);
@@ -531,7 +655,7 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       for (const [key, entry] of markers) {
         if (seen.has(key) || key === draggingKey) continue;
         const projected = activeMap.project(entry.coordinates);
-        if (inKeepAliveArea(projected)) {
+        if (!hidden.has(key) && inKeepAliveArea(projected) && !(settled && inVisibleMap(projected))) {
           if (entry.leaveTimer) {
             window.clearTimeout(entry.leaveTimer);
             entry.leaveTimer = 0;
@@ -735,6 +859,20 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
       marker.remove();
     };
   }, [highlightedPhotoId, map, photos]);
+
+  // Where a Day story is reading. Only the coordinates matter, so the ring
+  // also marks notes and places, and it never takes the pointer.
+  const focusLng = focusPoint?.lng ?? null;
+  const focusLat = focusPoint?.lat ?? null;
+  useEffect(() => {
+    if (!map || focusLng === null || focusLat === null) return;
+    const element = document.createElement("div");
+    element.className = "lofoten-story-focus";
+    const marker = new mapboxgl.Marker({ element, anchor: "center" }).setLngLat([focusLng, focusLat]).addTo(map);
+    return () => {
+      marker.remove();
+    };
+  }, [focusLat, focusLng, map]);
 
   // Location-check preview: a pulsing ring on the flagged photo, a dot on
   // each time-neighbor, a dashed ring at the suggested spot, and a line

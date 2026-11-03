@@ -31,3 +31,25 @@ export function photoMarkerPresentation(zoom: number, count: number): PhotoMarke
     ].filter(Boolean).join(" "),
   };
 }
+
+// Closer than this on screen, two photo markers (52px prints) stop reading as
+// a deliberate fan and become a heap of overlapping cards and count tags.
+export const MARKER_OVERLAP_PX = 32;
+
+export type MarkerOverlapCandidate = { key: string; x: number; y: number; count: number; pinned?: boolean };
+
+// Which markers to show when some would sit nearly on top of each other.
+// Bigger clusters win, then the nearer one (lower on screen, so in front on a
+// tilted map); the rest fade until a zoom separates them. Pinned markers (one
+// being dragged) sit outside the contest: always shown, hiding nothing, so a
+// drag never makes the map around it blink. Greedy, which is plenty for the
+// few dozen markers on screen at once.
+export function markerOverlapWinners(candidates: MarkerOverlapCandidate[], minDistancePx: number): Set<string> {
+  const ordered = candidates.filter((candidate) => !candidate.pinned).sort((a, b) => b.count - a.count || b.y - a.y);
+  const kept: MarkerOverlapCandidate[] = [];
+  const minSquared = minDistancePx * minDistancePx;
+  for (const candidate of ordered) {
+    if (!kept.some((other) => (other.x - candidate.x) ** 2 + (other.y - candidate.y) ** 2 < minSquared)) kept.push(candidate);
+  }
+  return new Set([...candidates.filter((candidate) => candidate.pinned), ...kept].map((candidate) => candidate.key));
+}

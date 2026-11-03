@@ -67,10 +67,11 @@ describe("formatDayParam", () => {
 
 describe("readTripUrlState", () => {
   it("reads supported search params", () => {
-    expect(readTripUrlState("https://example.com/?day=2&journey=photo:x&item=note:y")).toEqual({
+    expect(readTripUrlState("https://example.com/?day=2&journey=photo:x&item=note:y&story=1")).toEqual({
       day: "2",
       journey: "photo:x",
       item: "note:y",
+      story: "1",
     });
   });
 });
@@ -79,5 +80,10 @@ describe("applyTripUrlState", () => {
   it("builds the next href without touching history in tests", () => {
     const next = applyTripUrlState("https://example.com/", { day: "2", journey: null }, "replace");
     expect(next).toBe("/?day=2");
+  });
+
+  it("sets and clears the story flag alongside the day", () => {
+    expect(applyTripUrlState("https://example.com/?day=2", { story: "1" })).toBe("/?day=2&story=1");
+    expect(applyTripUrlState("https://example.com/?day=2&story=1", { day: null, story: null })).toBe("/");
   });
 });

@@ -1,9 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ChevronLeft, ChevronRight, ChevronUp, Play } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, ChevronUp, Play } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { AdminRequestPanel, DayList, DayListSkeleton, LayersPanel, MemberAdminPanel, NotesPlacesList, QuickActions, type SidebarProps } from "@/components/DaySidebar";
+import { AdminRequestPanel, DayList, DayListSkeleton, LayersPanel, MemberAdminPanel, NotesPlacesList, type SidebarProps } from "@/components/DaySidebar";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
 import { dayColorFor } from "@/lib/day-colors";
 import { journeyEntryCopy } from "@/lib/journey";
@@ -184,13 +184,15 @@ export function MobileSheet(props: MobileSheetProps) {
           {/* Collapsed: a single slim row keeps Relive one tap away without
               the full hero card eating a quarter of the screen. The full card
               (with its photo preview) lives in the expanded region. */}
-          <div className="space-y-2 px-3 pb-3">
-            {props.journey && !expanded ? (
+          {/* With a day picked, "Read" sits beside it: the day as a story,
+              the map following along above. */}
+          {props.journey && !expanded ? (
+            <div className="flex gap-2 px-3 pb-3">
               <button
                 type="button"
                 onClick={props.journey.onPlay}
                 disabled={props.journey.disabled}
-                className="flex w-full items-center gap-3 rounded-xl bg-[#0f3b32] px-3 py-2 text-left text-white shadow-sm transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-xl bg-[#0f3b32] px-3 py-2 text-left text-white shadow-sm transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ember-400 text-stone-950"><Play className="h-4 w-4 fill-current" /></span>
                 <span className="min-w-0 flex-1">
@@ -198,16 +200,25 @@ export function MobileSheet(props: MobileSheetProps) {
                   <span className="block truncate text-[11px] text-white/75">{journeyCopy.subtitle}</span>
                 </span>
               </button>
-            ) : null}
-            <QuickActions onStartPhotoUpload={props.onStartPhotoUpload} onStartAddNote={props.onStartAddNote} onStartRouteDraw={props.onStartRouteDraw} />
-          </div>
+              {selectedDay && props.onReadDay ? (
+                <button
+                  type="button"
+                  onClick={() => props.onReadDay?.(selectedDay.id)}
+                  aria-label={`Read Day ${selectedDay.day_number}`}
+                  className="flex shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl border border-stone-200 bg-white/80 px-3.5 text-[11px] font-bold text-stone-800 shadow-sm transition active:scale-[0.97]"
+                >
+                  <BookOpen className="h-4 w-4 text-teal-700" /> Read
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           </div>
 
           {/* Expandable region animates via grid-template-rows 0fr -> 1fr. */}
           <div className={cn("grid transition-[grid-template-rows] duration-300 ease-out", expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
             <div className="overflow-hidden">
               {expanded ? (
-                <div className="max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
+                <div className="scroll-quiet max-h-[58dvh] space-y-4 overflow-y-auto px-4 pb-4">
                   {props.journey ? (
                     <JourneyHeroCard
                       photos={props.journey.photos}
@@ -223,7 +234,7 @@ export function MobileSheet(props: MobileSheetProps) {
                   {props.days.length === 0 && props.trip === null ? (
                     <DayListSkeleton />
                   ) : (
-                    <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} showStepButtons={false} />
+                    <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} dayPhotos={props.dayPhotos} selectedDayId={props.selectedDayId} onSelectDay={handleSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} onReadDay={props.onReadDay} showStepButtons={false} />
                   )}
                   {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
                   {props.notesPlaces ? <NotesPlacesList {...props.notesPlaces} /> : null}

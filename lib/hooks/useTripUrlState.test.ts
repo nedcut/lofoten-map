@@ -64,6 +64,37 @@ describe("useTripUrlState", () => {
     expect(window.location.search).toBe("");
   });
 
+  it("opens a day's story from a deep link, but never without a day", () => {
+    setUrl("?day=2&story=1");
+    const { result } = render();
+    expect(result.current.selectedDayId).toBe(demoDays[1].id);
+    expect(result.current.storyOpen).toBe(true);
+
+    setUrl("?story=1");
+    const ignored = render().result;
+    expect(ignored.current.storyOpen).toBe(false);
+    // Picking a day then must not leave a story link behind for a reload.
+    act(() => ignored.current.selectDay(demoDays[0].id));
+    expect(window.location.search).toBe("?day=1");
+  });
+
+  it("pushes a story to history, keeps it across days, and closes it with All days", () => {
+    const { result } = render();
+    const historyLength = window.history.length;
+    act(() => result.current.openStory(demoDays[0].id));
+    expect(result.current.storyOpen).toBe(true);
+    expect(window.location.search).toBe("?day=1&story=1");
+    expect(window.history.length).toBe(historyLength + 1);
+
+    act(() => result.current.selectDay(demoDays[1].id));
+    expect(result.current.storyOpen).toBe(true);
+    expect(window.location.search).toBe("?day=2&story=1");
+
+    act(() => result.current.selectDay(null));
+    expect(result.current.storyOpen).toBe(false);
+    expect(window.location.search).toBe("");
+  });
+
   it("pushes the edited item to the URL and drops any journey param", () => {
     setUrl("?journey=photo:x");
     const { result } = render();
