@@ -110,6 +110,29 @@ test.describe("desktop", { tag: "@desktop" }, () => {
     await expect(page.getByText("A shared travel story")).toBeHidden();
   });
 
+  test("opening a creation panel replaces an open editor", async ({ page }) => {
+    await page.goto("/?item=note:note-demo-1");
+    await expect(page.getByRole("heading", { name: "Edit note" })).toBeVisible();
+    await page.getByRole("button", { name: "Upload media" }).first().click();
+    await expect(page.getByRole("button", { name: "Close upload" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Edit note" })).toHaveCount(0);
+    await expect(page).not.toHaveURL(/item=/);
+  });
+
+  test("a story brought back by history waits behind an open creation panel", async ({ page }) => {
+    await page.goto("/?day=1");
+    await page.getByRole("button", { name: "Upload media" }).first().click();
+    await expect(page.getByRole("button", { name: "Close upload" })).toBeVisible();
+    // Stand-in for Back/Forward landing on an entry that still has ?story=1.
+    await page.evaluate(() => {
+      window.history.pushState(null, "", `${window.location.pathname}${window.location.search}&story=1`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await expect(page.getByRole("article")).toHaveCount(0);
+    await page.getByRole("button", { name: "Close upload" }).click();
+    await expect(page.getByRole("article", { name: "Reine arrival" })).toBeVisible();
+  });
+
   test("a selected day opens as a story that links, steps days, and closes", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: /Day 1: Reine arrival/ }).click();

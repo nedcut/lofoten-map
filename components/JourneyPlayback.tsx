@@ -104,6 +104,11 @@ function attachedText(attached: JourneyAttachedItem) {
 const TRAVEL_INTERLUDE_KM = 2.5;
 const CHAPTER_MS = 4200;
 
+// Where the viewer is in a playthrough. One value rather than separate
+// playing/intro/complete flags, so "complete but still playing" and similar
+// combinations cannot be represented.
+type PlaybackPhase = "intro" | "playing" | "paused" | "complete";
+
 type Interlude = { kind: "chapter" | "travel"; dayId: string | null; durationMs: number; key: number };
 
 // Matches the camera: walking legs take about 1s per km (JourneyMiniMap),
@@ -209,12 +214,13 @@ export function JourneyPlayback({
 }: Props) {
   const activeItem = items[activeIndex] ?? items[0];
   const videoUrl = activeItem?.kind === "photo" && activeItem.primary.media_type === "video" ? activeItem.primary.image_url : null;
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [phase, setPhase] = useState<PlaybackPhase>(showIntro ? "intro" : "paused");
+  const isPlaying = phase === "playing";
+  const introOpen = phase === "intro";
+  const complete = phase === "complete";
   const [speed, setSpeed] = useState(1);
   const [interactionHold, setInteractionHold] = useState(false);
   const { captionDraft, setCaptionDraft, editingCaption, setEditingCaption } = useCaptionDraft(activeItem);
-  const [introOpen, setIntroOpen] = useState(showIntro);
-  const [complete, setComplete] = useState(false);
   const [shareStatus, setShareStatus] = useState<ShareResult | null>(null);
   const [interlude, setInterlude] = useState<Interlude | null>(null);
   // The previous item, so a step can tell whether it crossed into a new day
@@ -318,7 +324,7 @@ export function JourneyPlayback({
       videoFallbackTimerRef.current = window.setTimeout(() => {
         videoFallbackTimerRef.current = null;
         if (!isPlayingRef.current) return;
-        if (activeIndexRef.current >= items.length - 1) { setIsPlaying(false); setComplete(true); }
+        if (activeIndexRef.current >= items.length - 1) setPhase("complete");
         else { autoAdvanceRef.current = true; onNext(); }
       }, Math.max(videoFallbackDurationMs(video.duration, speed), 3000));
     });
@@ -336,7 +342,7 @@ export function JourneyPlayback({
 
   function advanceVideoInSlideshow() {
     if (!isPlayingRef.current) return;
-    if (activeIndexRef.current >= items.length - 1) { setIsPlaying(false); setComplete(true); }
+    if (activeIndexRef.current >= items.length - 1) setPhase("complete");
     else { autoAdvanceRef.current = true; onNext(); }
   }
 
@@ -346,6 +352,12 @@ export function JourneyPlayback({
       videoFallbackTimerRef.current = null;
       advanceVideoInSlideshow();
     }, Math.max(durationMs, 3000));
+  }
+
+  // Play/pause only switches between those two; it never leaves the intro or
+  // the completion card.
+  function togglePlaying() {
+    setPhase((current) => current === "playing" ? "paused" : current === "paused" ? "playing" : current);
   }
 
   function noteInteraction() {
@@ -393,7 +405,7 @@ export function JourneyPlayback({
     autoplayTimerRef.current = window.setTimeout(() => {
       // Autoplay runs through the journey once and then pauses on the final
       // item; manual prev/next still wraps for convenience.
-      if (isLast) { setIsPlaying(false); setComplete(true); }
+      if (isLast) setPhase("complete");
       else { autoAdvanceRef.current = true; onNext(); }
     }, duration);
     return () => {
@@ -433,7 +445,7 @@ export function JourneyPlayback({
         onClose();
       } else if (event.key === " ") {
         event.preventDefault();
-        setIsPlaying((value) => !value);
+        togglePlaying();
       }
     };
     window.addEventListener("keydown", handler);
@@ -610,10 +622,8 @@ export function JourneyPlayback({
   }
 
   function replay() {
-    setComplete(false);
-    setIntroOpen(false);
     onSelectIndex(0);
-    setIsPlaying(true);
+    setPhase("playing");
     openChapter(items[0]);
   }
 
@@ -719,7 +729,7 @@ export function JourneyPlayback({
               {trip?.description ? <p className="mx-auto mt-5 max-w-lg text-lg leading-7 text-white/85 [text-shadow:0_1px_16px_rgba(0,0,0,0.5)]">{trip.description}</p> : null}
               <p className="mt-3 text-sm text-white/65">{items.length} moments across {days.length} days</p>
               <div className="mt-8 flex flex-wrap justify-center gap-3">
-                <Button onClick={() => { setIntroOpen(false); setIsPlaying(true); openChapter(); }} className="rounded-full px-6"><CirclePlay className="h-5 w-5" /> Begin journey</Button>
+                <Button onClick={() => { setPhase("playing"); openChapter(); }} className="rounded-full px-6"><CirclePlay className="h-5 w-5" /> Begin journey</Button>
                 <button type="button" onClick={onClose} className="rounded-full bg-white/12 px-5 py-3 font-bold text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/25">Return to map</button>
               </div>
             </section>
@@ -904,7 +914,7 @@ export function JourneyPlayback({
               the right. From md up it collapses to the single-row grid. */}
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-3">
             <div className="col-start-1 row-start-2 flex items-center gap-2 md:row-start-1">
-              <button onClick={() => setIsPlaying((value) => !value)} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-stone-950 shadow-lg transition hover:bg-[#fff4d8] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30" aria-label={isPlaying ? "Pause autoplay" : "Start autoplay"}>
+              <button onClick={togglePlaying} className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-stone-950 shadow-lg transition hover:bg-[#fff4d8] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/30" aria-label={isPlaying ? "Pause autoplay" : "Start autoplay"}>
                 {isPlaying ? <CirclePause className="h-5 w-5" /> : <CirclePlay className="h-5 w-5" />}
               </button>
               <button
