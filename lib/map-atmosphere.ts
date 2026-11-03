@@ -31,6 +31,14 @@ const BASEMAP_PAINT: Array<[layer: string, property: string, value: unknown]> = 
   ["water-line-label", "text-halo-color", "hsla(203, 34%, 40%, 0.35)"],
 ];
 
+// Basemap layers that compete with the trip's own story: Mapbox's ferry
+// lines run straight across the open sea beside the trip's own ferry routes,
+// road shields and contour figures read as a navigation map, and everyday
+// POIs (campsites, shops) crowd a day's framing. Peaks and place names stay.
+const BASEMAP_HIDDEN = ["ferry", "ferry-auto", "ferry-aerialway-label", "road-number-shield", "road-exit-shield", "contour-label"];
+// Everyday POIs only once you are zoomed right in on a village.
+const POI_MIN_ZOOM = 14.5;
+
 // Low northern light: a warm haze near the ground fading to a pale sky. The
 // range starts the haze a little way out so nearby photos stay crisp.
 const FOG = {
@@ -52,6 +60,10 @@ export function applyLofotenAtmosphere(map: MapboxMap, { exaggeration = 1.3 }: {
       // A property the layer type doesn't support; leave the stock paint.
     }
   }
+  for (const layer of BASEMAP_HIDDEN) {
+    if (map.getLayer(layer)) map.setLayoutProperty(layer, "visibility", "none");
+  }
+  if (map.getLayer("poi-label")) map.setLayerZoomRange("poi-label", POI_MIN_ZOOM, 24);
   map.setFog(FOG);
   if (!map.getSource(TERRAIN_SOURCE_ID)) {
     map.addSource(TERRAIN_SOURCE_ID, { type: "raster-dem", url: "mapbox://mapbox.mapbox-terrain-dem-v1", tileSize: 512, maxzoom: 14 });
