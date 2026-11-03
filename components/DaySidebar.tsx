@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { Anchor, BookOpen, Bus, CalendarDays, Camera, Check, ChevronLeft, ChevronRight, Footprints, Loader2, Map, MapPin, Mountain, PanelLeftClose, Play, Route, ShieldCheck, UserPlus, Users, Video, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { AdminDataProps } from "@/components/AdminDataPanel";
 import { JourneyHeroCard } from "@/components/JourneyHeroCard";
 import { Button } from "@/components/ui/Button";
@@ -162,6 +162,10 @@ type DayListProps = Pick<SidebarProps, "days" | "dayStats" | "dayColors" | "dayP
   // The mobile sheet already has a day stepper in its peek header, so it
   // hides this one rather than showing two.
   showStepButtons?: boolean;
+  // Scroll the selected day's card into view when the selection changes from
+  // elsewhere (the map, the arrow keys, a ?day= link). The desktop sidebar
+  // wants this; the mobile sheet shows the selection in its own header.
+  revealSelected?: boolean;
 };
 
 // A day's covers: up to four of its photos spread across the day, as small
@@ -204,7 +208,7 @@ function DayFilmstrip({ photos }: { photos: Photo[] }) {
   );
 }
 
-const MODE_ICON: Record<RouteMode, typeof Footprints> = { hike: Footprints, walk: Footprints, bus: Bus, ferry: Anchor, other: Route };
+const MODE_ICON: Record<RouteMode, typeof Footprints> = { hike: Mountain, walk: Footprints, bus: Bus, ferry: Anchor, other: Route };
 const MODE_STAT_ORDER: RouteMode[] = ["hike", "walk", "bus", "ferry", "other"];
 
 // The day's numbers as small icon-and-figure pairs: media, journal pins, and
@@ -231,7 +235,18 @@ export function DayStatsRow({ stats }: { stats: DayStats | undefined }) {
   );
 }
 
-export function DayList({ days, dayStats, dayColors, dayPhotos, selectedDayId, onSelectDay, onStepDay, onPlayDay, onReadDay, showStepButtons = true }: DayListProps) {
+export function DayList({ days, dayStats, dayColors, dayPhotos, selectedDayId, onSelectDay, onStepDay, onPlayDay, onReadDay, showStepButtons = true, revealSelected = false }: DayListProps) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  // The cards render once days load, so wait for them before revealing.
+  const hasDays = days.length > 0;
+  useEffect(() => {
+    if (!revealSelected || !selectedDayId || !hasDays) return;
+    const card = listRef.current?.querySelector<HTMLElement>(`[data-day-id="${CSS.escape(selectedDayId)}"]`);
+    if (!card) return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // "nearest" leaves a card that's already visible where it is.
+    card.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
+  }, [hasDays, revealSelected, selectedDayId]);
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2 text-sm font-bold text-stone-900">
@@ -243,7 +258,7 @@ export function DayList({ days, dayStats, dayColors, dayPhotos, selectedDayId, o
           </span>
         ) : null}
       </div>
-      <div className="space-y-2.5">
+      <div ref={listRef} className="space-y-2.5">
         <button
           onClick={() => onSelectDay(null)}
           aria-pressed={selectedDayId === null}
@@ -266,7 +281,7 @@ export function DayList({ days, dayStats, dayColors, dayPhotos, selectedDayId, o
           const strip = dayFilmstripPhotos(dayPhotos?.get(day.id) ?? []);
           const title = `Day ${day.day_number}: ${day.title ?? "Open trail"}`;
           return (
-            <div key={day.id} className="group relative">
+            <div key={day.id} data-day-id={day.id} className="group relative scroll-my-4">
               <button
                 onClick={() => onSelectDay(day.id)}
                 aria-pressed={selected}
@@ -283,7 +298,7 @@ export function DayList({ days, dayStats, dayColors, dayPhotos, selectedDayId, o
                 )}
               >
                 <DayFilmstrip photos={strip} />
-                <span className={cn("block px-1", canPlay && strip.length === 0 && "pr-11")}>
+                <span className={cn("block px-1", canPlay && "pr-11")}>
                   <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">
                     <DayDot color={color} className="h-2 w-2 ring-0" />
                     Day {day.day_number}{day.date ? ` · ${formatDateOnly(day.date)}` : ""}
@@ -312,11 +327,11 @@ export function DayList({ days, dayStats, dayColors, dayPhotos, selectedDayId, o
                   onClick={() => onPlayDay?.(day.id)}
                   aria-label={startJourneyAtDayLabel(day.day_number)}
                   title={startJourneyAtDayLabel(day.day_number)}
-                  // Sits on the filmstrip's corner like a play badge on a
-                  // video; without a strip, in the card's top-right corner.
+                  // Sits beside the day's label and title, below the
+                  // filmstrip, so it never hides one of the day's photos.
                   className={cn(
-                    "absolute right-[1.4rem] inline-flex h-9 w-9 items-center justify-center rounded-full bg-paper/95 text-ember-600 shadow-md ring-1 ring-stone-900/5 backdrop-blur transition hover:scale-105 hover:bg-[#fdf1dc] hover:text-ember-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember-400/30 active:scale-95",
-                    strip.length > 0 ? "top-[1.4rem]" : "top-3.5",
+                    "absolute right-3.5 inline-flex h-9 w-9 items-center justify-center rounded-full bg-paper text-ember-600 shadow-sm ring-1 ring-stone-900/10 transition hover:bg-[#fdf1dc] hover:text-ember-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ember-400/30 active:scale-95 motion-reduce:active:scale-100",
+                    strip.length > 0 ? "top-[5.75rem]" : "top-3.5",
                   )}
                 >
                   <Play className="h-4 w-4 fill-current" />
@@ -420,7 +435,7 @@ export function NotesPlacesList({ notes, places, onOpen }: NotesPlacesEntry) {
             onClick={() => onOpen(item.kind, item.id)}
             className="flex w-full items-center gap-2 truncate rounded-[var(--radius-control)] bg-paper-tint px-3 py-2 text-left text-sm text-stone-800 transition hover:bg-[#f1e8d8]"
           >
-            <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-teal-800">{item.kind}</span>
+            <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.08em] text-teal-800">{item.kind}</span>
             <span className="truncate">{item.label}</span>
           </button>
         ))}
@@ -523,7 +538,7 @@ export function AdminRequestPanel({ status, isSaving, message, messageTone, onRe
 
 export function DaySidebar(props: SidebarProps) {
   return (
-    <aside className="relative flex h-full max-h-[78dvh] min-h-0 flex-col gap-4 overflow-y-auto rounded-panel border border-white/60 bg-paper/86 p-4 text-stone-950 shadow-panel backdrop-blur-2xl backdrop-saturate-150 md:max-h-none md:w-96 md:p-5">
+    <aside className="scroll-quiet relative flex h-full max-h-[78dvh] min-h-0 flex-col gap-4 overflow-y-auto rounded-panel border border-white/60 bg-paper/86 p-4 text-stone-950 shadow-panel backdrop-blur-2xl backdrop-saturate-150 md:max-h-none md:w-96 md:p-5">
       {props.onCollapse ? (
         <button
           type="button"
@@ -549,7 +564,7 @@ export function DaySidebar(props: SidebarProps) {
       {props.days.length === 0 && props.trip === null ? (
         <DayListSkeleton />
       ) : (
-        <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} dayPhotos={props.dayPhotos} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} onReadDay={props.onReadDay} />
+        <DayList days={props.days} dayStats={props.dayStats} dayColors={props.dayColors} dayPhotos={props.dayPhotos} selectedDayId={props.selectedDayId} onSelectDay={props.onSelectDay} onStepDay={props.onStepDay} onPlayDay={props.journey?.onPlayDay} onReadDay={props.onReadDay} revealSelected />
       )}
       {props.showLayerControls !== false ? <LayersPanel layerVisibility={props.layerVisibility} onLayerVisibilityChange={props.onLayerVisibilityChange} /> : null}
       {props.notesPlaces ? <NotesPlacesList {...props.notesPlaces} /> : null}

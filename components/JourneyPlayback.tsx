@@ -165,7 +165,7 @@ function JourneyPhoto({ url, alt, index }: { url: string; alt: string; index: nu
     const id = window.setTimeout(() => setPrevious(null), 750);
     return () => window.clearTimeout(id);
   }, [ready, previous]);
-  const frame = "absolute inset-0 m-auto max-h-full max-w-full rounded-lg shadow-[0_36px_100px_rgba(0,0,0,0.5)]";
+  const frame = "absolute inset-0 m-auto max-h-full max-w-full rounded-lg shadow-photo";
   return (
     <div className="relative h-full w-full">
       {previous && previous !== current ? (
@@ -244,6 +244,8 @@ export function JourneyPlayback({
   // on a narrow screen (eight days across a phone) can be dropped.
   const [trackWidth, setTrackWidth] = useState(0);
   const isPlayingRef = useRef(isPlaying);
+  // Set just before autoplay steps, so only its steps open an interlude.
+  const autoAdvanceRef = useRef(false);
   const activeIndexRef = useRef(activeIndex);
   const uploaderOptions = useMemo(
     () => personFilterOptions(allItems.map((item) => item.kind === "photo" ? item.primary.uploader_name : null)),
@@ -276,6 +278,9 @@ export function JourneyPlayback({
     const activePx = active ? toPx(active.left) : null;
     let lastLabelledPx = -Infinity;
     for (const tick of dayTicks) {
+      // Undated items get a hollow, unlabelled dot: a "—" label read as a
+      // glitch and took the slot from the real day beside it.
+      if (!tick.day) continue;
       const px = toPx(tick.left);
       const isActive = tick === active;
       if (!isActive && (px - lastLabelledPx < minGapPx || (activePx !== null && Math.abs(activePx - px) < minGapPx))) continue;
@@ -320,7 +325,7 @@ export function JourneyPlayback({
         videoFallbackTimerRef.current = null;
         if (!isPlayingRef.current) return;
         if (activeIndexRef.current >= items.length - 1) setPhase("complete");
-        else onNext();
+        else { autoAdvanceRef.current = true; onNext(); }
       }, Math.max(videoFallbackDurationMs(video.duration, speed), 3000));
     });
   }, [activeIndex, isPlaying, items.length, onNext, speed, videoUrl]);
@@ -338,7 +343,7 @@ export function JourneyPlayback({
   function advanceVideoInSlideshow() {
     if (!isPlayingRef.current) return;
     if (activeIndexRef.current >= items.length - 1) setPhase("complete");
-    else onNext();
+    else { autoAdvanceRef.current = true; onNext(); }
   }
 
   function scheduleVideoAdvance(durationMs: number) {
@@ -368,12 +373,15 @@ export function JourneyPlayback({
   const showInterlude = interlude !== null && isPlaying && !introOpen && !complete;
 
   // Open a chapter or a travel interlude when autoplay steps into a new day or
-  // across a long leg. Manual stepping while paused never triggers one.
+  // across a long leg. Manual steps (buttons, keys, the slider, the mini-map)
+  // never trigger one, even while autoplay is on.
   const activeItemId = activeItem?.id;
   useEffect(() => {
     const previous = previousItemRef.current;
     previousItemRef.current = activeItem ?? null;
-    if (!activeItem || !previous || previous.id === activeItem.id || !isPlayingRef.current) return;
+    const autoAdvanced = autoAdvanceRef.current;
+    autoAdvanceRef.current = false;
+    if (!activeItem || !previous || previous.id === activeItem.id || !isPlayingRef.current || !autoAdvanced) return;
     const km = previous.coord && activeItem.coord ? distanceKm(previous.coord, activeItem.coord) : 0;
     const far = mapVisible && km > TRAVEL_INTERLUDE_KM;
     const travel = far ? travelMs(km) : 0;
@@ -398,7 +406,7 @@ export function JourneyPlayback({
       // Autoplay runs through the journey once and then pauses on the final
       // item; manual prev/next still wraps for convenience.
       if (isLast) setPhase("complete");
-      else onNext();
+      else { autoAdvanceRef.current = true; onNext(); }
     }, duration);
     return () => {
       if (autoplayTimerRef.current) window.clearTimeout(autoplayTimerRef.current);
@@ -752,8 +760,11 @@ export function JourneyPlayback({
       ) : null}
 
       {/* Media fills whatever the header and the measured bottom bar leave
-          free; the 2rem lets it run into the bar's transparent gradient top. */}
-      <div className={cn("relative z-10 flex h-full items-center justify-center px-2 pb-[calc(var(--journey-bar-height,13rem)-2rem)] pt-[calc(4.25rem+env(safe-area-inset-top))] transition-[opacity,transform] duration-700 ease-out motion-reduce:transition-none md:px-16 md:pt-24", showInterlude && "pointer-events-none scale-[0.97] opacity-0")}>
+          free; the 2rem lets it run into the bar's transparent gradient top.
+          On desktop the docked mini-map's column is kept clear too, so it
+          never sits on the photo. Landscape shots are height-bound there, so
+          the reserved column rarely costs the photo any size. */}
+      <div className={cn("relative z-10 flex h-full items-center justify-center px-2 pb-[calc(var(--journey-bar-height,13rem)-2rem)] pt-[calc(4.25rem+env(safe-area-inset-top))] transition-[opacity,transform] duration-700 ease-out motion-reduce:transition-none md:px-16 md:pt-24", mapVisible && "md:pr-[calc(var(--journey-minimap-width,18rem)+3rem)]", showInterlude && "pointer-events-none scale-[0.97] opacity-0")}>
         {/* A video waits out the interlude unmounted, so it starts from the top
             once the screen is back. */}
         {videoUrl && showInterlude ? null : videoUrl ? (
@@ -783,13 +794,13 @@ export function JourneyPlayback({
                 if (!isPlayingRef.current) return;
                 scheduleVideoAdvance(5000);
               }}
-              className="max-h-full max-w-full rounded-lg object-contain shadow-[0_36px_100px_rgba(0,0,0,0.45)]"
+              className="max-h-full max-w-full rounded-lg object-contain shadow-photo"
             />
           </div>
         ) : imageUrl ? (
           <JourneyPhoto url={imageUrl} alt={title} index={activeIndex} />
         ) : (
-          <article className="mx-auto max-w-2xl rounded-xl border border-white/15 bg-paper/94 p-6 text-stone-950 shadow-[0_36px_100px_rgba(0,0,0,0.3)]">
+          <article className="mx-auto max-w-2xl rounded-xl border border-white/15 bg-paper/94 p-6 text-stone-950 shadow-photo">
             <div className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-teal-800">{itemKindLabel(activeItem)}</div>
             <h2 className="font-serif text-3xl font-semibold leading-tight">{title}</h2>
             {activeItem.kind === "place" && activeItem.primary.description ? <p className="mt-4 text-sm leading-6 text-stone-700">{activeItem.primary.description}</p> : null}
@@ -952,9 +963,13 @@ export function JourneyPlayback({
                     className="pointer-events-none absolute top-0 flex -translate-x-1/2 flex-col items-center"
                     style={{ left: `${left}%` }}
                   >
-                    <span className={cn("h-4 w-4 rounded-full border-2 border-stone-950 shadow transition-transform", isActiveDay && "scale-110")} style={{ backgroundColor: color }} />
-                    {labelledTicks.has(index) ? (
-                      <span className={cn("mt-0.5 text-[10px] font-bold uppercase tabular-nums leading-none", isActiveDay ? "text-white" : "text-white/55")}>{day ? `D${day.day_number}` : "—"}</span>
+                    {day ? (
+                      <span className={cn("h-4 w-4 rounded-full border-2 border-stone-950 shadow transition-transform", isActiveDay && "scale-110")} style={{ backgroundColor: color }} />
+                    ) : (
+                      <span className={cn("h-4 w-4 rounded-full border-2 border-white/45 bg-stone-950 transition-transform", isActiveDay && "scale-110 border-white")} />
+                    )}
+                    {day && labelledTicks.has(index) ? (
+                      <span className={cn("mt-0.5 text-[11px] font-bold uppercase tabular-nums leading-none", isActiveDay ? "text-white" : "text-white/55")}>D{day.day_number}</span>
                     ) : null}
                   </span>
                 );

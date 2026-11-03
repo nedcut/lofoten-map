@@ -5,6 +5,7 @@
 // failure so a build without a backend still gets the plain card.
 
 import { dayColorAt } from "@/lib/day-colors";
+import { lineDistanceMeters } from "@/lib/geo";
 import { PHOTO_BUCKET, publicObjectUrl } from "@/lib/object-store";
 
 export type OgRoute = { color: string; onFoot: boolean; points: Array<[number, number]> };
@@ -130,7 +131,8 @@ export async function loadOgTrip(slug: string): Promise<OgTrip | null> {
     const routes = routeRows
       .map((route) => ({ color: dayColorAt(route.day_id ? dayIndex.get(route.day_id) ?? -1 : -1), onFoot: onFoot(route.mode), points: lineCoordinates(route.geometry_geojson) }))
       .filter((route) => route.points.length > 1);
-    const onFootMeters = routeRows.reduce((sum, route) => sum + (onFoot(route.mode) ? route.distance_meters ?? 0 : 0), 0);
+    // A route saved without a distance is measured from its line, as the map does.
+    const onFootMeters = routeRows.reduce((sum, route) => sum + (onFoot(route.mode) ? route.distance_meters ?? lineDistanceMeters({ type: "LineString", coordinates: lineCoordinates(route.geometry_geojson) }) : 0), 0);
     return {
       title: trip.title,
       description: trip.description,
@@ -152,10 +154,13 @@ export async function loadOgTrip(slug: string): Promise<OgTrip | null> {
  */
 export async function loadGoogleFont(family: string, axes: string, text: string): Promise<ArrayBuffer | null> {
   try {
-    const css = await (await fetch(`https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:${axes}&text=${encodeURIComponent(text)}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })).text();
-    const url = css.match(/src: url\((.+?)\) format\('(?:truetype|opentype)'\)/)?.[1];
+    const cssResponse = await fetch(`https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:${axes}&text=${encodeURIComponent(text)}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!cssResponse.ok) return null;
+    const url = (await cssResponse.text()).match(/src: url\((.+?)\) format\('(?:truetype|opentype)'\)/)?.[1];
     if (!url) return null;
-    return await (await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })).arrayBuffer();
+    // An error page is not a font; handing one to satori fails the whole card.
+    const fontResponse = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    return fontResponse.ok ? await fontResponse.arrayBuffer() : null;
   } catch {
     return null;
   }

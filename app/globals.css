@@ -26,6 +26,15 @@
   --radius-control: 0.5rem;
   --shadow-panel: 0 24px 80px rgba(46, 61, 54, 0.22);
   --shadow-control: 0 12px 30px rgba(46, 61, 54, 0.18);
+  /* A photo or card floating over Journey Mode's dark stage. */
+  --shadow-photo: 0 36px 100px rgba(0, 0, 0, 0.45);
+
+  /* Motion: two curves. ease-arrive for things that appear (cards, chapter
+     titles, popups): a quick start and a long, soft landing. ease-travel for
+     things that move from one place to another. Quick UI feedback (hover,
+     press) keeps Tailwind's defaults. */
+  --ease-arrive: cubic-bezier(0.25, 0.8, 0.25, 1);
+  --ease-travel: cubic-bezier(0.45, 0, 0.1, 1);
 }
 
 :root {
@@ -49,6 +58,13 @@ body {
 .font-serif {
   letter-spacing: -0.015em;
   font-variation-settings: "SOFT" 50;
+}
+
+/* A thin, track-less scrollbar for panels floating over the map, so a
+   classic grey gutter doesn't cut down the edge of a frosted card. */
+.scroll-quiet {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(120 113 108 / 0.35) transparent;
 }
 
 /* Slow drift on the active Journey hero slide — ambient motion that hints the
@@ -89,10 +105,10 @@ body {
   animation: journey-photo-in 1200ms ease-out both;
 }
 .journey-chapter-in {
-  animation: journey-chapter-in 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: journey-chapter-in 900ms var(--ease-arrive) both;
 }
 .journey-chapter-in .journey-chapter-line {
-  animation: journey-chapter-in 900ms 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: journey-chapter-in 900ms 180ms var(--ease-arrive) both;
 }
 
 @keyframes journey-photo-in {
