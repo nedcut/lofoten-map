@@ -238,6 +238,8 @@ export function JourneyPlayback({
   // on a narrow screen (eight days across a phone) can be dropped.
   const [trackWidth, setTrackWidth] = useState(0);
   const isPlayingRef = useRef(isPlaying);
+  // Set just before autoplay steps, so only its steps open an interlude.
+  const autoAdvanceRef = useRef(false);
   const activeIndexRef = useRef(activeIndex);
   const uploaderOptions = useMemo(
     () => personFilterOptions(allItems.map((item) => item.kind === "photo" ? item.primary.uploader_name : null)),
@@ -317,7 +319,7 @@ export function JourneyPlayback({
         videoFallbackTimerRef.current = null;
         if (!isPlayingRef.current) return;
         if (activeIndexRef.current >= items.length - 1) { setIsPlaying(false); setComplete(true); }
-        else onNext();
+        else { autoAdvanceRef.current = true; onNext(); }
       }, Math.max(videoFallbackDurationMs(video.duration, speed), 3000));
     });
   }, [activeIndex, isPlaying, items.length, onNext, speed, videoUrl]);
@@ -335,7 +337,7 @@ export function JourneyPlayback({
   function advanceVideoInSlideshow() {
     if (!isPlayingRef.current) return;
     if (activeIndexRef.current >= items.length - 1) { setIsPlaying(false); setComplete(true); }
-    else onNext();
+    else { autoAdvanceRef.current = true; onNext(); }
   }
 
   function scheduleVideoAdvance(durationMs: number) {
@@ -359,12 +361,15 @@ export function JourneyPlayback({
   const showInterlude = interlude !== null && isPlaying && !introOpen && !complete;
 
   // Open a chapter or a travel interlude when autoplay steps into a new day or
-  // across a long leg. Manual stepping while paused never triggers one.
+  // across a long leg. Manual steps (buttons, keys, the slider, the mini-map)
+  // never trigger one, even while autoplay is on.
   const activeItemId = activeItem?.id;
   useEffect(() => {
     const previous = previousItemRef.current;
     previousItemRef.current = activeItem ?? null;
-    if (!activeItem || !previous || previous.id === activeItem.id || !isPlayingRef.current) return;
+    const autoAdvanced = autoAdvanceRef.current;
+    autoAdvanceRef.current = false;
+    if (!activeItem || !previous || previous.id === activeItem.id || !isPlayingRef.current || !autoAdvanced) return;
     const km = previous.coord && activeItem.coord ? distanceKm(previous.coord, activeItem.coord) : 0;
     const far = mapVisible && km > TRAVEL_INTERLUDE_KM;
     const travel = far ? travelMs(km) : 0;
@@ -389,7 +394,7 @@ export function JourneyPlayback({
       // Autoplay runs through the journey once and then pauses on the final
       // item; manual prev/next still wraps for convenience.
       if (isLast) { setIsPlaying(false); setComplete(true); }
-      else onNext();
+      else { autoAdvanceRef.current = true; onNext(); }
     }, duration);
     return () => {
       if (autoplayTimerRef.current) window.clearTimeout(autoplayTimerRef.current);

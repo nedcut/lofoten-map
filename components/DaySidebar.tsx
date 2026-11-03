@@ -208,7 +208,7 @@ function DayFilmstrip({ photos }: { photos: Photo[] }) {
   );
 }
 
-const MODE_ICON: Record<RouteMode, typeof Footprints> = { hike: Footprints, walk: Footprints, bus: Bus, ferry: Anchor, other: Route };
+const MODE_ICON: Record<RouteMode, typeof Footprints> = { hike: Mountain, walk: Footprints, bus: Bus, ferry: Anchor, other: Route };
 const MODE_STAT_ORDER: RouteMode[] = ["hike", "walk", "bus", "ferry", "other"];
 
 // The day's numbers as small icon-and-figure pairs: media, journal pins, and

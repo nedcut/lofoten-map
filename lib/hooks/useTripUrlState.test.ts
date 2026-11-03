@@ -71,7 +71,11 @@ describe("useTripUrlState", () => {
     expect(result.current.storyOpen).toBe(true);
 
     setUrl("?story=1");
-    expect(render().result.current.storyOpen).toBe(false);
+    const ignored = render().result;
+    expect(ignored.current.storyOpen).toBe(false);
+    // Picking a day then must not leave a story link behind for a reload.
+    act(() => ignored.current.selectDay(demoDays[0].id));
+    expect(window.location.search).toBe("?day=1");
   });
 
   it("pushes a story to history, keeps it across days, and closes it with All days", () => {

@@ -39,8 +39,10 @@ export function useTripUrlState({ data, allJourneyItems, loading, onJourneyFromU
     setSelectedDayId(dayId);
     if (!dayId) setStoryOpen(false);
     if (typeof window === "undefined") return;
-    applyTripUrlState(window.location.href, { day: formatDayParam(dayId, data.days), ...(dayId ? {} : { story: null }) });
-  }, [data.days]);
+    // Keep `story=1` only while a story is actually open; a flag the page
+    // ignored (no day named) must not turn into a story link on reload.
+    applyTripUrlState(window.location.href, { day: formatDayParam(dayId, data.days), ...(dayId && storyOpen ? {} : { story: null }) });
+  }, [data.days, storyOpen]);
 
   // Opening a story pushes history so the back button returns to the map.
   const openStory = useCallback((dayId: string) => {

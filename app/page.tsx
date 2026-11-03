@@ -729,7 +729,7 @@ export default function Home() {
                 top-left corner on desktop. Hidden while a placement prompt
                 occupies the same spot. */}
             {!mapUnavailable && selectedDay && clickMode === "idle" ? (
-              <div className={cn(storyOpen && "md:hidden", "pointer-events-none absolute left-3 top-16 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-full border border-stone-200/80 bg-paper/92 py-1.5 pl-3 pr-4 text-xs font-bold text-stone-900 shadow-control backdrop-blur md:transition-[left,top] md:duration-300", sidebarOpen ? "md:left-[27rem] md:top-4" : "md:left-6 md:top-[4.25rem]")}>
+              <div className={cn(storyOpen && "md:hidden", "pointer-events-none absolute left-3 top-16 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-full border border-stone-200/80 bg-paper/92 py-1.5 pl-3 pr-4 text-xs font-bold text-stone-900 shadow-control backdrop-blur md:transition-[left,top] md:duration-300 md:motion-reduce:transition-none", sidebarOpen ? "md:left-[27rem] md:top-4" : "md:left-6 md:top-[4.25rem]")}>
                 <DayDot color={dayColorFor(dayColors, selectedDay.id)} className="h-3 w-3" />
                 <span className="truncate">Day {selectedDay.day_number}{selectedDay.date ? ` · ${formatDateOnly(selectedDay.date)}` : ""}{selectedDay.title ? ` · ${selectedDay.title}` : ""}</span>
               </div>
