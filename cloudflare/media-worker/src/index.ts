@@ -13,6 +13,9 @@ function responseHeaders() {
     "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
     "Access-Control-Max-Age": "86400",
     "X-Content-Type-Options": "nosniff",
+    // The app only ever embeds objects as <img>/<video>, so a document opened
+    // directly from this domain must never run script.
+    "Content-Security-Policy": "default-src 'none'; sandbox",
   });
 }
 

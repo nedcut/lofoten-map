@@ -134,7 +134,13 @@ export async function presignPut(input: {
       ContentLength: input.contentLength,
       IfNoneMatch: "*",
     }),
-    { expiresIn: 300 },
+    {
+      expiresIn: 300,
+      // The presigner leaves content-type out of the signature by default, which
+      // lets the uploader send any type on this URL. Signing it pins the stored
+      // type to the one the presign route validated.
+      signableHeaders: new Set(["content-type"]),
+    },
   );
 }
 

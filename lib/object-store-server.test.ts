@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { authorizeObjectRequest, isContentAddressedPhotoPath, objectKey, parseNamespace, validObjectPath } = await import("@/lib/object-store-server");
+const { authorizeObjectRequest, isContentAddressedPhotoPath, objectKey, parseNamespace, presignPut, validObjectPath } = await import("@/lib/object-store-server");
 
 const HASH = "a".repeat(64);
 
@@ -61,6 +61,35 @@ describe("objectKey", () => {
   it("joins namespace and path with a single slash", () => {
     expect(objectKey("trip-photos", "slug/abc.jpg")).toBe("trip-photos/slug/abc.jpg");
     expect(objectKey("avatars", "user/thumbs/a.webp")).toBe("avatars/user/thumbs/a.webp");
+  });
+});
+
+describe("presignPut", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  async function signedHeaders(contentType: string) {
+    vi.stubEnv("R2_ACCOUNT_ID", "fake-account");
+    vi.stubEnv("R2_ACCESS_KEY_ID", "fake-access-key");
+    vi.stubEnv("R2_SECRET_ACCESS_KEY", "fake-secret-key");
+    vi.stubEnv("R2_BUCKET_NAME", "fake-bucket");
+    const url = new URL(await presignPut({
+      namespace: "trip-photos",
+      path: `slug/${HASH}.jpg`,
+      contentType,
+      cacheControl: "31536000",
+      contentLength: 1024,
+    }));
+    return (url.searchParams.get("X-Amz-SignedHeaders") ?? "").split(";");
+  }
+
+  // Without this the storage service accepts any Content-Type on the URL, so a
+  // member could store an allowed upload under a type the app never approved.
+  it("signs the content type so the upload cannot change it", async () => {
+    const headers = await signedHeaders("image/jpeg");
+    expect(headers).toContain("content-type");
+    expect(headers).toContain("host");
   });
 });
 
