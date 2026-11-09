@@ -58,6 +58,13 @@ describe("resolveEditedTakenAt", () => {
     expect(resolveEditedTakenAt(initial, initial, stored)).toBe(stored);
   });
 
+  it("keeps the stored value when the browser drops zero seconds from the submitted value", () => {
+    const withZeroSeconds = "2026-07-12T22:30:00.123Z";
+    const zeroSecondsInitial = tripDateTimeInputValue(withZeroSeconds);
+    expect(zeroSecondsInitial).toBe("2026-07-13T00:30:00");
+    expect(resolveEditedTakenAt("2026-07-13T00:30", zeroSecondsInitial, withZeroSeconds)).toBe(withZeroSeconds);
+  });
+
   it("saves the new instant when the field changed", () => {
     expect(resolveEditedTakenAt("2026-07-13T01:00:00", initial, stored)).toBe("2026-07-12T23:00:00.000Z");
   });

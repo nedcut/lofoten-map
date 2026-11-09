@@ -49,10 +49,16 @@ export function tripDayStartMs(date: string): number | null {
 
 /**
  * The `taken_at` to save from the editor. A field left as it was keeps the
- * stored string exactly (seconds and milliseconds included); an emptied or
- * unparseable field saves null.
+ * stored string exactly (seconds and milliseconds included), even if the
+ * browser normalised the submitted text; an emptied or unparseable field
+ * saves null.
  */
 export function resolveEditedTakenAt(submitted: string, initial: string, stored: string | null): string | null {
   if (submitted === initial) return stored;
-  return tripDateTimeInputToIso(submitted);
+  const submittedIso = tripDateTimeInputToIso(submitted);
+  // A datetime-local input drops zero seconds ("00:30:00" is submitted as
+  // "00:30"), so an untouched field can differ from its initial string while
+  // still denoting the same second.
+  if (submittedIso !== null && submittedIso === tripDateTimeInputToIso(initial)) return stored;
+  return submittedIso;
 }
