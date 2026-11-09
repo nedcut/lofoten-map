@@ -207,9 +207,11 @@ $$;
 revoke execute on function public.is_trip_member_by_slug(text) from public, anonymous;
 grant execute on function public.is_trip_member_by_slug(text) to authenticated;
 
--- Used only by the authenticated R2 avatar route when serving an existing
+-- Used only by the authenticated R2 avatar route to authorize deleting a legacy
 -- avatar whose object key still contains the user's old Supabase UUID. Exact
--- equality prevents this RPC from becoming a general object-prefix oracle.
+-- equality prevents this RPC from becoming a general object-prefix oracle. It
+-- trusts trip_members.avatar_path, so update_my_trip_profile is what stops a
+-- member from claiming someone else's key.
 create function public.is_my_avatar_path(check_path text)
 returns boolean
 language sql
@@ -314,7 +316,7 @@ begin
     raise exception 'Only trip admins can add members' using errcode = '42501';
   end if;
 
-  select id, coalesce(nullif("name", ''), email)
+  select id, nullif(btrim("name"), '')
   into found_user_id, found_display_name
   from neon_auth."user"
   where lower(email) = normalized_email
@@ -359,6 +361,7 @@ as $$
 declare
   found_trip_id uuid;
   clean_name text;
+  current_avatar_path text;
 begin
   if nullif(auth.user_id(), '')::uuid is null then
     raise exception 'Must be signed in' using errcode = '42501';
@@ -374,15 +377,29 @@ begin
 
   clean_name := nullif(btrim(new_display_name), '');
 
-  update public.trip_members
-  set display_name = clean_name,
-      avatar_path = new_avatar_path
+  select avatar_path into current_avatar_path
+  from public.trip_members
   where trip_id = found_trip_id
     and user_id = nullif(auth.user_id(), '')::uuid;
 
   if not found then
     raise exception 'Join the trip before editing your profile' using errcode = '42501';
   end if;
+
+  -- avatar_path is publicly readable and the storage delete route trusts it, so
+  -- a member may only clear it, keep what they already have, or point it at a
+  -- key under their own user id.
+  if new_avatar_path is not null
+     and new_avatar_path is distinct from current_avatar_path
+     and not starts_with(new_avatar_path, auth.user_id() || '/') then
+    raise exception 'Avatar path must belong to you' using errcode = '42501';
+  end if;
+
+  update public.trip_members
+  set display_name = clean_name,
+      avatar_path = new_avatar_path
+  where trip_id = found_trip_id
+    and user_id = nullif(auth.user_id(), '')::uuid;
 end;
 $$;
 revoke execute on function public.update_my_trip_profile(text, text, text) from public, anonymous;
@@ -543,7 +560,12 @@ begin
 
   if approve then
     insert into public.trip_members (trip_id, user_id, role, display_name)
-    values (req.trip_id, req.user_id, 'admin', req.display_name)
+    values (
+      req.trip_id,
+      req.user_id,
+      'admin',
+      case when req.display_name is distinct from req.email then req.display_name end
+    )
     on conflict (trip_id, user_id) do update
       set role = 'admin';
   end if;
