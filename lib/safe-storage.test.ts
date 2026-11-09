@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { isStorageAvailable, readStorage, removeStorage, writeStorage } from "./safe-storage";
+import { readStorage, removeStorage, writeStorage } from "./safe-storage";
 
 function fakeStorage() {
   const data = new Map<string, string>();
@@ -26,7 +26,6 @@ describe("safe storage", () => {
     expect(readStorage("session", "k")).toBeNull();
     removeStorage("local", "k");
     expect(readStorage("local", "k")).toBeNull();
-    expect(isStorageAvailable("local")).toBe(true);
   });
 
   it("returns null and no-ops when window is undefined", () => {
@@ -34,7 +33,6 @@ describe("safe storage", () => {
     expect(readStorage("local", "k")).toBeNull();
     expect(() => writeStorage("local", "k", "v")).not.toThrow();
     expect(() => removeStorage("local", "k")).not.toThrow();
-    expect(isStorageAvailable("local")).toBe(false);
   });
 
   it("returns null and no-ops when the storage object is undefined", () => {
@@ -43,7 +41,6 @@ describe("safe storage", () => {
     expect(readStorage("session", "k")).toBeNull();
     expect(() => writeStorage("local", "k", "v")).not.toThrow();
     expect(() => removeStorage("session", "k")).not.toThrow();
-    expect(isStorageAvailable("session")).toBe(false);
   });
 
   it("returns null and no-ops when the storage getter throws", () => {
@@ -58,7 +55,6 @@ describe("safe storage", () => {
     expect(readStorage("session", "k")).toBeNull();
     expect(() => writeStorage("local", "k", "v")).not.toThrow();
     expect(() => removeStorage("session", "k")).not.toThrow();
-    expect(isStorageAvailable("local")).toBe(false);
   });
 
   it("swallows errors thrown by getItem, setItem and removeItem", () => {

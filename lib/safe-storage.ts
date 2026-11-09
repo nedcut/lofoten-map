@@ -13,10 +13,6 @@ function getStorage(kind: StorageKind): Storage | null {
   }
 }
 
-export function isStorageAvailable(kind: StorageKind): boolean {
-  return getStorage(kind) !== null;
-}
-
 export function readStorage(kind: StorageKind, key: string): string | null {
   try {
     return getStorage(kind)?.getItem(key) ?? null;
