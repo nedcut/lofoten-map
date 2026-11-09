@@ -29,7 +29,7 @@ const { outputFiles } = await build({
 const config = JSON.parse((await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8")));
 const body = "0123456789".repeat(100);
 // An object opened directly from the media domain must never run script.
-const CONTENT_SECURITY_POLICY = "default-src 'none'; sandbox";
+const CONTENT_SECURITY_POLICY = "default-src 'none'; img-src 'self'; media-src 'self'; sandbox";
 
 test("cold and warm cache preserve range and conditional semantics", async (t) => {
   const mf = new Miniflare(convertV4MiniflareOptions({

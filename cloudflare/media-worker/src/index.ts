@@ -14,8 +14,11 @@ function responseHeaders() {
     "Access-Control-Max-Age": "86400",
     "X-Content-Type-Options": "nosniff",
     // The app only ever embeds objects as <img>/<video>, so a document opened
-    // directly from this domain must never run script.
-    "Content-Security-Policy": "default-src 'none'; sandbox",
+    // directly from this domain must never run script. img-src and media-src
+    // stay open to 'self' because a browser opening a photo or video URL in a tab
+    // wraps it in its own image/media document, which loads the file as a
+    // subresource; default-src 'none' alone would show a broken image.
+    "Content-Security-Policy": "default-src 'none'; img-src 'self'; media-src 'self'; sandbox",
   });
 }
 
