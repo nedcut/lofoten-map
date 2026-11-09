@@ -38,6 +38,9 @@ describe("Neon schema contract: avatar paths and public display names", () => {
   it("does not copy an email address into a member's public display name when granting access", () => {
     const body = functionText(schema, "grant_trip_member_by_email");
     expect(body).not.toContain(`coalesce(nullif("name", ''), email)`);
+    // The on conflict target and returns-table columns share names (trip_id,
+    // user_id); without this directive every call fails as "ambiguous".
+    expect(body).toMatch(/as \$\$\s*#variable_conflict use_column\s*declare/);
   });
 
   it("does not copy an email-shaped admin request name into trip_members", () => {

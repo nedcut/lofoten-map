@@ -5,7 +5,11 @@
 -- 2. grant_trip_member_by_email and resolve_admin_request stop copying a user's
 --    email address into trip_members.display_name, which anonymous visitors can
 --    read. The data cleanup at the end removes emails already stored in public
---    columns. Safe to re-run.
+--    columns.
+-- 3. grant_trip_member_by_email failed on every call with 'column reference
+--    "trip_id" is ambiguous' (its on conflict target clashed with the returns
+--    table columns); '#variable_conflict use_column' makes column names win.
+--    Safe to re-run.
 --
 --   psql "$TARGET_DATABASE_URL" --no-psqlrc --set=ON_ERROR_STOP=1 \
 --     --file=neon/patches/2026-11-09-avatar-path-and-display-names.sql
@@ -85,6 +89,7 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+#variable_conflict use_column
 declare
   found_trip_id uuid;
   found_user_id uuid;

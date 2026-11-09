@@ -288,6 +288,7 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+#variable_conflict use_column
 declare
   found_trip_id uuid;
   found_user_id uuid;
