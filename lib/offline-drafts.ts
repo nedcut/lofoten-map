@@ -1,4 +1,5 @@
 import type { LngLat } from "@/types/trip";
+import { readStorage, removeStorage, writeStorage } from "@/lib/safe-storage";
 
 export type NoteDraft = {
   body: string;
@@ -15,9 +16,8 @@ function noteDraftKey(tripSlug: string) {
 }
 
 export function readNoteDraft(tripSlug: string): NoteDraft | null {
-  if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(noteDraftKey(tripSlug));
+    const raw = readStorage("local", noteDraftKey(tripSlug));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as NoteDraft;
     if (typeof parsed.body !== "string") return null;
@@ -28,16 +28,14 @@ export function readNoteDraft(tripSlug: string): NoteDraft | null {
 }
 
 export function writeNoteDraft(tripSlug: string, draft: NoteDraft) {
-  if (typeof window === "undefined") return;
   const empty = !draft.body.trim() && !draft.authorName.trim() && !draft.coordinate;
   if (empty) {
-    window.localStorage.removeItem(noteDraftKey(tripSlug));
+    removeStorage("local", noteDraftKey(tripSlug));
     return;
   }
-  window.localStorage.setItem(noteDraftKey(tripSlug), JSON.stringify(draft));
+  writeStorage("local", noteDraftKey(tripSlug), JSON.stringify(draft));
 }
 
 export function clearNoteDraft(tripSlug: string) {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(noteDraftKey(tripSlug));
+  removeStorage("local", noteDraftKey(tripSlug));
 }

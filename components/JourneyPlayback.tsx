@@ -17,6 +17,7 @@ import { syncJourneyVideo, videoFallbackDurationMs } from "@/lib/journey-video";
 import { dayColorMap } from "@/lib/day-colors";
 import { journeyDayStops, journeyTimelineTicks } from "@/lib/journey-timeline";
 import { initialMinimapVisible, MINIMAP_VISIBLE_STORAGE_KEY } from "@/lib/journey-minimap";
+import { readStorage, writeStorage } from "@/lib/safe-storage";
 import { shareJourneyLink, type ShareResult } from "@/lib/share";
 import type { Day, Photo, RouteMode, RouteSegment, Trip } from "@/types/trip";
 
@@ -230,7 +231,7 @@ export function JourneyPlayback({
   // The mini-map can be hidden entirely so the photo is never covered. The
   // choice lasts for the browser session; with no choice yet, short screens
   // start without it. The viewer is client-only, so reading storage here is safe.
-  const [mapVisible, setMapVisible] = useState(() => initialMinimapVisible(window.sessionStorage.getItem(MINIMAP_VISIBLE_STORAGE_KEY), window.innerHeight));
+  const [mapVisible, setMapVisible] = useState(() => initialMinimapVisible(readStorage("session", MINIMAP_VISIBLE_STORAGE_KEY), window.innerHeight));
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const resumeTimerRef = useRef<number | null>(null);
   const autoplayTimerRef = useRef<number | null>(null);
@@ -611,7 +612,7 @@ export function JourneyPlayback({
   function toggleMap() {
     const next = !mapVisible;
     setMapVisible(next);
-    window.sessionStorage.setItem(MINIMAP_VISIBLE_STORAGE_KEY, next ? "1" : "0");
+    writeStorage("session", MINIMAP_VISIBLE_STORAGE_KEY, next ? "1" : "0");
   }
 
   function jumpToDay(stopIndex: number) {

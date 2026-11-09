@@ -5,6 +5,7 @@ import type { ChangeEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { PhotoUploadProgress } from "@/components/UploadPhotoPanel";
 import { Button } from "@/components/ui/Button";
+import { readStorage, writeStorage } from "@/lib/safe-storage";
 import { dayLabel, locationLabel, type QueueItem } from "@/lib/upload-queue";
 import { cn, TRIP_TIME_ZONE } from "@/lib/utils";
 import type { Day } from "@/types/trip";
@@ -29,8 +30,7 @@ const PREVIEW_SIZE_STORAGE_KEY = "lofoten-placement-preview-size";
 const MEDIA_ACCEPT = "image/*,video/*,.heic,.heif,.mov,.m4v";
 
 function storedSizeIndex() {
-  if (typeof window === "undefined") return 1;
-  const raw = window.localStorage.getItem(PREVIEW_SIZE_STORAGE_KEY);
+  const raw = readStorage("local", PREVIEW_SIZE_STORAGE_KEY);
   const parsed = raw === null ? NaN : Number(raw);
   return Number.isInteger(parsed) && parsed >= 0 && parsed < PREVIEW_SIZES.length ? parsed : 1;
 }
@@ -93,11 +93,9 @@ export function PlacementWorkspace({ items, days, mapAvailable, activeItemId, se
   const filmstripRef = useRef<HTMLDivElement | null>(null);
 
   function stepPreviewSize(direction: 1 | -1) {
-    setPreviewSizeIndex((current) => {
-      const next = Math.min(PREVIEW_SIZES.length - 1, Math.max(0, current + direction));
-      if (typeof window !== "undefined") window.localStorage.setItem(PREVIEW_SIZE_STORAGE_KEY, String(next));
-      return next;
-    });
+    const next = Math.min(PREVIEW_SIZES.length - 1, Math.max(0, previewSizeIndex + direction));
+    setPreviewSizeIndex(next);
+    writeStorage("local", PREVIEW_SIZE_STORAGE_KEY, String(next));
   }
 
   function handleAddFiles(event: ChangeEvent<HTMLInputElement>) {
