@@ -1,4 +1,5 @@
 import ExifReader from "exifreader";
+import { tripLocalDateToIso } from "./trip-time";
 import { TRIP_TIME_ZONE } from "./utils";
 
 export type ExtractedExif = {
@@ -90,16 +91,6 @@ function applyGpsRef(coordinate: number, ref: unknown): number {
   return gpsRef === "S" || gpsRef === "W" ? -Math.abs(coordinate) : coordinate;
 }
 
-function timeZoneOffsetMs(instant: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
-  }).formatToParts(instant);
-  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((entry) => entry.type === type)?.value);
-  return Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second")) - instant.getTime();
-}
-
 // Accepts EXIF OffsetTime* values ("+02:00", "-0400") and the trailing zone
 // designators found inside video creation timestamps ("Z", "UTC").
 function normalizeUtcOffset(value: string | undefined): string | null {
@@ -108,16 +99,6 @@ function normalizeUtcOffset(value: string | undefined): string | null {
   if (/^(?:Z|UTC|GMT)$/i.test(trimmed)) return "+00:00";
   const match = trimmed.match(/^([+-])(\d{2}):?(\d{2})$/);
   return match ? `${match[1]}${match[2]}:${match[3]}` : null;
-}
-
-function tripLocalDateToIso(year: number, month: number, day: number, hour: number, minute: number, second: number): string | null {
-  const wallClockAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
-  const initial = new Date(wallClockAsUtc);
-  if (initial.getUTCFullYear() !== year || initial.getUTCMonth() !== month - 1 || initial.getUTCDate() !== day
-    || initial.getUTCHours() !== hour || initial.getUTCMinutes() !== minute || initial.getUTCSeconds() !== second) return null;
-  let instantMs = wallClockAsUtc - timeZoneOffsetMs(initial, TRIP_TIME_ZONE);
-  instantMs = wallClockAsUtc - timeZoneOffsetMs(new Date(instantMs), TRIP_TIME_ZONE);
-  return new Date(instantMs).toISOString();
 }
 
 export function parseExifDate(value: string | undefined, offset?: string): { takenAt: string | null; takenDate: string | null; timeZoneSource: "embedded" | "trip-local" | null } {

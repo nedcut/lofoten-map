@@ -4,6 +4,7 @@ import { Loader2, MapPin, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import type { Day, Note, Photo, Place, RouteMode, RouteSegment, Trip } from "@/types/trip";
+import { resolveEditedTakenAt, tripDateTimeInputValue } from "@/lib/trip-time";
 import { TRIP_TIME_ZONE } from "@/lib/utils";
 
 // The per-row admin edit forms (days, routes, notes, places, photos) plus the
@@ -77,21 +78,6 @@ function optionalNumber(formData: FormData, key: string) {
   if (!value) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function datetimeLocalValue(value: string | null) {
-  if (!value) return "";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "";
-  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
-}
-
-function optionalDateTime(formData: FormData, key: string) {
-  const value = String(formData.get(key) ?? "").trim();
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function dayOptions(days: Day[]) {
@@ -306,6 +292,8 @@ export function PlaceEditor({ place, days, isSaving, onSave, onDelete }: { place
 }
 
 export function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo: Photo; days: Day[]; isSaving: boolean; onSave: (photoId: string, input: PhotoUpdate) => Promise<void>; onDelete: () => Promise<void> }) {
+  const takenAtInitial = tripDateTimeInputValue(photo.taken_at);
+
   async function submit(formData: FormData) {
     await onSave(photo.id, {
       day_id: String(formData.get("day_id") || "") || null,
@@ -313,7 +301,7 @@ export function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo
       caption: optionalString(formData, "caption"),
       lat: optionalNumber(formData, "lat"),
       lng: optionalNumber(formData, "lng"),
-      taken_at: optionalDateTime(formData, "taken_at"),
+      taken_at: resolveEditedTakenAt(String(formData.get("taken_at") ?? "").trim(), takenAtInitial, photo.taken_at),
     });
   }
 
@@ -332,7 +320,7 @@ export function PhotoEditor({ photo, days, isSaving, onSave, onDelete }: { photo
           <Field label="Latitude"><Input name="lat" type="number" step="any" defaultValue={photo.lat ?? ""} /></Field>
           <Field label="Longitude"><Input name="lng" type="number" step="any" defaultValue={photo.lng ?? ""} /></Field>
         </div>
-        <Field label="Taken time"><Input name="taken_at" type="datetime-local" defaultValue={datetimeLocalValue(photo.taken_at)} /></Field>
+        <Field label="Taken time" hint="Norway time"><Input name="taken_at" type="datetime-local" step={1} defaultValue={takenAtInitial} /></Field>
         <Field label="Caption" hideLabel><Textarea name="caption" defaultValue={photo.caption ?? ""} placeholder="Caption" className="min-h-14" /></Field>
         <EditorActions isSaving={isSaving} saveLabel="Save photo" deleteLabel="Delete photo" deleteConfirmMessage={`Delete ${photoLabel(photo)}? The uploaded image file will also be removed when storage cleanup succeeds.`} onDelete={onDelete} />
       </div>
