@@ -118,6 +118,9 @@ type Options = {
 };
 
 export function useTripData({ backend, backendConfigured = Boolean(backend), user, authLoading, tripSlug, initialData }: Options) {
+  // The auth SDK hands out a new user object on every auth event (session
+  // restore, token refresh); only a change of identity should reload the trip.
+  const userId = user?.id ?? null;
   const [data, setData] = useState<TripData>(initialData);
   const [loading, setLoading] = useState(Boolean(backend) || backendConfigured);
   const [error, setError] = useState<string | null>(null);
@@ -170,7 +173,7 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
           // Changed, or the check failed: fall through to a full reload, which
           // reports any real failure the usual way.
         }
-        const withAdminRequests = Boolean(user);
+        const withAdminRequests = userId !== null;
         const rows = (await fetchTripEmbedded(backend, tripSlug, withAdminRequests))
           ?? (await fetchTripSeparately(backend, tripSlug, withAdminRequests));
         if (!isCurrent()) return;
@@ -244,12 +247,13 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
     };
     void request.then(clearInFlight, clearInFlight);
     return request;
-  }, [backend, tripSlug, user]);
+  }, [backend, tripSlug, userId]);
 
   // Trip rows are public, so the first load does not wait for the session check:
   // both start together, and the SDK's data requests share its session lookup.
-  // When a signed-in user resolves, loadData changes and reloads with their
-  // admin requests.
+  // When a signed-in user resolves (or a different user signs in), loadData
+  // changes with the user id and reloads with their admin requests. A new user
+  // object for the same id does not.
   useEffect(() => {
     if (!backend) return;
     void loadData();
@@ -257,7 +261,7 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
 
   useEffect(() => {
     if (!backend || authLoading) return;
-    const interval = user ? MEMBER_POLL_INTERVAL_MS : GUEST_POLL_INTERVAL_MS;
+    const interval = userId !== null ? MEMBER_POLL_INTERVAL_MS : GUEST_POLL_INTERVAL_MS;
     let stopped = false;
     let timer: number | null = null;
     let polling = false;
@@ -299,7 +303,7 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
       window.removeEventListener("focus", handleReturn);
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [authLoading, backend, loadData, user]);
+  }, [authLoading, backend, loadData, userId]);
 
   return {
     data,

@@ -207,6 +207,78 @@ describe("useTripMutations", () => {
     });
   });
 
+  describe("movePhoto", () => {
+    const photo = demoTripData.photos.find((item) => item.lat !== null && item.lng !== null)!;
+    const original = { lat: photo.lat, lng: photo.lng };
+    const dropped = { lat: 68.1, lng: 13.5 };
+    const coordinateOf = (data: TripData) => {
+      const current = data.photos.find((item) => item.id === photo.id)!;
+      return { lat: current.lat, lng: current.lng };
+    };
+
+    it("puts the marker back when the backend reports an error", async () => {
+      const { backend } = createFakeBackend({ photos: { data: null, error: { message: "network down" } } });
+      const { result, setGlobalError } = renderMutations(backend);
+
+      await act(async () => {
+        await result.current.mutations.movePhoto(photo.id, dropped);
+      });
+
+      expect(coordinateOf(result.current.data)).toEqual(original);
+      expect(setGlobalError).toHaveBeenLastCalledWith("network down");
+    });
+
+    it("puts the marker back when no row was updated", async () => {
+      const { backend } = createFakeBackend({ photos: { data: [], error: null } });
+      const { result } = renderMutations(backend);
+
+      await act(async () => {
+        await result.current.mutations.movePhoto(photo.id, dropped);
+      });
+
+      expect(coordinateOf(result.current.data)).toEqual(original);
+      expect(result.current.mutations.status.tone).toBe("error");
+    });
+
+    it("puts the marker back when the request throws", async () => {
+      const backend = {
+        from: () => {
+          throw new Error("offline");
+        },
+      } as unknown as BackendClient;
+      const { result, setGlobalError } = renderMutations(backend);
+
+      await act(async () => {
+        await result.current.mutations.movePhoto(photo.id, dropped);
+      });
+
+      expect(coordinateOf(result.current.data)).toEqual(original);
+      expect(setGlobalError).toHaveBeenLastCalledWith("offline");
+    });
+
+    it("keeps the new position when the save succeeds", async () => {
+      const { backend, calls } = createFakeBackend({ photos: { data: [{ id: photo.id }], error: null } });
+      const { result } = renderMutations(backend);
+
+      await act(async () => {
+        await result.current.mutations.movePhoto(photo.id, dropped);
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(coordinateOf(result.current.data)).toEqual(dropped);
+    });
+
+    it("keeps the new position in demo mode", async () => {
+      const { result } = renderMutations(null);
+
+      await act(async () => {
+        await result.current.mutations.movePhoto(photo.id, dropped);
+      });
+
+      expect(coordinateOf(result.current.data)).toEqual(dropped);
+    });
+  });
+
   describe("deleteDataItem", () => {
     it("deletes a photo row, removes its stored files, and reloads", async () => {
       const { backend, calls } = createFakeBackend();

@@ -128,6 +128,28 @@ describe("useTripData", () => {
     expect(result.current.data.routeSegments).toEqual(demoRoutes);
   });
 
+  it("does not reload when the auth SDK hands out a new user object with the same id", async () => {
+    const { backend, calls } = createFakeBackend(okResponses());
+    const { result, rerender } = renderHook(
+      ({ user }: { user: BackendUser }) => useTripData({ backend, user, authLoading: false, tripSlug: demoTrip.slug, initialData: emptyTripData }),
+      { initialProps: { user: fakeUser } },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(calls).toEqual(["trips"]);
+
+    rerender({ user: { id: "user-1" } as unknown as BackendUser });
+    await act(async () => {
+      for (let tick = 0; tick < 25; tick += 1) await Promise.resolve();
+    });
+
+    expect(calls).toEqual(["trips"]);
+    expect(result.current.loading).toBe(false);
+
+    rerender({ user: { id: "user-2" } as unknown as BackendUser });
+    await waitFor(() => expect(calls).toEqual(["trips", "trips"]));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
   it("embeds admin requests for a signed-in user", async () => {
     const responses = okResponses();
     responses.admin_requests = { data: [{ id: "request-1", trip_id: demoTrip.id }], error: null };
