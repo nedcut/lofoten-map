@@ -649,6 +649,8 @@ $$;
 -- user id, or the value it already had (legacy keys under an old Supabase id).
 -- The trip-admin RLS policy lets admins write trip_members directly, so the rule
 -- lives on the table. It checks new.user_id (the row's owner), not the caller.
+-- Changing a row's user_id re-runs the check, so an unchanged path is accepted
+-- only while the owner is unchanged too.
 -- It applies only to API callers: sessions with no auth.user_id() (the database
 -- owner, psql, neon/migration/) are not checked.
 create or replace function public.check_trip_member_avatar_path()
@@ -662,7 +664,9 @@ begin
   end if;
 
   if new.avatar_path is null
-     or (tg_op = 'UPDATE' and new.avatar_path is not distinct from old.avatar_path)
+     or (tg_op = 'UPDATE'
+         and new.user_id = old.user_id
+         and new.avatar_path is not distinct from old.avatar_path)
      or starts_with(new.avatar_path, new.user_id::text || '/') then
     return new;
   end if;
@@ -674,7 +678,7 @@ revoke execute on function public.check_trip_member_avatar_path() from public, a
 
 drop trigger if exists trip_members_check_avatar_path on public.trip_members;
 create trigger trip_members_check_avatar_path
-  before insert or update of avatar_path on public.trip_members
+  before insert or update of avatar_path, user_id on public.trip_members
   for each row execute function public.check_trip_member_avatar_path();
 
 grant usage on schema public to anonymous, authenticated;

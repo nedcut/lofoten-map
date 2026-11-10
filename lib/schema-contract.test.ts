@@ -63,9 +63,12 @@ describe("Neon schema contract: avatar paths and public display names", () => {
     // The row's owner, not the caller, decides which prefix is allowed.
     expect(body).toContain("starts_with(new.avatar_path, new.user_id::text || '/')");
     expect(body).toContain("new.avatar_path is not distinct from old.avatar_path");
+    // An unchanged path counts only while the owner is unchanged: moving a row to
+    // another user_id and back must not leave it holding that user's key.
+    expect(body).toMatch(/tg_op = 'UPDATE'\s+and new\.user_id = old\.user_id\s+and new\.avatar_path is not distinct from old\.avatar_path/);
     expect(body).toContain("errcode = '42501'");
     expect(triggerText(schema, "trip_members_check_avatar_path")).toMatch(
-      /before insert or update of avatar_path\s+on public\.trip_members\s+for each row execute function public\.check_trip_member_avatar_path\(\)/,
+      /before insert or update of avatar_path, user_id\s+on public\.trip_members\s+for each row execute function public\.check_trip_member_avatar_path\(\)/,
     );
     // Leave the RLS policy alone: the trigger, not the policy, owns this rule.
     expect(schema).toMatch(/create policy "admins write trip memberships"\s+on public\.trip_members for all to authenticated\s+using \(public\.is_trip_admin\(trip_id\)\)\s+with check \(public\.is_trip_admin\(trip_id\)\)/);
