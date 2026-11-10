@@ -12,6 +12,7 @@ import type { Day, LngLat, RouteSegment } from "@/types/trip";
 import { canUseStyle } from "@/lib/map-style";
 import { isFatalMapError, MAP_STYLE_TIMEOUT_MS } from "@/lib/map-init";
 import { applyLofotenAtmosphere } from "@/lib/map-atmosphere";
+import { readStorage, writeStorage } from "@/lib/safe-storage";
 
 type Props = {
   routes: RouteSegment[];
@@ -157,8 +158,7 @@ export const MINIMAP_WIDTH_VAR = "--journey-minimap-width";
 const EXPANDED_SIZE_STORAGE_KEY = "lofoten-minimap-size-expanded";
 
 function storedSizeIndex(key: string, presetCount: number) {
-  if (typeof window === "undefined") return 1;
-  const raw = window.localStorage.getItem(key);
+  const raw = readStorage("local", key);
   const parsed = raw === null ? NaN : Number(raw);
   return Number.isInteger(parsed) && parsed >= 0 && parsed < presetCount ? parsed : 1;
 }
@@ -617,14 +617,12 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
   // the enlarged size when expanded.
   function stepSize(direction: 1 | -1) {
     sizeChangedAtRef.current = performance.now();
-    const [setter, key, count] = expanded
-      ? [setExpandedSizeIndex, EXPANDED_SIZE_STORAGE_KEY, EXPANDED_SIZES.length] as const
-      : [setSizeIndex, SIZE_STORAGE_KEY, COLLAPSED_SIZES.length] as const;
-    setter((current) => {
-      const next = Math.min(count - 1, Math.max(0, current + direction));
-      if (typeof window !== "undefined") window.localStorage.setItem(key, String(next));
-      return next;
-    });
+    const [setter, key, count, current] = expanded
+      ? [setExpandedSizeIndex, EXPANDED_SIZE_STORAGE_KEY, EXPANDED_SIZES.length, expandedSizeIndex] as const
+      : [setSizeIndex, SIZE_STORAGE_KEY, COLLAPSED_SIZES.length, sizeIndex] as const;
+    const next = Math.min(count - 1, Math.max(0, current + direction));
+    setter(next);
+    writeStorage("local", key, String(next));
   }
 
   function rotateBy(degrees: number) {
