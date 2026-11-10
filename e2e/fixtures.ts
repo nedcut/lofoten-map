@@ -6,8 +6,8 @@ import { expect, test as base } from "@playwright/test";
 // assertion-only suite never sees.
 
 // Vercel's analytics scripts only exist on a Vercel deployment; locally the
-// browser logs their 404 as a generic resource error.
-const IGNORED_CONSOLE = [/Failed to load resource/, /_vercel\/(insights|speed-insights)/];
+// browser logs errors naming their URL, in the message or as its source.
+const VERCEL_ANALYTICS = /\/_vercel\/(insights|speed-insights)\//;
 
 export const test = base.extend<{ failOnBrowserErrors: void }>({
   failOnBrowserErrors: [async ({ page }, use) => {
@@ -15,8 +15,9 @@ export const test = base.extend<{ failOnBrowserErrors: void }>({
     page.on("pageerror", (error) => problems.push(`uncaught: ${error.message}`));
     page.on("console", (message) => {
       if (message.type() !== "error") return;
-      const text = message.text();
-      if (!IGNORED_CONSOLE.some((pattern) => pattern.test(text))) problems.push(`console.error: ${text}`);
+      const source = message.location().url;
+      if (VERCEL_ANALYTICS.test(source) || VERCEL_ANALYTICS.test(message.text())) return;
+      problems.push(`console.error: ${message.text()} (${source})`);
     });
     await use();
     expect(problems, "the page logged errors during this test").toEqual([]);
