@@ -338,6 +338,39 @@ describe("useTripMutations", () => {
         expect(coordinateOf(result.current.data)).toEqual(second);
       });
 
+      it("ignores a stale save that resolves after a later drag started a new sequence", async () => {
+        const third = { lat: 68.3, lng: 13.7 };
+        const { backend, settlers } = createDeferredBackend();
+        const { result } = renderMutations(backend);
+        const { firstDone, secondDone } = await dragTwice(result);
+
+        // The newest move fails and settles, ending the first sequence.
+        await act(async () => {
+          settlers[1](failure);
+          await secondDone;
+        });
+        expect(coordinateOf(result.current.data)).toEqual(original);
+
+        // A new drag starts while the very first save is still in flight.
+        let thirdDone!: Promise<void>;
+        await act(async () => {
+          thirdDone = result.current.mutations.movePhoto(photo.id, third);
+        });
+        expect(coordinateOf(result.current.data)).toEqual(third);
+
+        await act(async () => {
+          settlers[0](failure);
+          await firstDone;
+        });
+        expect(coordinateOf(result.current.data)).toEqual(third);
+
+        await act(async () => {
+          settlers[2](failure);
+          await thirdDone;
+        });
+        expect(coordinateOf(result.current.data)).toEqual(original);
+      });
+
       it("restores the first position when only the second save fails", async () => {
         const { backend, settlers } = createDeferredBackend();
         const { result } = renderMutations(backend);

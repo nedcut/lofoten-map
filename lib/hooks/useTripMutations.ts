@@ -392,8 +392,10 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
         lng: coordinate.lng,
         taken_at: photo.taken_at,
       });
+      // Compare identity, not just presence: the entry this move joined may have
+      // been deleted and re-created by a later drag, and that one is not ours.
       const settled = pending.get(photoId);
-      if (!settled) return;
+      if (settled !== entry) return;
       const isNewest = settled.latest === moveNumber;
       if (saved) settled.baseline = { lat: coordinate.lat, lng: coordinate.lng };
       else if (isNewest && settled.baseline) {
