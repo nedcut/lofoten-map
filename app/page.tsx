@@ -466,9 +466,14 @@ export default function Home() {
   // While Journey Mode is open the main map is hidden (display:none) behind the
   // full-screen viewer, so only the mini-map renders a live WebGL context. A
   // display:none canvas loses its dimensions, so resize it once we return.
+  // resize() does nothing when Mapbox never noticed the map was hidden, so the
+  // repaint is what guarantees an "idle" for the photo thumbnails to resync on.
   useEffect(() => {
     if (journeyOpen || !map) return;
-    const id = window.setTimeout(() => map.resize(), 60);
+    const id = window.setTimeout(() => {
+      map.resize();
+      map.triggerRepaint();
+    }, 60);
     return () => window.clearTimeout(id);
   }, [journeyOpen, map]);
 

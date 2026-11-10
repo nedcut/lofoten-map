@@ -111,6 +111,13 @@ body {
   animation: journey-chapter-in 900ms 180ms var(--ease-arrive) both;
 }
 
+/* Leaving the stage, the mini-map keeps its stage z-index until the 700ms
+   shrink back to its corner is done. Reduced motion has no shrink to wait for. */
+@media (prefers-reduced-motion: no-preference) {
+  .journey-minimap-docked {
+    transition: right 700ms ease-in-out, top 700ms ease-in-out, bottom 700ms ease-in-out, z-index 0s linear 700ms;
+  }
+}
 @keyframes journey-photo-in {
   from { opacity: 0; }
   to { opacity: 1; }
