@@ -28,6 +28,8 @@ const { outputFiles } = await build({
 });
 const config = JSON.parse((await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8")));
 const body = "0123456789".repeat(100);
+// An object opened directly from the media domain must never run script.
+const CONTENT_SECURITY_POLICY = "default-src 'none'; img-src 'self'; media-src 'self'; sandbox";
 
 test("cold and warm cache preserve range and conditional semantics", async (t) => {
   const mf = new Miniflare(convertV4MiniflareOptions({
@@ -81,6 +83,7 @@ test("cold and warm cache preserve range and conditional semantics", async (t) =
         assert.equal(response.headers.get("Content-Range"), scenario.range ?? null);
         assert.equal(response.headers.get("ETag"), etag);
         assert.equal(response.headers.get("Access-Control-Allow-Origin"), "*");
+        assert.equal(response.headers.get("Content-Security-Policy"), CONTENT_SECURITY_POLICY);
         if (scenario.status === 416) {
           assert.equal(response.headers.get("Cache-Control"), "no-store");
           assert.equal(response.headers.get("Content-Type"), "text/plain; charset=utf-8");
@@ -96,6 +99,7 @@ test("cold and warm cache preserve range and conditional semantics", async (t) =
       assert.equal(response.status, 200);
       assert.equal(response.headers.get("Content-Length"), "1000");
       assert.equal(response.headers.get("Content-Range"), null);
+      assert.equal(response.headers.get("Content-Security-Policy"), CONTENT_SECURITY_POLICY);
     }
   });
 
