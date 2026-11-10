@@ -1,4 +1,5 @@
 import type { Day, Note, Photo, Place, TripData } from "@/types/trip";
+import { tripDayStartMs } from "./trip-time";
 
 export type JourneyAttachedItem = { kind: "note"; item: Note } | { kind: "place"; item: Place };
 
@@ -56,23 +57,25 @@ function dayMap(days: Day[]) {
   return new Map(days.map((day) => [day.id, day]));
 }
 
-// Midnight (UTC) of a day's calendar date, or null when the item has no day or
-// its day has no date set.
-function dayDateMs(daysById: Map<string, Day>, dayId: string | null) {
+// The instant a day ends in trip time: 00:00 trip time on the next calendar
+// date (not +24 h, so the two daylight-saving days come out right). Null when
+// the item has no day or its day has no valid date set.
+function dayEndMs(daysById: Map<string, Day>, dayId: string | null) {
   if (!dayId) return null;
   const date = daysById.get(dayId)?.date;
   if (!date) return null;
-  const ms = new Date(`${date}T00:00:00Z`).getTime();
-  return Number.isFinite(ms) ? ms : null;
+  const parsed = new Date(`${date}T00:00:00Z`).getTime();
+  if (!Number.isFinite(parsed)) return null;
+  return tripDayStartMs(new Date(parsed + DAY_MS).toISOString().slice(0, 10));
 }
 
 // Effective sort time for items that have no timestamp of their own. They land
-// at the end of their assigned day (untimed photos just ahead of journal items),
-// or at the very end of the journey when no day date is known.
+// at the end of their assigned day in trip time (untimed photos just ahead of
+// journal items), or at the very end of the journey when no day date is known.
 function fallbackTime(daysById: Map<string, Day>, dayId: string | null, slot: "photo" | "journal") {
-  const ms = dayDateMs(daysById, dayId);
+  const ms = dayEndMs(daysById, dayId);
   if (ms === null) return Number.POSITIVE_INFINITY;
-  return ms + (slot === "photo" ? DAY_MS - 2 : DAY_MS - 1);
+  return ms - (slot === "photo" ? 2 : 1);
 }
 
 function coordOf(item: Pick<Photo, "lat" | "lng"> | Pick<Note, "lat" | "lng"> | Pick<Place, "lat" | "lng">) {

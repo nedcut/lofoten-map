@@ -97,6 +97,18 @@ describe("buildJourneyItems", () => {
     ]);
   });
 
+  it("ends a day at midnight trip time, so a just-after-midnight photo sorts after the previous day's notes", () => {
+    const items = buildJourneyItems(data({
+      photos: [
+        // 00:30 Oslo on 2026-07-13, which is still 2026-07-12 in UTC.
+        photo({ id: "after-midnight", day_id: "day-2", taken_at: "2026-07-12T22:30:00Z" }),
+      ],
+      notes: [note({ id: "day-one-note", day_id: "day-1", lat: 67.91 })],
+    }), { attachmentRadiusMeters: 10 });
+
+    expect(items.map((item) => item.id)).toEqual(["note:day-one-note", "photo:after-midnight"]);
+  });
+
   it("attaches nearby notes and places to same-day photos", () => {
     const items = buildJourneyItems(data({
       photos: [photo({ id: "anchor", lat: 67.9, lng: 13 })],
