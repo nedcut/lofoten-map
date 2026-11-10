@@ -256,6 +256,106 @@ describe("useTripMutations", () => {
       expect(setGlobalError).toHaveBeenLastCalledWith("offline");
     });
 
+    it("leaves the marker where it was when the preview write block refuses the move", async () => {
+      vi.stubEnv("VERCEL_ENV", "preview");
+      const { backend, calls } = createFakeBackend();
+      const { result, setGlobalError } = renderMutations(backend);
+
+      await act(async () => {
+        await result.current.mutations.movePhoto(photo.id, dropped);
+      });
+
+      expect(calls).toEqual([]);
+      expect(coordinateOf(result.current.data)).toEqual(original);
+      expect(setGlobalError).toHaveBeenLastCalledWith("This preview is view-only. Open the live app to add or edit trip data.");
+    });
+
+    describe("overlapping drags", () => {
+      const first = { lat: 68.1, lng: 13.5 };
+      const second = { lat: 68.2, lng: 13.6 };
+
+      /** Backend whose photo updates stay pending until the test settles them, in call order. */
+      function createDeferredBackend() {
+        const settlers: Array<(response: QueryResponse) => void> = [];
+        const from = () => {
+          const builder = {
+            update: () => builder,
+            eq: () => builder,
+            select: () => builder,
+            then: <T>(resolve: (value: QueryResponse) => T) => new Promise<QueryResponse>((settle) => settlers.push(settle)).then(resolve),
+          };
+          return builder;
+        };
+        return { backend: { from } as unknown as BackendClient, settlers };
+      }
+      const failure: QueryResponse = { data: null, error: { message: "network down" } };
+      const success: QueryResponse = { data: [{ id: photo.id }], error: null };
+
+      async function dragTwice(result: ReturnType<typeof renderMutations>["result"]) {
+        let firstDone!: Promise<void>;
+        let secondDone!: Promise<void>;
+        await act(async () => {
+          firstDone = result.current.mutations.movePhoto(photo.id, first);
+        });
+        await act(async () => {
+          secondDone = result.current.mutations.movePhoto(photo.id, second);
+        });
+        expect(coordinateOf(result.current.data)).toEqual(second);
+        return { firstDone, secondDone };
+      }
+
+      it("restores the last saved position when both saves fail", async () => {
+        const { backend, settlers } = createDeferredBackend();
+        const { result } = renderMutations(backend);
+        const { firstDone, secondDone } = await dragTwice(result);
+
+        await act(async () => {
+          settlers[0](failure);
+          await firstDone;
+        });
+        await act(async () => {
+          settlers[1](failure);
+          await secondDone;
+        });
+
+        expect(coordinateOf(result.current.data)).toEqual(original);
+      });
+
+      it("keeps the second position when only the first save fails", async () => {
+        const { backend, settlers } = createDeferredBackend();
+        const { result } = renderMutations(backend);
+        const { firstDone, secondDone } = await dragTwice(result);
+
+        await act(async () => {
+          settlers[0](failure);
+          await firstDone;
+        });
+        await act(async () => {
+          settlers[1](success);
+          await secondDone;
+        });
+
+        expect(coordinateOf(result.current.data)).toEqual(second);
+      });
+
+      it("restores the first position when only the second save fails", async () => {
+        const { backend, settlers } = createDeferredBackend();
+        const { result } = renderMutations(backend);
+        const { firstDone, secondDone } = await dragTwice(result);
+
+        await act(async () => {
+          settlers[0](success);
+          await firstDone;
+        });
+        await act(async () => {
+          settlers[1](failure);
+          await secondDone;
+        });
+
+        expect(coordinateOf(result.current.data)).toEqual(first);
+      });
+    });
+
     it("keeps the new position when the save succeeds", async () => {
       const { backend, calls } = createFakeBackend({ photos: { data: [{ id: photo.id }], error: null } });
       const { result } = renderMutations(backend);

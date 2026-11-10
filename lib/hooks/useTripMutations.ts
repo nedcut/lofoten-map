@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { BackendClient, BackendUser } from "@/lib/backend";
 import type { Day, LngLat, Note, RouteMode, RouteSegment, TripData } from "@/types/trip";
@@ -359,16 +359,30 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
     [savePhoto],
   );
 
+  // Per photo with moves in flight: the last position known to be saved, and a
+  // counter that numbers the moves so only the newest can roll back. Drags can
+  // overlap (A→B, then B→C before the first save returns), so a move cannot take
+  // its rollback target from the optimistic state on screen.
+  const pendingMovesRef = useRef(new Map<string, { baseline: LngLat | null; latest: number }>());
+
   // A photo marker was dragged to a new spot. Update local state immediately so
   // the marker stays where it was dropped while the save round-trips. If the save
   // does not succeed (write blocked, database error, zero rows, or a thrown
-  // request) the marker goes back to where it was, unless newer data has already
-  // moved it; the failure itself is reported by savePhoto.
+  // request) the newest move for that photo puts the marker back at the last
+  // saved position, unless newer data has already moved it; the failure itself
+  // is reported by savePhoto.
   const movePhoto = useCallback(
     async (photoId: string, coordinate: LngLat) => {
       const photo = data.photos.find((item) => item.id === photoId);
       if (!photo) return;
-      const original = photo.lat !== null && photo.lng !== null ? { lat: photo.lat, lng: photo.lng } : null;
+      const pending = pendingMovesRef.current;
+      let entry = pending.get(photoId);
+      if (!entry) {
+        entry = { baseline: photo.lat !== null && photo.lng !== null ? { lat: photo.lat, lng: photo.lng } : null, latest: 0 };
+        pending.set(photoId, entry);
+      }
+      entry.latest += 1;
+      const moveNumber = entry.latest;
       setData((current) => movePhotoInStore(current, photoId, coordinate));
       const saved = await savePhoto(photoId, {
         day_id: photo.day_id,
@@ -378,12 +392,19 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
         lng: coordinate.lng,
         taken_at: photo.taken_at,
       });
-      if (saved || !original) return;
-      setData((current) => {
-        const now = current.photos.find((item) => item.id === photoId);
-        if (!now || now.lat !== coordinate.lat || now.lng !== coordinate.lng) return current;
-        return movePhotoInStore(current, photoId, original);
-      });
+      const settled = pending.get(photoId);
+      if (!settled) return;
+      const isNewest = settled.latest === moveNumber;
+      if (saved) settled.baseline = { lat: coordinate.lat, lng: coordinate.lng };
+      else if (isNewest && settled.baseline) {
+        const baseline = settled.baseline;
+        setData((current) => {
+          const now = current.photos.find((item) => item.id === photoId);
+          if (!now || now.lat !== coordinate.lat || now.lng !== coordinate.lng) return current;
+          return movePhotoInStore(current, photoId, baseline);
+        });
+      }
+      if (isNewest) pending.delete(photoId);
     },
     [data.photos, setData, savePhoto],
   );
