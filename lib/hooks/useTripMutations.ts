@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { BackendClient, BackendUser } from "@/lib/backend";
 import type { Day, LngLat, Note, RouteMode, RouteSegment, TripData } from "@/types/trip";
@@ -60,20 +60,25 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
     [setStatusError, setGlobalError],
   );
 
+  // Resolves true when the operation ran and finished without reporting a
+  // failure. An operation can return false to say it reported one itself; a
+  // preview write block or a thrown exception also resolve false. Most callers
+  // ignore the result.
   const runAdminOperation = useCallback(
-    async (operation: () => Promise<void>) => {
+    async (operation: () => Promise<boolean | void>): Promise<boolean> => {
       const blocked = backendPreviewWriteBlock(Boolean(backend));
       if (blocked) {
         reportError(blocked);
-        return;
+        return false;
       }
       setSaving(true);
       reset();
       setGlobalError(null);
       try {
-        await operation();
+        return (await operation()) !== false;
       } catch (adminError) {
         reportError(adminError instanceof Error ? adminError.message : "Admin action failed.");
+        return false;
       } finally {
         setSaving(false);
       }
@@ -311,43 +316,75 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
     [trip, runAdminOperation, backend, reportError, setInfo, loadData, setData],
   );
 
-  const updatePhoto = useCallback(
-    async (photoId: string, input: { day_id: string | null; uploader_name: string | null; caption: string | null; lat: number | null; lng: number | null; taken_at: string | null }) => {
-      if (!trip) return;
-      await runAdminOperation(async () => {
+  type PhotoInput = { day_id: string | null; uploader_name: string | null; caption: string | null; lat: number | null; lng: number | null; taken_at: string | null };
+
+  // Resolves true only when the photo was saved. movePhoto needs the outcome to
+  // undo its optimistic move; updatePhoto below hides it behind Promise<void>.
+  const savePhoto = useCallback(
+    async (photoId: string, input: PhotoInput): Promise<boolean> => {
+      if (!trip) return false;
+      return runAdminOperation(async () => {
         if (backend) {
           // .select() makes the update report which rows it touched: RLS filters
           // silently (no error, zero rows), which would otherwise show "Photo
           // updated." while writing nothing — and leave an optimistic marker
           // move on screen that reverts on the next load.
           const { data: updatedRows, error } = await backend.from("photos").update(input).eq("id", photoId).eq("trip_id", trip.id).select("id");
-          if (error) reportError(error.message);
-          else if (!updatedRows || updatedRows.length === 0) {
+          if (error) {
+            reportError(error.message);
+            return false;
+          }
+          if (!updatedRows || updatedRows.length === 0) {
             // Reload before reporting: a non-silent load clears the global error.
             await loadData();
             reportError("The change was not saved — you may not have permission to edit this photo.");
-          } else {
-            setInfo("Photo updated.");
-            await loadData();
+            return false;
           }
+          setInfo("Photo updated.");
+          await loadData();
         } else {
           setData((current) => patchPhoto(current, photoId, input));
           setInfo("Photo updated.");
         }
+        return true;
       });
     },
     [trip, runAdminOperation, backend, reportError, setInfo, loadData, setData],
   );
 
+  const updatePhoto = useCallback(
+    async (photoId: string, input: PhotoInput) => {
+      await savePhoto(photoId, input);
+    },
+    [savePhoto],
+  );
+
+  // Per photo with moves in flight: the last position known to be saved, and a
+  // counter that numbers the moves so only the newest can roll back. Drags can
+  // overlap (A→B, then B→C before the first save returns), so a move cannot take
+  // its rollback target from the optimistic state on screen.
+  const pendingMovesRef = useRef(new Map<string, { baseline: LngLat | null; latest: number }>());
+
   // A photo marker was dragged to a new spot. Update local state immediately so
-  // the marker stays where it was dropped while the save round-trips; on error
-  // updatePhoto surfaces the failure and the next load restores server truth.
+  // the marker stays where it was dropped while the save round-trips. If the save
+  // does not succeed (write blocked, database error, zero rows, or a thrown
+  // request) the newest move for that photo puts the marker back at the last
+  // saved position, unless newer data has already moved it; the failure itself
+  // is reported by savePhoto.
   const movePhoto = useCallback(
     async (photoId: string, coordinate: LngLat) => {
       const photo = data.photos.find((item) => item.id === photoId);
       if (!photo) return;
+      const pending = pendingMovesRef.current;
+      let entry = pending.get(photoId);
+      if (!entry) {
+        entry = { baseline: photo.lat !== null && photo.lng !== null ? { lat: photo.lat, lng: photo.lng } : null, latest: 0 };
+        pending.set(photoId, entry);
+      }
+      entry.latest += 1;
+      const moveNumber = entry.latest;
       setData((current) => movePhotoInStore(current, photoId, coordinate));
-      await updatePhoto(photoId, {
+      const saved = await savePhoto(photoId, {
         day_id: photo.day_id,
         uploader_name: photo.uploader_name,
         caption: photo.caption,
@@ -355,8 +392,23 @@ export function useTripMutations({ backend, user, isAdmin, data, setData, loadDa
         lng: coordinate.lng,
         taken_at: photo.taken_at,
       });
+      // Compare identity, not just presence: the entry this move joined may have
+      // been deleted and re-created by a later drag, and that one is not ours.
+      const settled = pending.get(photoId);
+      if (settled !== entry) return;
+      const isNewest = settled.latest === moveNumber;
+      if (saved) settled.baseline = { lat: coordinate.lat, lng: coordinate.lng };
+      else if (isNewest && settled.baseline) {
+        const baseline = settled.baseline;
+        setData((current) => {
+          const now = current.photos.find((item) => item.id === photoId);
+          if (!now || now.lat !== coordinate.lat || now.lng !== coordinate.lng) return current;
+          return movePhotoInStore(current, photoId, baseline);
+        });
+      }
+      if (isNewest) pending.delete(photoId);
     },
-    [data.photos, setData, updatePhoto],
+    [data.photos, setData, savePhoto],
   );
 
   const deleteDataItem = useCallback(
