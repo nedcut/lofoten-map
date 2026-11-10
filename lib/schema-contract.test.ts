@@ -5,12 +5,12 @@ import { describe, expect, it } from "vitest";
 const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), "utf8");
 
+// 2026-11-09 has already been applied to production and must not change; later
+// fixes to the same area live in later patches.
 const PATCH = "neon/patches/2026-11-09-avatar-path-and-display-names.sql";
-const PATCHED_FUNCTIONS = [
-  "update_my_trip_profile",
-  "grant_trip_member_by_email",
-  "resolve_admin_request",
-];
+const PATCHED_FUNCTIONS = ["update_my_trip_profile", "resolve_admin_request"];
+const TRIGGER_PATCH = "neon/patches/2026-11-10-avatar-path-trigger.sql";
+const TRIGGER_PATCHED_FUNCTIONS = ["check_trip_member_avatar_path", "grant_trip_member_by_email"];
 
 // Text from "create [or replace] function public.<name>" through the closing "$$;".
 function functionText(sql: string, name: string): string {
@@ -19,6 +19,13 @@ function functionText(sql: string, name: string): string {
   const end = sql.indexOf("$$;", sql.indexOf("as $$", start));
   expect(end, `${name} has a closing $$;`).toBeGreaterThan(start);
   return sql.slice(start, end + 3);
+}
+
+// The "create trigger" statement for a trigger name, through its closing ";".
+function triggerText(sql: string, name: string): string {
+  const start = sql.indexOf(`create trigger ${name}`);
+  expect(start, `${name} trigger is created`).toBeGreaterThanOrEqual(0);
+  return sql.slice(start, sql.indexOf(";", start) + 1);
 }
 
 const normalise = (text: string) =>
@@ -43,6 +50,27 @@ describe("Neon schema contract: avatar paths and public display names", () => {
     expect(body).toMatch(/as \$\$\s*#variable_conflict use_column\s*declare/);
   });
 
+  it("stores no display name when the account name is empty or is the email address", () => {
+    const body = functionText(schema, "grant_trip_member_by_email");
+    expect(body).toContain(`lower(btrim("name")) = lower(btrim(email)) then null`);
+    expect(body).toContain(`btrim("name") ~ '^[^[:space:]@]+@[^[:space:]@]+\\.[^[:space:]@]+$' then null`);
+  });
+
+  it("stops every API writer, admins included, from giving a member a foreign avatar path", () => {
+    const body = functionText(schema, "check_trip_member_avatar_path");
+    // Only API callers are checked; database owners, psql and neon/migration/ are not.
+    expect(body).toMatch(/if nullif\(auth\.user_id\(\), ''\) is null then\s+return new;/);
+    // The row's owner, not the caller, decides which prefix is allowed.
+    expect(body).toContain("starts_with(new.avatar_path, new.user_id::text || '/')");
+    expect(body).toContain("new.avatar_path is not distinct from old.avatar_path");
+    expect(body).toContain("errcode = '42501'");
+    expect(triggerText(schema, "trip_members_check_avatar_path")).toMatch(
+      /before insert or update of avatar_path\s+on public\.trip_members\s+for each row execute function public\.check_trip_member_avatar_path\(\)/,
+    );
+    // Leave the RLS policy alone: the trigger, not the policy, owns this rule.
+    expect(schema).toMatch(/create policy "admins write trip memberships"\s+on public\.trip_members for all to authenticated\s+using \(public\.is_trip_admin\(trip_id\)\)\s+with check \(public\.is_trip_admin\(trip_id\)\)/);
+  });
+
   it("does not copy an email-shaped admin request name into trip_members", () => {
     const body = functionText(schema, "resolve_admin_request");
     expect(body).not.toMatch(/'admin',\s*req\.display_name\s*\)/);
@@ -57,5 +85,24 @@ describe("Neon schema contract: avatar paths and public display names", () => {
         normalise(functionText(schema, name)),
       );
     }
+  });
+
+  it("keeps the avatar-path trigger patch in step with schema.sql", () => {
+    const patch = read(TRIGGER_PATCH);
+    for (const name of TRIGGER_PATCHED_FUNCTIONS) {
+      expect(patch).toContain(`create or replace function public.${name}(`);
+      expect(normalise(functionText(patch, name)), `${name} matches schema.sql`).toBe(
+        normalise(functionText(schema, name)),
+      );
+    }
+    expect(patch).toContain("drop trigger if exists trip_members_check_avatar_path on public.trip_members;");
+    expect(normalise(triggerText(patch, "trip_members_check_avatar_path"))).toBe(
+      normalise(triggerText(schema, "trip_members_check_avatar_path")),
+    );
+    expect(patch).toContain("revoke execute on function public.grant_trip_member_by_email(text, text, text) from public, anonymous;");
+    expect(patch).toContain("grant execute on function public.grant_trip_member_by_email(text, text, text) to authenticated;");
+    // No data changes: outside function bodies there are no DML statements.
+    const outsideBodies = patch.replace(/\$\$[\s\S]*?\$\$/g, "");
+    expect(outsideBodies).not.toMatch(/^\s*(update|delete|insert)\b/im);
   });
 });

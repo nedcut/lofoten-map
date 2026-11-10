@@ -210,8 +210,9 @@ grant execute on function public.is_trip_member_by_slug(text) to authenticated;
 -- Used only by the authenticated R2 avatar route to authorize deleting a legacy
 -- avatar whose object key still contains the user's old Supabase UUID. Exact
 -- equality prevents this RPC from becoming a general object-prefix oracle. It
--- trusts trip_members.avatar_path, so update_my_trip_profile is what stops a
--- member from claiming someone else's key.
+-- trusts trip_members.avatar_path, so the trip_members avatar-path trigger is
+-- what stops any writer, admin included, from claiming someone else's key.
+-- update_my_trip_profile checks the same rule first to give a clear error.
 create function public.is_my_avatar_path(check_path text)
 returns boolean
 language sql
@@ -317,7 +318,13 @@ begin
     raise exception 'Only trip admins can add members' using errcode = '42501';
   end if;
 
-  select id, nullif(btrim("name"), '')
+  select id,
+         case
+           when nullif(btrim("name"), '') is null then null
+           when lower(btrim("name")) = lower(btrim(email)) then null
+           when btrim("name") ~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' then null
+           else btrim("name")
+         end
   into found_user_id, found_display_name
   from neon_auth."user"
   where lower(email) = normalized_email
@@ -636,6 +643,39 @@ begin
   end loop;
 end;
 $$;
+
+-- trip_members.avatar_path is publicly readable and the storage delete route
+-- trusts it (see is_my_avatar_path), so a row may only hold a key under its own
+-- user id, or the value it already had (legacy keys under an old Supabase id).
+-- The trip-admin RLS policy lets admins write trip_members directly, so the rule
+-- lives on the table. It checks new.user_id (the row's owner), not the caller.
+-- It applies only to API callers: sessions with no auth.user_id() (the database
+-- owner, psql, neon/migration/) are not checked.
+create or replace function public.check_trip_member_avatar_path()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if nullif(auth.user_id(), '') is null then
+    return new;
+  end if;
+
+  if new.avatar_path is null
+     or (tg_op = 'UPDATE' and new.avatar_path is not distinct from old.avatar_path)
+     or starts_with(new.avatar_path, new.user_id::text || '/') then
+    return new;
+  end if;
+
+  raise exception 'Avatar path must belong to the member' using errcode = '42501';
+end;
+$$;
+revoke execute on function public.check_trip_member_avatar_path() from public, anonymous, authenticated;
+
+drop trigger if exists trip_members_check_avatar_path on public.trip_members;
+create trigger trip_members_check_avatar_path
+  before insert or update of avatar_path on public.trip_members
+  for each row execute function public.check_trip_member_avatar_path();
 
 grant usage on schema public to anonymous, authenticated;
 grant select on table public.trips,
