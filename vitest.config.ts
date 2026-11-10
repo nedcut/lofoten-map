@@ -18,7 +18,14 @@ export default defineConfig({
       provider: "v8",
       include: ["{lib,app,components}/**/*.{ts,tsx}"],
       exclude: ["**/*.test.{ts,tsx}"],
-      reporter: ["text", "html"],
+      reporter: ["text-summary", "html"],
+      // A ratchet, not a target: the floors sit just under what the pure
+      // logic in lib/ measures today, so a change that deletes tests or adds
+      // untested logic there fails `npm run test:coverage`. Raise them as
+      // coverage grows; components are covered by the Playwright suite instead.
+      thresholds: {
+        "lib/*.ts": { statements: 78, branches: 70, functions: 77, lines: 80 },
+      },
     },
   },
 });

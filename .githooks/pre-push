@@ -1,0 +1,11 @@
+#!/bin/sh
+# Runs the fast gate (lint, typecheck, unit tests with the coverage floor)
+# before anything leaves this machine, so CI is a confirmation, not a
+# discovery. Installed by `npm install` (the "prepare" script points
+# core.hooksPath here). The full gate, with the browser suite, is
+# `npm run verify`. Deleting a remote branch pushes nothing to check.
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  case "$local_sha" in *[!0]*) has_commits=1 ;; esac
+done
+[ -n "$has_commits" ] || exit 0
+exec npm run --silent ci

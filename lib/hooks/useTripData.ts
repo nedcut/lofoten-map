@@ -269,7 +269,7 @@ export function useTripData({ backend, backendConfigured = Boolean(backend), use
     const schedule = () => {
       if (timer !== null) window.clearTimeout(timer);
       timer = null;
-      if (!stopped && document.visibilityState === "visible") timer = window.setTimeout(poll, interval);
+      if (!stopped && document.visibilityState === "visible") timer = window.setTimeout(() => void poll(), interval);
     };
     const poll = async () => {
       if (timer !== null) window.clearTimeout(timer);
