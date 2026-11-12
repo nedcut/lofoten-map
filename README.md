@@ -204,20 +204,45 @@ Before retiring Supabase, verify at least:
 
 ```bash
 npm run dev            # local development server
-npm run lint           # ESLint
+npm run lint           # ESLint, type-aware, no warnings allowed
 npm run typecheck      # next typegen + tsc --noEmit
 npm run test           # Vitest unit suite
 npm run test:watch     # Vitest watch mode
-npm run test:coverage  # coverage report
-npm run test:e2e       # Playwright against a demo-mode production build
+npm run test:coverage  # unit suite with the coverage floor for lib/
+npm run test:e2e       # Playwright against demo-mode production builds
 npm run build          # production build
-npm run ci             # lint + typecheck + unit tests
+npm run ci             # the fast gate: lint + typecheck + unit tests with coverage
+npm run verify         # the full gate: ci + media worker checks + Playwright
 ```
 
-Unit tests are colocated with the modules they cover. CI runs lint, typecheck,
-unit tests, a demo-mode production build, a typecheck of the Cloudflare media
-worker, and then the Playwright suite. The Playwright suite forces local demo
-mode and does not contact Neon, R2, or the retired Supabase runtime.
+### Verification
+
+`npm run verify` is the bar a change has to clear. Three things run the same
+scripts, so they cannot drift apart:
+
+- **Pre-push hook.** `npm install` points git at `.githooks/`; pushing runs
+  `npm run ci` first.
+- **CI.** Every pull request runs `npm run ci`, a production build, the media
+  worker's typecheck and tests, then the Playwright suite.
+- **You, before opening a PR.** `npm run verify` (run `npm ci` in
+  `cloudflare/media-worker` once first).
+
+Unit tests are colocated with the modules they cover. Playwright runs three
+projects against demo mode, without contacting Neon or R2:
+
+| Project | Build | Covers |
+| --- | --- | --- |
+| `desktop`, `mobile` | no Mapbox token | App shell, panels, uploads, Journey controls, URLs and history |
+| `map` | real Mapbox token | Thumbnails, popups, placing by clicking, what Journey does to the map |
+
+The `map` project needs a token and the network. Locally it uses
+`NEXT_PUBLIC_MAPBOX_TOKEN` from `.env.local`; in CI it uses the
+`E2E_MAPBOX_TOKEN` repository secret. Without a token it is skipped with a
+warning, so fork and Dependabot pull requests run the mapless projects only.
+Every spec fails on an uncaught exception or console error (`e2e/fixtures.ts`).
+
+`AGENTS.md` holds the same bar for AI coding agents, plus the traps this
+codebase has already fallen into.
 
 ## Roadmap
 

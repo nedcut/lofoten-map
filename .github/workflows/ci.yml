@@ -28,14 +28,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Test
-        run: npm run test
+      # The same script the pre-push hook runs: lint (type-aware, no warnings),
+      # typecheck, and unit tests with the coverage floor from vitest.config.ts.
+      - name: Lint, typecheck, and unit tests
+        run: npm run ci
 
       - name: Build
         run: npm run build
@@ -45,12 +41,9 @@ jobs:
           NEXT_PUBLIC_TRIP_SLUG: lofoten-2026
 
       - name: Typecheck and test Cloudflare media worker
-        working-directory: cloudflare/media-worker
         run: |
-          npm ci
-          npm run types
-          npm run typecheck
-          npm test
+          npm ci --prefix cloudflare/media-worker
+          npm run verify:worker
 
   e2e:
     runs-on: ubuntu-latest
@@ -70,11 +63,16 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      # playwright.config.ts starts its own demo-mode production build on
-      # :3100 (NEXT_PUBLIC_LOCAL_DEMO_MODE, NEXT_DIST_DIR=.next-e2e) via its
-      # webServer block, so no extra env is needed here.
+      # playwright.config.ts starts its own demo-mode production builds via its
+      # webServer block: one without a Mapbox token on :3100 for the shell and
+      # data flows, and one with a token on :3101 for the real-map project.
+      # The map project only runs when the E2E_MAPBOX_TOKEN secret is set, and
+      # secrets are withheld from fork and Dependabot PRs, so those runs cover
+      # the mapless projects only (the config logs that it skipped the map).
       - name: Run Playwright suite
         run: npm run test:e2e
+        env:
+          E2E_MAPBOX_TOKEN: ${{ secrets.E2E_MAPBOX_TOKEN }}
 
       - name: Upload Playwright report
         if: failure()

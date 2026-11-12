@@ -1,13 +1,13 @@
 "use client";
 
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
-import mapboxgl from "mapbox-gl";
+import type { GeoJSONSource, Map as MapboxMap } from "mapbox-gl";
 import { useEffect, useMemo } from "react";
 import type { LngLat } from "@/types/trip";
 import { canUseStyle } from "@/lib/map-style";
 
 type Props = {
-  map: mapboxgl.Map | null;
+  map: MapboxMap | null;
   points: LngLat[];
 };
 
@@ -15,7 +15,7 @@ const sourceId = "route-draft";
 const lineLayerId = "route-draft-line";
 const pointLayerId = "route-draft-points";
 
-function getLayer(map: mapboxgl.Map, layerId: string) {
+function getLayer(map: MapboxMap, layerId: string) {
   if (!canUseStyle(map)) return undefined;
   try {
     return map.getLayer(layerId);
@@ -24,7 +24,7 @@ function getLayer(map: mapboxgl.Map, layerId: string) {
   }
 }
 
-function getSource(map: mapboxgl.Map, id: string) {
+function getSource(map: MapboxMap, id: string) {
   if (!canUseStyle(map)) return undefined;
   try {
     return map.getSource(id);
@@ -90,7 +90,7 @@ export function RouteDraftLayer({ map, points }: Props) {
           },
         });
       } else {
-        (getSource(map, sourceId) as mapboxgl.GeoJSONSource).setData(draftData);
+        (getSource(map, sourceId) as GeoJSONSource).setData(draftData);
       }
     };
 

@@ -559,9 +559,16 @@ export function TripLayers({ map, routes, photos, notes, places, days, dayColors
         return;
       }
 
+      // Journey Mode hides the map (display:none), which leaves the canvas
+      // measuring 0x0. Judged against that, every thumbnail is "off screen"
+      // and would be dropped, with nothing to bring them back until the map
+      // next moves. Leave the markers alone; the page asks for a repaint when
+      // the map returns, and that pass sees real dimensions.
+      const canvas = activeMap.getCanvas();
+      if (canvas.clientWidth === 0 || canvas.clientHeight === 0) return;
+
       const features = activeMap.queryRenderedFeatures({ layers: ["photos-hit"] });
       const seen = new Set<string>();
-      const canvas = activeMap.getCanvas();
       const zoom = activeMap.getZoom();
       // queryRenderedFeatures only returns viewport features, so new markers
       // cannot be created in this band. Already-mounted ones are kept so a

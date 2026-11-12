@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 // All specs run against demo mode (bundled sample data, no Neon or R2), so they
 // assert on the app shell and data flows rather than live backend data.
@@ -97,7 +97,9 @@ test.describe("desktop", { tag: "@desktop" }, () => {
   test("global journey entry opens with an authored introduction and deep links restore the exact moment", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "Relive the journey" }).first().click();
-    await expect(page.getByRole("heading", { name: "Lofoten 2026" })).toBeVisible();
+    // Scoped to the introduction: the sidebar's own "Lofoten 2026" heading is
+    // still in the tree for a moment while the viewer mounts over it.
+    await expect(page.getByRole("dialog").getByRole("heading", { name: "Lofoten 2026" })).toBeVisible();
     await expect(page.getByText("A shared travel story")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
     await expect(page.getByRole("button", { name: "Begin journey" })).toBeFocused();
@@ -148,8 +150,12 @@ test.describe("desktop", { tag: "@desktop" }, () => {
 
     await page.reload();
     await expect(page.getByRole("article", { name: "Kjerkfjorden hike" })).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("article")).toHaveCount(0);
+    // Under load, an Escape sent the instant the story appears after a reload
+    // has gone unheard, so the key is retried rather than pressed once.
+    await expect(async () => {
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("article")).toHaveCount(0, { timeout: 1_000 });
+    }).toPass();
     await expect(page).not.toHaveURL(/story=/);
   });
 

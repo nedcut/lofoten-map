@@ -666,7 +666,11 @@ export function JourneyMiniMap({ routes, days, items, activeItem, onInteraction,
       className={cn(
         "absolute transition-[right,top,bottom] duration-700 ease-in-out motion-reduce:transition-none",
         // On stage it sits under the viewer's header (z-20) and bar (z-30).
-        stage ? "right-0 top-0 z-[15] md:bottom-0 md:right-0 md:top-auto" : "right-3 top-[calc(4rem+env(safe-area-inset-top))] z-40 md:bottom-6 md:right-6 md:top-auto",
+        // Docked it rises above them, but only once it has finished shrinking
+        // (journey-minimap-docked delays the z-index change): a press on the
+        // header or bar is what ends the stage, and a map that jumped on top
+        // while still full-screen took the release, so the click was lost.
+        stage ? "right-0 top-0 z-[15] md:bottom-0 md:right-0 md:top-auto" : "journey-minimap-docked right-3 top-[calc(4rem+env(safe-area-inset-top))] z-40 md:bottom-6 md:right-6 md:top-auto",
       )}
       onMouseLeave={queueCollapse}
     >

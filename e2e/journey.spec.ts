@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 // Journey Mode entry, exit, and navigation in demo mode (three seeded days).
 
