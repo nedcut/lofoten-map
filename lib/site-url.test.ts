@@ -11,6 +11,6 @@ describe("siteUrl", () => {
   });
 
   it("never falls back to localhost for a production social card", () => {
-    expect(siteUrl({}).origin).toBe("https://lofoten-map-kappa.vercel.app");
+    expect(siteUrl({}).origin).toBe("https://lofoten-logbook.vercel.app");
   });
 });
