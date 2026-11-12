@@ -1,4 +1,4 @@
-const DEFAULT_SITE_URL = "https://lofoten-map-kappa.vercel.app";
+const DEFAULT_SITE_URL = "https://lofoten-logbook.vercel.app";
 
 function withProtocol(value: string) {
   return /^https?:\/\//i.test(value) ? value : `https://${value}`;
